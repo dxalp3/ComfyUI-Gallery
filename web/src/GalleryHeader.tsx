@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Flex, AutoComplete, Button, Segmented, Modal, message, Popconfirm } from 'antd';
+import { Flex, AutoComplete, Button, Segmented, Modal, message, Popconfirm, Select, Tooltip } from 'antd';
 import { CloseSquareFilled, DoubleLeftOutlined, DoubleRightOutlined } from '@ant-design/icons';
 import { useGalleryContext } from './GalleryContext';
 import { useDebounce, useCountDown } from 'ahooks';
@@ -12,6 +12,7 @@ const GalleryHeader = () => {
     const {
         showSettings, setShowSettings,
         searchFileName, setSearchFileName,
+        localSearchField, setLocalSearchField,
         sortMethod, setSortMethod,
         imagesAutoCompleteNames,
         autoCompleteOptions, setAutoCompleteOptions,
@@ -70,10 +71,11 @@ const GalleryHeader = () => {
     }, [debouncedSearch, imagesAutoCompleteNames, setAutoCompleteOptions]);
 
     return (
-        <Flex 
-            justify={"space-between"} 
+        <Flex
+            justify={"space-between"}
             align={"center"}
-            gap={20}
+            gap={12}
+            wrap
         >
             <div
                 style={{
@@ -234,23 +236,33 @@ const GalleryHeader = () => {
                     </Button>
                 </div>
             )}
-            <AutoComplete
-                options={
-                    autoCompleteOptions && autoCompleteOptions.length > 0 
-                        ? autoCompleteOptions 
-                        : imagesAutoCompleteNames
-                    }
-                style={{ 
-                    width: '50%' 
-                }}
-                onSearch={text => setSearch(text)}
-                value={search}
-                onChange={val => setSearch(val)}
-                placeholder="Search for file name"
-                allowClear={{ 
-                    clearIcon: <CloseSquareFilled /> 
-                }}
-            />
+            <Flex gap={8} style={{ flex: '1 1 430px', minWidth: 280, maxWidth: 780 }}>
+                <Tooltip title="Search all files in the current folder. Hydrus tags come from the saved metadata snapshot; use Refresh folder tags to fetch later changes.">
+                    <Select
+                        aria-label="Local search field"
+                        value={localSearchField}
+                        onChange={setLocalSearchField}
+                        style={{ width: 190, flexShrink: 0 }}
+                        options={[
+                            { value: 'all', label: 'All fields' },
+                            { value: 'name', label: 'File name' },
+                            { value: 'hydrus', label: 'Hydrus tags (cached)' },
+                            { value: 'positive', label: 'Positive prompt' },
+                            { value: 'negative', label: 'Negative prompt' },
+                        ]}
+                    />
+                </Tooltip>
+                <AutoComplete
+                    aria-label="Search local images"
+                    options={localSearchField === 'name' ? autoCompleteOptions : []}
+                    style={{ flex: 1, minWidth: 150 }}
+                    onSearch={text => setSearch(text)}
+                    value={search}
+                    onChange={val => setSearch(val)}
+                    placeholder={localSearchField === 'all' ? 'Search names, cached tags or prompts' : localSearchField === 'hydrus' ? 'Search cached Hydrus tags' : localSearchField === 'name' ? 'Search file names' : `Search ${localSearchField} prompts`}
+                    allowClear={{ clearIcon: <CloseSquareFilled /> }}
+                />
+            </Flex>
             <Segmented<string>
                 style={{ 
                     marginRight: 15 

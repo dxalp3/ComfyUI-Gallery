@@ -7,6 +7,10 @@ import GallerySidebar from './GallerySidebar';
 import GalleryImageGrid from './GalleryImageGrid';
 import GallerySettingsModal from './GallerySettingsModal';
 import { BASE_Z_INDEX } from './ComfyAppApi';
+import { HydrusToolbar } from './HydrusToolbar';
+import { HydrusSettingsModal } from './HydrusSettingsModal';
+import { HydrusExportModal } from './HydrusExportModal';
+import { HydrusDetailsModal } from './HydrusDetailsModal';
 
 const GalleryModal = () => {
     const { open, setOpen, size, showSettings, siderCollapsed, setSiderCollapsed } = useGalleryContext();
@@ -24,13 +28,14 @@ const GalleryModal = () => {
             width={size?.width}
             footer={null}
         >
-            <Layout 
+            <HydrusToolbar />
+            <Layout
                 style={{ 
                     borderRadius: 8, 
                     overflowX: "hidden", 
                     overflowY: "auto", 
                     width: '100%', 
-                    height: "85vh" 
+                    height: "70vh"
                 }}
             >
                 <Sider 
@@ -54,6 +59,9 @@ const GalleryModal = () => {
             </Layout>
         </Modal>
             {showSettings && <GallerySettingsModal />}
+            <HydrusSettingsModal />
+            <HydrusExportModal />
+            <HydrusDetailsModal />
         </>
     );
 };

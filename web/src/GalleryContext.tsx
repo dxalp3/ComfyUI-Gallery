@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useMemo, useEffect } from 'react';
+import React, { createContext, useContext, useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import type { Dispatch, SetStateAction } from 'react';
 import useSize from 'ahooks/lib/useSize';
 import useRequest from 'ahooks/lib/useRequest/src/useRequest';
@@ -7,7 +7,9 @@ import { useEventListener, useLocalStorageState } from 'ahooks';
 import type { FileDetails, FilesTree } from './types';
 import type { AutoCompleteProps } from 'antd/es/auto-complete';
 import { ComfyAppApi, BASE_PATH, OPEN_BUTTON_ID } from './ComfyAppApi';
-import { useClickAway } from 'ahooks';
+import { selectRange } from './HydrusApi';
+import { extractLocalPrompts, matchesLocalImage } from './LocalImageSearch';
+import type { LocalSearchField, LocalPrompts } from './LocalImageSearch';
 
 function getImages(): Promise<FilesTree> {
     return new Promise(async (resolve, reject) => {
@@ -71,6 +73,10 @@ export interface GalleryContextType {
     setCurrentFolder: Dispatch<SetStateAction<string>>;
     searchFileName: string;
     setSearchFileName: Dispatch<SetStateAction<string>>;
+    localSearchField: LocalSearchField;
+    setLocalSearchField: Dispatch<SetStateAction<LocalSearchField>>;
+    setLocalHydrusTags: Dispatch<SetStateAction<Record<string, string[]>>>;
+    unfilteredFolderImages: FileDetails[];
     showDateDivider: boolean;
     setShowDateDivider: Dispatch<SetStateAction<boolean>>;
     showSettings: boolean;
@@ -105,15 +111,30 @@ export interface GalleryContextType {
     setSettings: (v: SettingsState) => void;
     selectedImages: string[];
     setSelectedImages: React.Dispatch<React.SetStateAction<string[]>>;
+    selectImage: (url: string, range?: boolean) => void;
     siderCollapsed: boolean;
     setSiderCollapsed: React.Dispatch<React.SetStateAction<boolean>>;
 }
 
 const GalleryContext = createContext<GalleryContextType | undefined>(undefined);
 
+// Cards only subscribe to the small subset they use. Opening a dialog, resizing
+// the sidebar, or typing in search must not repaint every mounted media element.
+interface GalleryCardContextType {
+    settings: Pick<SettingsState, 'imageThumbFit' | 'videoThumbFit' | 'autoPlayVideos' | 'relativePath'>;
+    selectedImages: string[];
+    selectedImageSet: ReadonlySet<string>;
+    selectImage: GalleryContextType['selectImage'];
+    setPreviewingVideo: GalleryContextType['setPreviewingVideo'];
+}
+const GalleryCardContext = createContext<GalleryCardContextType | undefined>(undefined);
+
 export function GalleryProvider({ children }: { children: React.ReactNode }) {
     const [currentFolder, setCurrentFolder] = useState("output");
     const [searchFileName, setSearchFileName] = useState("");
+    const [localSearchField, setLocalSearchField] = useState<LocalSearchField>('all');
+    const [localHydrusTags, setLocalHydrusTags] = useState<Record<string, string[]>>({});
+    const promptSearchCache = useRef(new WeakMap<object, LocalPrompts>());
     const [showDateDivider, setShowDateDivider] = useState(true);
     const [showSettings, setShowSettings] = useState(false);
     const [showRawMetadata, setShowRawMetadata] = useState(false);
@@ -122,6 +143,7 @@ export function GalleryProvider({ children }: { children: React.ReactNode }) {
     const [open, setOpen] = useState(false);
     const [previewingVideo, setPreviewingVideo] = useState<string | undefined>(undefined);
     const [selectedImages, setSelectedImages] = useState<string[]>([]);
+    const selectionAnchor = useRef<string | undefined>(undefined);
     const [siderCollapsed, setSiderCollapsed] = useState(true);
     const size = useSize(document.querySelector('body'));
     const imagesBoxSize = useSize(document.querySelector('#imagesBox'));
@@ -133,6 +155,7 @@ export function GalleryProvider({ children }: { children: React.ReactNode }) {
         defaultValue: DEFAULT_SETTINGS,
         listenStorageChange: true,
     });
+    const [settingsLoaded, setSettingsLoaded] = useState(false);
 
     useEffect(() => {
         if (data && data.folders) {
@@ -158,7 +181,7 @@ export function GalleryProvider({ children }: { children: React.ReactNode }) {
             }
         } catch (e) { }
 
-        runAsync();
+        setSettingsLoaded(true);
 
         ComfyAppApi.onFileChange((event) => {
             console.log("file_change:", event.detail);
@@ -177,13 +200,13 @@ export function GalleryProvider({ children }: { children: React.ReactNode }) {
 
     // Watch for changes to settingsState.relativePath, disableLogs, usePollingObserver and update monitoring and data
     // Start monitoring when settings change
-    const saveSettings = (newSettings: SettingsState) => {
+    const saveSettings = useCallback((newSettings: SettingsState) => {
         setSettings(newSettings);
         ComfyAppApi.saveSettings(newSettings);
-    };
+    }, [setSettings]);
 
     useEffect(() => {
-        if (settingsState?.relativePath) {
+        if (settingsLoaded && settingsState?.relativePath) {
             setCurrentFolder("");
             ComfyAppApi.startMonitoring(
                 settingsState.relativePath,
@@ -192,20 +215,49 @@ export function GalleryProvider({ children }: { children: React.ReactNode }) {
                 settingsState.scanExtensions,
                 settingsState.deduplicateSymlinks
             );
-            runAsync();
+            void runAsync().catch(() => {});
         }
-    }, [settingsState?.relativePath, settingsState?.disableLogs, settingsState?.usePollingObserver, JSON.stringify(settingsState?.scanExtensions), settingsState?.deduplicateSymlinks]);
+    }, [settingsLoaded, settingsState?.relativePath, settingsState?.disableLogs, settingsState?.usePollingObserver, JSON.stringify(settingsState?.scanExtensions), settingsState?.deduplicateSymlinks]);
 
-    // Memoized list of all images in the current folder
-    const imagesDetailsList = useMemo(() => {
-        let list: FileDetails[] = Object.values(data?.folders?.[currentFolder] ?? []);
-        if (searchFileName && searchFileName.trim() !== "") {
-            const searchTerm = searchFileName.toLowerCase();
-            list = list.filter(imageInfo => imageInfo.name.toLowerCase().includes(searchTerm));
+    // Keep the complete folder available to Hydrus status lookup even when a search hides its files.
+    const currentFolderFiles = data?.folders?.[currentFolder];
+    const unfilteredFolderImages = useMemo<FileDetails[]>(() => Object.values(currentFolderFiles ?? {}), [currentFolderFiles]);
+    const searchNeedsPrompts = !!searchFileName.trim() && ['all', 'positive', 'negative'].includes(localSearchField);
+    const localPrompts = useMemo(() => {
+        const result = new Map<string, LocalPrompts>();
+        if (!searchNeedsPrompts) return result;
+        for (const file of unfilteredFolderImages) {
+            const metadata = file.metadata;
+            const cacheable = metadata && typeof metadata === 'object';
+            let prompts = cacheable ? promptSearchCache.current.get(metadata) : undefined;
+            if (!prompts) {
+                prompts = extractLocalPrompts(metadata);
+                if (cacheable) promptSearchCache.current.set(metadata, prompts);
+            }
+            result.set(file.url, prompts);
         }
+        return result;
+    }, [unfilteredFolderImages, searchNeedsPrompts]);
+
+    // Sorting depends on folder contents and the chosen order, not on search
+    // keystrokes, selection, column count, or arriving Hydrus metadata batches.
+    const sortedFolderImages = useMemo(() => {
+        const list = [...unfilteredFolderImages];
+        if (sortMethod === 'Name ↑') return list.sort((a, b) => a.name.localeCompare(b.name));
+        if (sortMethod === 'Name ↓') return list.sort((a, b) => b.name.localeCompare(a.name));
+        return list.sort((a, b) => sortMethod === 'Newest' ? (b.timestamp || 0) - (a.timestamp || 0) : (a.timestamp || 0) - (b.timestamp || 0));
+    }, [unfilteredFolderImages, sortMethod]);
+    const searchedHydrusTags = searchFileName.trim() && ['all', 'hydrus'].includes(localSearchField) ? localHydrusTags : undefined;
+    const filteredFolderImages = useMemo(() => searchFileName.trim()
+        ? sortedFolderImages.filter(file => matchesLocalImage(file, searchFileName, localSearchField, searchedHydrusTags?.[file.url], localPrompts.get(file.url)))
+        : sortedFolderImages,
+    [sortedFolderImages, searchFileName, localSearchField, searchedHydrusTags, localPrompts]);
+
+    // Search the complete folder before adding layout dividers or applying virtualized rendering.
+    const imagesDetailsList = useMemo(() => {
+        const list = filteredFolderImages;
         if (sortMethod !== 'Name ↑' && sortMethod !== 'Name ↓') {
-            list = list.sort((a, b) => (sortMethod === 'Newest' ? (b.timestamp || 0) - (a.timestamp || 0) : (a.timestamp || 0) - (b.timestamp || 0)));
-            if (!showDateDivider) return list;
+            if (!(settingsState?.showDateDivider ?? showDateDivider)) return list;
             const grouped: { [date: string]: FileDetails[] } = {};
             list.forEach(item => {
                 const date = item.timestamp ? new Date(item.timestamp * 1000).toISOString().slice(0, 10) : 'Unknown';
@@ -228,36 +280,19 @@ export function GalleryProvider({ children }: { children: React.ReactNode }) {
             });
             return result;
         }
-        switch (sortMethod) {
-            case 'Name ↑':
-                return list.sort((a, b) => a.name.localeCompare(b.name));
-            case 'Name ↓':
-                return list.sort((a, b) => b.name.localeCompare(a.name));
-            default:
-                return list;
-        }
-    }, [currentFolder, data, sortMethod, searchFileName, gridSize.columnCount, showDateDivider]);
+        return list;
+    }, [filteredFolderImages, sortMethod, gridSize.columnCount, showDateDivider, settingsState?.showDateDivider]);
 
     // Memoized list of image URLs for preview
     const imagesUrlsLists = useMemo(() =>
-        imagesDetailsList.filter(image => image.type === "image" || image.type === "media" || image.type === "audio" || image.type === "3d").map(image => `${BASE_PATH}${image.url}`),
-        [imagesDetailsList]
+        filteredFolderImages.map(image => `${BASE_PATH}${image.url}`),
+        [filteredFolderImages]
     );
 
     // Memoized autocomplete options for image names
-    const imagesAutoCompleteNames = useMemo<NonNullable<AutoCompleteProps['options']>>(() => {
-        let filtered = imagesDetailsList.filter(image => (image.type === "image" || image.type === "media" || image.type === "audio" || image.type === "3d") && typeof image.name === 'string');
-        if (sortMethod === 'Name ↑') {
-            filtered = filtered.sort((a, b) => (a.name as string).localeCompare(b.name as string));
-        } else if (sortMethod === 'Name ↓') {
-            filtered = filtered.sort((a, b) => (b.name as string).localeCompare(a.name as string));
-        } else if (sortMethod === 'Newest') {
-            filtered = filtered.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
-        } else if (sortMethod === 'Oldest') {
-            filtered = filtered.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
-        }
-        return filtered.map(image => ({ value: image.name as string, label: image.name as string }));
-    }, [imagesDetailsList, sortMethod]);
+    const imagesAutoCompleteNames = useMemo<NonNullable<AutoCompleteProps['options']>>(() =>
+        filteredFolderImages.filter(image => typeof image.name === 'string').map(image => ({ value: image.name, label: image.name })),
+    [filteredFolderImages]);
 
     // Update images in the gallery data (data: FilesTree)
     function updateImages(changes: any) {
@@ -267,41 +302,40 @@ export function GalleryProvider({ children }: { children: React.ReactNode }) {
         }
         mutate((oldData: FilesTree | undefined) => {
             if (!oldData || !oldData.folders) return oldData;
-            // Deep copy folders to avoid direct mutation
+            // Preserve unchanged folder/file identities so memoized cards and
+            // searches are reusable, while never mutating previous state.
             const folders = { ...oldData.folders };
             let changed = false;
             for (const folderName in changes.folders) {
                 const folderChanges = changes.folders[folderName];
-                if (!folders[folderName] && folderChanges) {
-                    folders[folderName] = {};
-                }
+                if (!folderChanges) continue;
+                const folder = { ...(folders[folderName] || {}) };
+                folders[folderName] = folder;
                 if (folders[folderName]) {
                     for (const filename in folderChanges) {
                         const fileChange = folderChanges[filename];
                         switch (fileChange.action) {
                             case 'create':
-                                folders[folderName][filename] = { ...fileChange };
+                                folder[filename] = { ...fileChange };
                                 changed = true;
                                 break;
                             case 'update':
-                                if (folders[folderName][filename]) {
-                                    Object.assign(folders[folderName][filename], fileChange);
+                                if (folder[filename]) {
+                                    folder[filename] = { ...folder[filename], ...fileChange };
                                     changed = true;
                                 }
                                 break;
                             case 'remove':
-                                if (folders[folderName][filename]) {
-                                    delete folders[folderName][filename];
+                                if (folder[filename]) {
+                                    delete folder[filename];
                                     changed = true;
-                                    if (Object.keys(folders[folderName]).length === 0) {
-                                        delete folders[folderName];
-                                    }
                                 }
                                 break;
                             default:
                                 console.warn(`Unknown action: ${fileChange.action}`);
                         }
                     }
+                    if (!Object.keys(folder).length) delete folders[folderName];
                 } else {
                     console.warn(`Change for non-existent folder: ${folderName}`);
                     return oldData;
@@ -314,23 +348,14 @@ export function GalleryProvider({ children }: { children: React.ReactNode }) {
         });
     }
 
-    const [imageCards, setImageCards] = useState(document.querySelectorAll(".image-card"));
-    const [folders, setFolders] = useState(document.querySelectorAll('[role="treeitem"], .folder'));
-    const [selectedImagesActionButtons, setSelectedImagesActionButtons] = useState(document.querySelectorAll(".selectedImagesActionButton"));
-
-    useEffect(() => {
-        setImageCards(document.querySelectorAll(".image-card"));
-    }, [imagesDetailsList]);
-    useEffect(() => {
-        setFolders(document.querySelectorAll('[role="treeitem"], .folder'));
-    }, [imagesDetailsList, currentFolder]);
-    useEffect(() => {
-        setSelectedImagesActionButtons(document.querySelectorAll(".selectedImagesActionButton"));
-    }, [selectedImages]);
-
-    useClickAway((event) => {
-        setSelectedImages([]);
-    }, [...imageCards, ...folders, ...selectedImagesActionButtons])
+    // Selection survives menus, dialogs and folder navigation. Clear it explicitly in the toolbar.
+    const shownUrls = useMemo(() => filteredFolderImages.map(item => item.url), [filteredFolderImages]);
+    const selectImage = useCallback((url: string, range = false) => {
+        const anchor = selectionAnchor.current;
+        setSelectedImages(previous => range ? selectRange(url, anchor, shownUrls, previous) :
+            previous.includes(url) ? previous.filter(value => value !== url) : [...previous, url]);
+        if (!range || !selectionAnchor.current) selectionAnchor.current = url;
+    }, [shownUrls]);
 
     useEventListener('keydown', (event) => {
         if (settingsState?.galleryShortcut && event.code == "KeyG" && event.ctrlKey) {
@@ -348,9 +373,17 @@ export function GalleryProvider({ children }: { children: React.ReactNode }) {
         ...(settingsState || {})
     }), [settingsState]);
 
+    const cardSettings = useMemo(() => ({ imageThumbFit: mergedSettings.imageThumbFit, relativePath: mergedSettings.relativePath,
+        videoThumbFit: mergedSettings.videoThumbFit, autoPlayVideos: mergedSettings.autoPlayVideos }),
+    [mergedSettings.imageThumbFit, mergedSettings.videoThumbFit, mergedSettings.autoPlayVideos, mergedSettings.relativePath]);
+    const selectedImageSet = useMemo(() => new Set(selectedImages), [selectedImages]);
+    const cardContext = useMemo(() => ({ settings: cardSettings, selectedImages, selectedImageSet, selectImage, setPreviewingVideo }),
+    [cardSettings, selectedImages, selectedImageSet, selectImage]);
+
     const value = useMemo(() => ({
         currentFolder, setCurrentFolder,
         searchFileName, setSearchFileName,
+        localSearchField, setLocalSearchField, setLocalHydrusTags, unfilteredFolderImages,
         showDateDivider, setShowDateDivider,
         showSettings, setShowSettings,
         showRawMetadata, setShowRawMetadata,
@@ -371,11 +404,14 @@ export function GalleryProvider({ children }: { children: React.ReactNode }) {
         setSettings: saveSettings,
         selectedImages,
         setSelectedImages,
+        selectImage,
         siderCollapsed,
         setSiderCollapsed,
     }), [
         currentFolder,
         searchFileName,
+        localSearchField,
+        unfilteredFolderImages,
         showDateDivider,
         showSettings,
         showRawMetadata,
@@ -398,6 +434,7 @@ export function GalleryProvider({ children }: { children: React.ReactNode }) {
         autoCompleteOptions,
         mergedSettings,
         saveSettings,
+        selectImage,
         selectedImages,
         setSelectedImages,
         siderCollapsed,
@@ -407,8 +444,14 @@ export function GalleryProvider({ children }: { children: React.ReactNode }) {
     return <GalleryContext.Provider
         value={value}
     >
-        {children}
+        <GalleryCardContext.Provider value={cardContext}>{children}</GalleryCardContext.Provider>
     </GalleryContext.Provider>;
+}
+
+export function useGalleryCardContext() {
+    const context = useContext(GalleryCardContext);
+    if (!context) throw new Error('useGalleryCardContext requires GalleryProvider');
+    return context;
 }
 
 export function useGalleryContext() {

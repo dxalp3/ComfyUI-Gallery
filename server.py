@@ -55,6 +55,22 @@ def save_settings_to_file(settings):
     except Exception as e:
         gallery_log(f"Error saving settings: {e}")
 
+
+def get_gallery_static_root():
+    """Resolve Hydrus and thumbnail requests against the current gallery root."""
+    for route in PromptServer.instance.app.router.routes():
+        if getattr(route, "name", None) == "static_gallery_placeholder":
+            return str(route.resource._directory)
+    return folder_paths.get_output_directory()
+
+
+from .hydrus import register_hydrus_routes
+from .thumbnails import register_thumbnail_routes
+
+register_hydrus_routes(PromptServer.instance.routes, get_gallery_static_root,
+                      get_input_root=folder_paths.get_input_directory)
+register_thumbnail_routes(PromptServer.instance.routes, get_gallery_static_root)
+
 def sanitize_json_data(data):
     """Recursively sanitizes data to be JSON serializable."""
     if isinstance(data, dict):

@@ -2,96 +2,37 @@ import React, { useMemo, useCallback, useEffect, useRef } from 'react';
 import { Empty, Image, Spin } from 'antd';
 import { AutoSizer } from 'react-virtualized';
 import { FixedSizeGrid } from 'react-window';
+import type { GridChildComponentProps, GridItemKeySelector } from 'react-window';
 import ImageCard, { ImageCardHeight, ImageCardWidth } from './ImageCard';
 import { useGalleryContext } from './GalleryContext';
 import { MetadataView } from './MetadataView';
 import { ModelViewer } from './ModelViewer';
 import type { FileDetails } from './types';
 import { BASE_PATH } from "./ComfyAppApi";
+import { useMemoizedFn } from 'ahooks';
 
-const GalleryImageGrid = () => {
-    const {
-        data,
-        currentFolder,
-        searchFileName,
-        sortMethod,
-        gridSize,
-        setGridSize,
-        autoSizer,
-        setAutoSizer,
-        imageInfoName,
-        setImageInfoName,
-        previewingVideo,
-        setPreviewingVideo,
-        showRawMetadata,
-        setShowRawMetadata,
-        settings,
-        loading
-    } = useGalleryContext();
-    const containerRef = useRef<HTMLDivElement>(null);
-    const imagesDetailsList = useMemo(() => {
-        let list: FileDetails[] = Object.values(data?.folders?.[currentFolder] ?? []);
-        if (searchFileName && searchFileName.trim() !== "") {
-            const searchTerm = searchFileName.toLowerCase();
-            list = list.filter(imageInfo => imageInfo.name.toLowerCase().includes(searchTerm));
-        }
-        if (sortMethod !== 'Name ↑' && sortMethod !== 'Name ↓') {
-            list = list.sort((a, b) => (sortMethod === 'Newest' ? (b.timestamp || 0) - (a.timestamp || 0) : (a.timestamp || 0) - (b.timestamp || 0)));
-            if (!settings.showDateDivider) return list;
-            const grouped: { [date: string]: FileDetails[] } = {};
-            list.forEach(item => {
-                const date = item.timestamp ? new Date(item.timestamp * 1000).toISOString().slice(0, 10) : 'Unknown';
-                if (!grouped[date]) grouped[date] = [];
-                grouped[date].push(item);
-            });
-            const result: FileDetails[] = [];
-            Object.entries(grouped).forEach(([date, items]) => {
-                const colCount = Math.max(1, gridSize.columnCount || 1);
-                for (let i = 0; i < colCount; i++) {
-                    result.push({ name: date, type: 'divider' } as FileDetails);
-                }
-                result.push(...items);
-                const remainder = items.length % colCount;
-                if (remainder !== 0 && colCount > 1) {
-                    for (let i = 0; i < colCount - remainder; i++) {
-                        result.push({ type: 'empty-space' } as FileDetails);
-                    }
-                }
-            });
-            return result;
-        }
-        switch (sortMethod) {
-            case 'Name ↑':
-                return list.sort((a, b) => a.name.localeCompare(b.name));
-            case 'Name ↓':
-                return list.sort((a, b) => b.name.localeCompare(a.name));
-            default:
-                return list;
-        }
-    }, [currentFolder, data, sortMethod, searchFileName, gridSize.columnCount, settings.showDateDivider]);
+interface GridCellData {
+    columnCount: number;
+    images: FileDetails[];
+    currentFolder: string;
+    onInfoClick: (name: string) => void;
+    onVideoClick: (name: string | undefined) => void;
+}
 
-    const imagesUrlsLists = useMemo(() =>
-        imagesDetailsList.filter(image => image.type === "image" || image.type === "media" || image.type === "audio" || image.type === "3d").map(image => `${BASE_PATH}${image.url}`),
-        [imagesDetailsList]
-    );
+// Keep the component type and item keys stable across status/selection updates.
+// A changing cell function makes react-window unmount and recreate every card.
+const gridItemKey: GridItemKeySelector<GridCellData> = ({ columnIndex, rowIndex, data }) => {
+    const index = rowIndex * data.columnCount + columnIndex;
+    const item = data.images[index];
+    return item?.url || `${item?.type || 'empty'}-${item?.name || ''}-${index}`;
+};
+const GridInner = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>((props, ref) =>
+    <div {...props} ref={ref} style={{ ...props.style, position: 'relative' }} />);
 
-    const handleInfoClick = useCallback((imageName: string) => {
-        // Set the info modal target
-
-        // If the item is media/audio/3d, set previewing state so the preview group uses media renderer
-        const item = data?.folders?.[currentFolder]?.[imageName];
-        if (item && (item.type === 'media' || item.type === 'audio' || item.type === '3d')) {
-            setPreviewingVideo(item.name);
-        } else {
-            setPreviewingVideo(undefined);
-        }
-
-        setImageInfoName(imageName);
-    }, [setImageInfoName, data, currentFolder, setPreviewingVideo]);
-
-    const Cell = useCallback(({ columnIndex, rowIndex, style }: { columnIndex: number; rowIndex: number; style: React.CSSProperties }) => {
-        const index = rowIndex * gridSize.columnCount + columnIndex;
-        const image = imagesDetailsList[index];
+const GridCell = React.memo(function GridCell({ columnIndex, rowIndex, style, data }: GridChildComponentProps<GridCellData>) {
+        const { columnCount, images, currentFolder, onInfoClick, onVideoClick } = data;
+        const index = rowIndex * columnCount + columnIndex;
+        const image = images[index];
         if (!image) return null;
         if (image.type === 'divider') {
             if (columnIndex !== 0) return null;
@@ -103,8 +44,8 @@ const GalleryImageGrid = () => {
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
-                        width: `calc(${gridSize.columnCount} * ${ImageCardWidth + 16}px)`,
-                        gridColumn: `span ${gridSize.columnCount}`,
+                        width: `calc(${columnCount} * ${ImageCardWidth + 16}px)`,
+                        gridColumn: `span ${columnCount}`,
                         background: 'transparent',
                         padding: 0,
                         minHeight: 48,
@@ -179,33 +120,65 @@ const GalleryImageGrid = () => {
                 }}
             >
                 <ImageCard
-                    image={{
-                        ...image,
-                        dragFolder: currentFolder
-                    }}
+                    image={image}
+                    dragFolder={currentFolder}
                     key={image.name}
-                    index={index}
-                    onInfoClick={() => handleInfoClick(image.name)} onVideoClick={() => setPreviewingVideo(image.name)}
+                    onInfoClick={onInfoClick} onVideoClick={onVideoClick}
                 />
             </div>
         );
-    }, [gridSize.columnCount, imagesDetailsList, handleInfoClick, setPreviewingVideo, currentFolder]);
+
+});
+
+const GalleryImageGrid = () => {
+    const {
+        data,
+        currentFolder,
+        imagesDetailsList,
+        imagesUrlsLists,
+        gridSize,
+        setGridSize,
+        autoSizer,
+        setAutoSizer,
+        imageInfoName,
+        setImageInfoName,
+        previewingVideo,
+        setPreviewingVideo,
+        showRawMetadata,
+        setShowRawMetadata,
+        settings,
+        loading
+    } = useGalleryContext();
+    const containerRef = useRef<HTMLDivElement>(null);
+
+    const handleInfoClick = useMemoizedFn((imageName: string) => {
+        // Set the info modal target
+
+        // If the item is media/audio/3d, set previewing state so the preview group uses media renderer
+        const item = data?.folders?.[currentFolder]?.[imageName];
+        if (item && (item.type === 'media' || item.type === 'audio' || item.type === '3d')) {
+            setPreviewingVideo(item.name);
+        } else {
+            setPreviewingVideo(undefined);
+        }
+
+        setImageInfoName(imageName);
+    });
+
+    const cellData = useMemo<GridCellData>(() => ({ columnCount: gridSize.columnCount,
+        images: imagesDetailsList, currentFolder, onInfoClick: handleInfoClick, onVideoClick: setPreviewingVideo }),
+    [gridSize.columnCount, imagesDetailsList, currentFolder, handleInfoClick, setPreviewingVideo]);
 
     useEffect(() => {
         const { width, height } = autoSizer;
         const columnCount = Math.max(1, Math.floor(width / (ImageCardWidth + 16)));
         const rowCount = Math.ceil(imagesDetailsList.length / columnCount);
-        setGridSize({ width, height, columnCount, rowCount });
-    }, [autoSizer.width, autoSizer.height, imagesDetailsList.length]);
-
-    useEffect(() => {
-        const grid = document.querySelector(".grid-element");
-        if (grid) {
-            Array.from(grid.children).forEach(child => {
-                (child as HTMLElement).style.position = 'relative';
-            });
-        }
-    }, [gridSize, imageInfoName, currentFolder, data]);
+        setGridSize(previous => previous.width === width && previous.height === height &&
+            previous.columnCount === columnCount && previous.rowCount === rowCount ? previous : { width, height, columnCount, rowCount });
+    }, [autoSizer.width, autoSizer.height, imagesDetailsList.length, setGridSize]);
+    const onResize = useCallback(({ width, height }: { width: number; height: number }) => {
+        setAutoSizer(previous => previous.width === width && previous.height === height ? previous : { width, height });
+    }, [setAutoSizer]);
 
     // Memoized previewable images for InfoView navigation and rendering
     const previewableImages = useMemo(() =>
@@ -401,12 +374,9 @@ const GalleryImageGrid = () => {
                         description={"No images found"}
                     />
                 ) : (
-                    <AutoSizer>
-                        {({ width, height }) => {
-                            if (autoSizer.width !== width || autoSizer.height !== height) {
-                                setTimeout(() => setAutoSizer({ width, height }), 0);
-                            }
-                            return (
+                    <AutoSizer onResize={onResize}>
+                        {({ width, height }) => (
+
                                 <FixedSizeGrid
                                     columnCount={gridSize.columnCount}
                                     rowCount={gridSize.rowCount}
@@ -415,16 +385,18 @@ const GalleryImageGrid = () => {
                                     width={width}
                                     height={height}
                                     className={"grid-element"}
+                                    itemData={cellData}
+                                    itemKey={gridItemKey}
+                                    innerElementType={GridInner}
                                     style={{
                                         display: "flex",
                                         alignContent: "center",
                                         justifyContent: "center"
                                     }}
                                 >
-                                    {Cell}
+                                    {GridCell}
                                 </FixedSizeGrid>
-                            );
-                        }}
+                        )}
                     </AutoSizer>
                 )}
             </Image.PreviewGroup>

@@ -1,0 +1,10 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+web/node_modules/
+*.tsbuildinfo
+user_settings.json
+hydrus_settings.json
+hydrus_settings.json.*
+.hydrus-settings-*
+hydrus_memory.sqlite3*

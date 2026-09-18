@@ -66,6 +66,34 @@ const comfyApp = getComfyApp();
 const app = comfyApp ? comfyApp : mockApi;
 
 export const ComfyAppApi = {
+    addInputImageNode: async (inputName: string, imageUrl: string) => {
+        const comfy = getComfyApp();
+        const graph = comfy?.canvas?.graph || comfy?.graph;
+        const liteGraph = (window as any).LiteGraph || (window as any).comfyAPI?.litegraph?.LiteGraph;
+        if (!graph || !liteGraph?.createNode) throw new Error('Automatic Load Image creation is unavailable.');
+        const node = liteGraph.createNode('LoadImage');
+        const widget = node?.widgets?.find((value: any) => value.name === 'image');
+        if (!node || !widget) throw new Error('Load Image node is unavailable.');
+        const canvas = comfy.canvas;
+        const scale = canvas?.ds?.scale || 1;
+        const offset = canvas?.ds?.offset || [0, 0];
+        node.pos = [(canvas?.canvas?.clientWidth || 800) / (2 * scale) - offset[0], (canvas?.canvas?.clientHeight || 600) / (2 * scale) - offset[1]];
+        graph.beforeChange?.();
+        try {
+            graph.add(node);
+            if (Array.isArray(widget.options?.values) && !widget.options.values.includes(inputName)) widget.options.values.push(inputName);
+            widget.value = inputName;
+            widget.callback?.(inputName);
+            const preview = new window.Image();
+            preview.onload = () => { node.imgs = [preview]; node.setDirtyCanvas?.(true, true); };
+            preview.src = imageUrl;
+            canvas?.selectNode?.(node);
+            node.setDirtyCanvas?.(true, true);
+        } finally { graph.afterChange?.(); }
+    },
+    // Keep credentials in the server bridge, and never pass Hydrus requests through the logging mock.
+    fetchHydrus: (path: string, options?: RequestInit): Promise<Response> =>
+        comfyApp ? comfyApp.api.fetchApi(`/Gallery/hydrus/${path}`, options) : fetch(`/Gallery/hydrus/${path}`, options),
     startMonitoring: (relativePath: string, disableLogs?: boolean, usePollingObserver?: boolean, scanExtensions?: string[], deduplicateSymlinks?: boolean) =>
         app.api.fetchApi("/Gallery/monitor/start", {
             method: "POST",

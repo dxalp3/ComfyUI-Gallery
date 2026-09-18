@@ -87,8 +87,6 @@ const FolderTitle = memo(({ nodeData, currentFolder }: { nodeData: any, currentF
                     return Array.from(new Set([...oldSelectedImages, ...folderImages]));
                 }
             });
-        } else {
-            setSelectedImages([]);
         }
     };
 

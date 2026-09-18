@@ -1,10 +1,14 @@
-import { Button, Image, Typography } from 'antd';
+import { Button, Checkbox, Dropdown, Image, Tag, Typography, message } from 'antd';
+import { useHydrus } from './HydrusContext';
+import { hydrusStatus } from './HydrusApi';
+import type { HydrusItem } from './HydrusApi';
 import type { FileDetails } from './types';
 import InfoCircleOutlined from '@ant-design/icons/lib/icons/InfoCircleOutlined';
 import SoundOutlined from '@ant-design/icons/lib/icons/SoundOutlined';
-import React, { useRef, useState } from 'react';
-import { useDrag, useEventListener } from 'ahooks';
-import { useGalleryContext } from './GalleryContext';
+import React, { memo, useRef, useState } from 'react';
+import { useDrag, useMemoizedFn } from 'ahooks';
+import { useGalleryCardContext } from './GalleryContext';
+import type { SettingsState } from './GalleryContext';
 import { BASE_PATH } from './ComfyAppApi';
 import { use3DThumbnail } from './GlobalModelRenderer';
 
@@ -62,25 +66,54 @@ const ImageCard3DThumbnail = ({ image, onClick }: { image: FileDetails, onClick:
 export const ImageCardWidth = 350;
 export const ImageCardHeight = 450;
 
-function ImageCard({
-    image,
-    index,
-    onInfoClick,
-    onVideoClick
-}: {
-    image: FileDetails & { dragFolder?: string };
-    index: number;
-    onInfoClick: (imageName: string | undefined) => void;
+interface ImageCardProps {
+    image: FileDetails;
+    dragFolder: string;
+    onInfoClick: (imageName: string) => void;
     onVideoClick: (imageName: string | undefined) => void;
+}
+
+// The connector can receive shared context updates cheaply. The memoized media
+// subtree only renders when this image, its selection, or its badge changes.
+function ImageCard(props: ImageCardProps) {
+    const { settings, selectedImages, selectedImageSet, selectImage, setPreviewingVideo } = useGalleryCardContext();
+    const { items, requestExport, refresh, setDetailsUrl, imageFiles } = useHydrus();
+    const getTargets = useMemoizedFn(() => (selectedImageSet.has(props.image.url) ? selectedImages : [props.image.url]).filter(url => imageFiles[url]));
+    return <ImageCardView {...props} settings={settings} selected={selectedImageSet.has(props.image.url)}
+        item={items[props.image.url]} selectImage={selectImage} setPreviewingVideo={setPreviewingVideo}
+        getTargets={getTargets} requestExport={requestExport} refresh={refresh} setDetailsUrl={setDetailsUrl} />;
+}
+
+const ImageCardView = memo(function ImageCardView({
+    image,
+    dragFolder,
+    onInfoClick,
+    onVideoClick,
+    settings, selected, item, selectImage, setPreviewingVideo,
+    getTargets, requestExport, refresh, setDetailsUrl,
+}: ImageCardProps & {
+    settings: Pick<SettingsState, 'imageThumbFit' | 'videoThumbFit' | 'autoPlayVideos' | 'relativePath'>;
+    selected: boolean;
+    item?: HydrusItem;
+    selectImage: (url: string, range?: boolean) => void;
+    setPreviewingVideo: (name: string | undefined) => void;
+    getTargets: () => string[];
+    requestExport: (urls: string[]) => void;
+    refresh: (urls: string[]) => Promise<HydrusItem[]>;
+    setDetailsUrl: (url: string) => void;
 }) {
-    const { settings, selectedImages, setSelectedImages, setPreviewingVideo } = useGalleryContext();
+    const badge = hydrusStatus(item);
     const dragRef = useRef<HTMLDivElement>(null);
     const [dragging, setDragging] = useState(false);
+    const [targetCount, setTargetCount] = useState(1);
+    const [failedThumbnail, setFailedThumbnail] = useState<string>();
+    const originalUrl = `${BASE_PATH}${image.url}`;
+    const thumbnailUrl = `${BASE_PATH}/Gallery/thumbnail?url=${encodeURIComponent(image.url)}&v=${image.timestamp || 0}&root=${encodeURIComponent(settings.relativePath)}`;
 
     useDrag(
         {
             name: image.name,
-            folder: image.dragFolder || '',
+            folder: dragFolder,
             type: image.type,
             url: image.url,
         },
@@ -93,20 +126,12 @@ function ImageCard({
 
     // Use ctrlKey from click event, not global state
     const handleCardClick = (event: React.MouseEvent) => {
-        if (event.ctrlKey || event.metaKey) {
+        if (event.ctrlKey || event.metaKey || event.shiftKey) {
             // The click dont stop
             event.stopPropagation();
             event.preventDefault();
 
-            setSelectedImages((oldSelectedImages) => {
-                if (oldSelectedImages.includes(image.url)) {
-                    return [...oldSelectedImages.filter((selectedImage) => selectedImage != image.url)];
-                } else {
-                    return [...oldSelectedImages, image.url];
-                }
-            });
-        } else {
-            setSelectedImages([]);
+            selectImage(image.url, event.shiftKey);
         }
     };
 
@@ -136,7 +161,24 @@ function ImageCard({
         // event.dataTransfer.setDragImage(event.currentTarget, 10, 10);
     };
 
-    return (<>
+    return (<Dropdown trigger={['contextMenu']} disabled={image.type !== 'image'}
+        onOpenChange={open => { if (open) setTargetCount(getTargets().length); }}
+        menu={{ items: [
+            { key: 'export', label: `Export to Hydrus (${targetCount})` },
+            { key: 'refresh', label: `Refresh Hydrus status (${targetCount})` },
+            { key: 'metadata', label: 'Hydrus metadata' },
+            { key: 'select', label: selected ? 'Deselect image' : 'Select image' },
+        ], onClick: async ({ key, domEvent }) => {
+            domEvent.stopPropagation();
+            const targets = getTargets();
+            if (key === 'export') requestExport(targets);
+            if (key === 'metadata') setDetailsUrl(image.url);
+            if (key === 'select') selectImage(image.url);
+            if (key === 'refresh') {
+                try { const results = await refresh(targets); const failed = results.filter(item => item.error); if (failed.length) message.warning(failed[0].error); else message.success(`Refreshed ${results.length} image(s).`); }
+                catch (error) { message.error(error instanceof Error ? error.message : String(error)); }
+            }
+        } }}>
         <div
             className='image-card'
             ref={dragRef}
@@ -154,10 +196,15 @@ function ImageCard({
                 alignItems: "center",
                 position: "relative",
                 cursor: 'grab',
-                boxShadow: selectedImages.includes(image.url) ? '0 0 0 3px #1890ff' : undefined,
+                boxShadow: selected ? '0 0 0 3px #1890ff' : undefined,
             }}
-            onClick={handleCardClick}
+            onClickCapture={event => { if (!(event.target as HTMLElement).closest('[data-gallery-select]')) handleCardClick(event); }}
         >
+            <div data-gallery-select style={{ position: 'absolute', top: 10, left: 10, right: 10, zIndex: 4, display: 'flex', justifyContent: 'space-between' }} onClick={event => event.stopPropagation()}>
+                <Checkbox aria-label={`Select ${image.name}`} checked={selected}
+                    onClick={event => { event.stopPropagation(); selectImage(image.url, event.shiftKey); }} />
+                {image.type === 'image' && <Tag color={badge.color} style={{ cursor: 'pointer', margin: 0 }} onClick={() => setDetailsUrl(image.url)}>{badge.label}</Tag>}
+            </div>
             {image.type == "image" ? (<>
                 <Image
                     id={image.url}
@@ -169,14 +216,14 @@ function ImageCard({
                         userSelect: 'none',
                         cursor: 'grab',
                     }}
-                    src={`${BASE_PATH}${image.url}`}
+                    src={failedThumbnail === thumbnailUrl ? originalUrl : thumbnailUrl}
+                    preview={{ src: originalUrl }}
                     loading="lazy"
-                    // preview={false}
+                    decoding="async"
+                    onError={() => { if (failedThumbnail !== thumbnailUrl) setFailedThumbnail(thumbnailUrl); }}
                     onClick={() => {
                         // Ensure any leftover media preview state is cleared so this opens as an image
                         try { setPreviewingVideo(undefined); } catch { }
-                        // Trigger the preview
-                        document.getElementById(image.url)?.click();
                     }}
                     alt={image.name}
                     draggable
@@ -276,7 +323,7 @@ function ImageCard({
                 />
             </div>
         </div>
-    </>)
-}
+    </Dropdown>)
+});
 
-export default ImageCard
+export default memo(ImageCard);
