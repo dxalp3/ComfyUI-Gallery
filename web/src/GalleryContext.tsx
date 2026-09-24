@@ -1,3 +1,4 @@
+import type { ImageQualities } from './LocalImageSearch';
 import React, { createContext, useContext, useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import type { Dispatch, SetStateAction } from 'react';
 import useSize from 'ahooks/lib/useSize';
@@ -6,9 +7,9 @@ import useAsyncEffect from 'ahooks/lib/useAsyncEffect';
 import { useEventListener, useLocalStorageState } from 'ahooks';
 import type { FileDetails, FilesTree } from './types';
 import type { AutoCompleteProps } from 'antd/es/auto-complete';
-import { ComfyAppApi, BASE_PATH, OPEN_BUTTON_ID } from './ComfyAppApi';
+import { ComfyAppApi, BASE_PATH, OPEN_BUTTON_ID, STANDALONE } from './ComfyAppApi';
 import { selectRange } from './HydrusApi';
-import { extractLocalPrompts, matchesLocalImage } from './LocalImageSearch';
+import { extractLocalPrompts, matchesLocalImage, matchesImageQualities } from './LocalImageSearch';
 import type { LocalSearchField, LocalPrompts } from './LocalImageSearch';
 
 function getImages(): Promise<FilesTree> {
@@ -73,6 +74,8 @@ export interface GalleryContextType {
     setCurrentFolder: Dispatch<SetStateAction<string>>;
     searchFileName: string;
     setSearchFileName: Dispatch<SetStateAction<string>>;
+    qualities: ImageQualities;
+    setQualities: Dispatch<SetStateAction<ImageQualities>>;
     localSearchField: LocalSearchField;
     setLocalSearchField: Dispatch<SetStateAction<LocalSearchField>>;
     setLocalHydrusTags: Dispatch<SetStateAction<Record<string, string[]>>>;
@@ -132,6 +135,7 @@ const GalleryCardContext = createContext<GalleryCardContextType | undefined>(und
 export function GalleryProvider({ children }: { children: React.ReactNode }) {
     const [currentFolder, setCurrentFolder] = useState("output");
     const [searchFileName, setSearchFileName] = useState("");
+    const [qualities, setQualities] = useState<ImageQualities>({ minWidth: 0, minHeight: 0, format: '' });
     const [localSearchField, setLocalSearchField] = useState<LocalSearchField>('all');
     const [localHydrusTags, setLocalHydrusTags] = useState<Record<string, string[]>>({});
     const promptSearchCache = useRef(new WeakMap<object, LocalPrompts>());
@@ -140,7 +144,7 @@ export function GalleryProvider({ children }: { children: React.ReactNode }) {
     const [showRawMetadata, setShowRawMetadata] = useState(false);
     const [sortMethod, setSortMethod] = useState<'Newest' | 'Oldest' | 'Name ↑' | 'Name ↓'>("Newest");
     const [imageInfoName, setImageInfoName] = useState<string | undefined>(undefined);
-    const [open, setOpen] = useState(false);
+    const [open, setOpen] = useState(STANDALONE);
     const [previewingVideo, setPreviewingVideo] = useState<string | undefined>(undefined);
     const [selectedImages, setSelectedImages] = useState<string[]>([]);
     const selectionAnchor = useRef<string | undefined>(undefined);
@@ -208,7 +212,7 @@ export function GalleryProvider({ children }: { children: React.ReactNode }) {
     useEffect(() => {
         if (settingsLoaded && settingsState?.relativePath) {
             setCurrentFolder("");
-            ComfyAppApi.startMonitoring(
+            if (!STANDALONE) ComfyAppApi.startMonitoring(
                 settingsState.relativePath,
                 settingsState.disableLogs,
                 settingsState.usePollingObserver,
@@ -248,10 +252,9 @@ export function GalleryProvider({ children }: { children: React.ReactNode }) {
         return list.sort((a, b) => sortMethod === 'Newest' ? (b.timestamp || 0) - (a.timestamp || 0) : (a.timestamp || 0) - (b.timestamp || 0));
     }, [unfilteredFolderImages, sortMethod]);
     const searchedHydrusTags = searchFileName.trim() && ['all', 'hydrus'].includes(localSearchField) ? localHydrusTags : undefined;
-    const filteredFolderImages = useMemo(() => searchFileName.trim()
-        ? sortedFolderImages.filter(file => matchesLocalImage(file, searchFileName, localSearchField, searchedHydrusTags?.[file.url], localPrompts.get(file.url)))
-        : sortedFolderImages,
-    [sortedFolderImages, searchFileName, localSearchField, searchedHydrusTags, localPrompts]);
+    const filteredFolderImages = useMemo(() => sortedFolderImages.filter(file =>
+        matchesImageQualities(file, qualities) && (!searchFileName.trim() || matchesLocalImage(file, searchFileName, localSearchField, searchedHydrusTags?.[file.url], localPrompts.get(file.url)))),
+    [sortedFolderImages, searchFileName, localSearchField, searchedHydrusTags, localPrompts, qualities]);
 
     // Search the complete folder before adding layout dividers or applying virtualized rendering.
     const imagesDetailsList = useMemo(() => {
@@ -383,7 +386,7 @@ export function GalleryProvider({ children }: { children: React.ReactNode }) {
     const value = useMemo(() => ({
         currentFolder, setCurrentFolder,
         searchFileName, setSearchFileName,
-        localSearchField, setLocalSearchField, setLocalHydrusTags, unfilteredFolderImages,
+        qualities, setQualities, localSearchField, setLocalSearchField, setLocalHydrusTags, unfilteredFolderImages,
         showDateDivider, setShowDateDivider,
         showSettings, setShowSettings,
         showRawMetadata, setShowRawMetadata,
@@ -410,7 +413,7 @@ export function GalleryProvider({ children }: { children: React.ReactNode }) {
     }), [
         currentFolder,
         searchFileName,
-        localSearchField,
+        localSearchField, qualities,
         unfilteredFolderImages,
         showDateDivider,
         showSettings,

@@ -66,10 +66,15 @@ def get_gallery_static_root():
 
 from .hydrus import register_hydrus_routes
 from .thumbnails import register_thumbnail_routes
+from .gallery_app import register_gallery_app_routes
+from .image_source_api import register_source_routes
 
+register_gallery_app_routes(PromptServer.instance.routes)
 register_hydrus_routes(PromptServer.instance.routes, get_gallery_static_root,
                       get_input_root=folder_paths.get_input_directory)
 register_thumbnail_routes(PromptServer.instance.routes, get_gallery_static_root)
+register_source_routes(PromptServer.instance.routes, get_gallery_static_root,
+                       folder_paths.get_input_directory)
 
 def sanitize_json_data(data):
     """Recursively sanitizes data to be JSON serializable."""

@@ -1,8 +1,9 @@
+import { installSourceWidgets } from './ImageSourceBridge';
 import { createRoot } from 'react-dom/client'
 import Gallery from './Gallery.tsx'
 import App from 'antd/es/app/App';
 import { DEFAULT_SETTINGS, STORAGE_KEY, type SettingsState } from './GalleryContext.tsx';
-import { ComfyAppApi, OPEN_BUTTON_ID } from './ComfyAppApi.ts';
+import { ComfyAppApi, OPEN_BUTTON_ID, STANDALONE } from './ComfyAppApi.ts';
 import { ConfigProvider, theme } from 'antd';
 import { useLocalStorageState } from 'ahooks';
 import { ModelThumbnailProvider } from './GlobalModelRenderer';
@@ -94,7 +95,11 @@ function waitForElement(selectorOrSelectors: string | string[], delay = 1500, ti
     });
 }
 
-ComfyAppApi.registerExtension({
+if (STANDALONE) {
+    const root = document.createElement('div');
+    document.body.appendChild(root);
+    createRoot(root).render(<Main />);
+} else ComfyAppApi.registerExtension({
     name: "Gallery",
     async init() {
         (async () => {
@@ -121,21 +126,19 @@ ComfyAppApi.registerExtension({
             console.log("Gallery: UI target found:", targetElement);
 
             if (!targetElement) {
-                console.error('Gallery: Could not find element to inject the button.');
-                return;
+                console.warn('Gallery: Toolbar not found; mounting the gallery controls on the page.');
             }
 
             const box = document.createElement("div");
-            targetElement.appendChild(box);
+            (targetElement || document.body).appendChild(box);
 
             createRoot(box).render(
                 <Main />,
             );
-
-            ComfyAppApi.startMonitoring(settings.relativePath);
         })();
     },
     async nodeCreated(node: any) {
+        installSourceWidgets(node);
         try {
             if (node.comfyClass === "GalleryNode") {
                 node.addWidget("button", "Open Gallery", null, () => {

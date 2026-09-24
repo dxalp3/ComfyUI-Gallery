@@ -1,3 +1,5 @@
+import { openGalleryTab } from './ImageSourceBridge';
+import { message } from 'antd';
 import Button from 'antd/es/button/button';
 import { useGalleryContext } from './GalleryContext';
 import { useLocalStorageState, useDebounceFn } from 'ahooks';
@@ -165,6 +167,7 @@ const GalleryOpenButton = () => {
         >
             {settings.buttonLabel || 'Open Gallery'}
         </Button>
+        <Button title="Open Gallery in a new tab" onClick={() => { try { openGalleryTab(); } catch (error) { message.error(String(error)); } }}>↗</Button>
     </>);
 };
 

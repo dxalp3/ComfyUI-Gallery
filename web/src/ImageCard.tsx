@@ -1,3 +1,4 @@
+import { appendLocalImages } from './ImageSourceBridge';
 import { Button, Checkbox, Dropdown, Image, Tag, Typography, message } from 'antd';
 import { useHydrus } from './HydrusContext';
 import { hydrusStatus } from './HydrusApi';
@@ -164,6 +165,7 @@ const ImageCardView = memo(function ImageCardView({
     return (<Dropdown trigger={['contextMenu']} disabled={image.type !== 'image'}
         onOpenChange={open => { if (open) setTargetCount(getTargets().length); }}
         menu={{ items: [
+            { key: 'source', label: `Append to Image Source (${targetCount})` },
             { key: 'export', label: `Export to Hydrus (${targetCount})` },
             { key: 'refresh', label: `Refresh Hydrus status (${targetCount})` },
             { key: 'metadata', label: 'Hydrus metadata' },
@@ -171,6 +173,10 @@ const ImageCardView = memo(function ImageCardView({
         ], onClick: async ({ key, domEvent }) => {
             domEvent.stopPropagation();
             const targets = getTargets();
+            if (key === 'source') {
+                const done = message.loading('Copying images to input…', 0);
+                try { message.success(await appendLocalImages(targets)); } catch (error) { message.error(error instanceof Error ? error.message : String(error)); } finally { done(); }
+            }
             if (key === 'export') requestExport(targets);
             if (key === 'metadata') setDetailsUrl(image.url);
             if (key === 'select') selectImage(image.url);

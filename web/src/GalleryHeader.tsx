@@ -1,18 +1,18 @@
 import { useEffect, useRef, useState } from 'react';
-import { Flex, AutoComplete, Button, Segmented, Modal, message, Popconfirm, Select, Tooltip } from 'antd';
+import { Flex, InputNumber, AutoComplete, Button, Segmented, Modal, message, Popconfirm, Select, Tooltip } from 'antd';
 import { CloseSquareFilled, DoubleLeftOutlined, DoubleRightOutlined } from '@ant-design/icons';
 import { useGalleryContext } from './GalleryContext';
 import { useDebounce, useCountDown } from 'ahooks';
 import Typography from 'antd/es/typography/Typography';
 import JSZip from 'jszip';
 import FileSaver from 'file-saver';
-import { BASE_PATH, ComfyAppApi } from './ComfyAppApi';
+import { BASE_PATH, ComfyAppApi, STANDALONE } from './ComfyAppApi';
 
 const GalleryHeader = () => {
     const {
         showSettings, setShowSettings,
         searchFileName, setSearchFileName,
-        localSearchField, setLocalSearchField,
+        localSearchField, setLocalSearchField, qualities, setQualities,
         sortMethod, setSortMethod,
         imagesAutoCompleteNames,
         autoCompleteOptions, setAutoCompleteOptions,
@@ -21,7 +21,7 @@ const GalleryHeader = () => {
         siderCollapsed, setSiderCollapsed
     } = useGalleryContext();
 
-    const [search, setSearch] = useState("");
+    const [search, setSearch] = useState(searchFileName);
     const [showClose, setShowClose] = useState(false);
     const [targetDate, setTargetDate] = useState<number>();
     const [countdown] = useCountDown({
@@ -40,7 +40,7 @@ const GalleryHeader = () => {
 
     // Show close button only when dragging
     useEffect(() => {
-        const onDragStart = () => setShowClose(true);
+        const onDragStart = () => { if (!STANDALONE) setShowClose(true); };
         const onDragEnd = () => {
             setShowClose(false);
             setTargetDate(undefined);
@@ -263,6 +263,10 @@ const GalleryHeader = () => {
                     allowClear={{ clearIcon: <CloseSquareFilled /> }}
                 />
             </Flex>
+            <InputNumber aria-label="Local minimum width" placeholder="Min width" min={0} max={32768} value={qualities.minWidth || null} onChange={value => setQualities(previous => ({ ...previous, minWidth: value || 0 }))} />
+            <InputNumber aria-label="Local minimum height" placeholder="Min height" min={0} max={32768} value={qualities.minHeight || null} onChange={value => setQualities(previous => ({ ...previous, minHeight: value || 0 }))} />
+            <Select aria-label="Local image format" value={qualities.format} style={{ width: 120 }} onChange={format => setQualities(previous => ({ ...previous, format }))}
+                options={[{ value: '', label: 'All formats' }, ...['png', 'jpg', 'webp', 'gif', 'avif'].map(value => ({ value, label: value.toUpperCase() }))]} />
             <Segmented<string>
                 style={{ 
                     marginRight: 15 

@@ -1,6 +1,6 @@
 # ComfyUI Gallery
 
-## Hydrus edition — 2.7.1-hydrus.3
+## Hydrus edition — 2.7.1-hydrus.4
 
 This customized edition adds image export to the Hydrus Client API, persistent
 SHA-256 export history, cached Hydrus metadata, bulk actions, checkboxes, range
@@ -13,8 +13,10 @@ suggestions** are available in export tags, per-image prompt tags, and saved def
 
 Browse Hydrus by tags or open client pages, use live tag recommendations with
 AND/OR searches and select-all suggestions, download originals or a bulk ZIP,
-and use keyboard controls. Copy source images into ComfyUI input and add Load
-Image nodes for img2img. The compiled frontend is included.
+and use keyboard controls. View Local, Hydrus, or Both in the main gallery, or
+open Gallery in a separate browser tab. Bulk-append sources to **Gallery Image
+Source**, crop with pixel controls or a drag rectangle, and stitch horizontally,
+vertically, or in a grid for img2img. The compiled frontend is included.
 
 The gallery uses cached 512px thumbnails while retaining originals for previews
 and exports. Image cards stay mounted during metadata and file updates, sorting

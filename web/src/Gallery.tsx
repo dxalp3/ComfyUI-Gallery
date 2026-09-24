@@ -1,3 +1,5 @@
+import { STANDALONE } from './ComfyAppApi';
+import { ImageSourceHost } from './ImageSourceHost';
 import { GalleryProvider } from './GalleryContext';
 import GalleryOpenButton from './GalleryOpenButton';
 import GalleryModal from './GalleryModal';
@@ -7,7 +9,8 @@ function Gallery() {
     return (
         <GalleryProvider>
             <HydrusProvider>
-            <GalleryOpenButton />
+            {!STANDALONE && <GalleryOpenButton />}
+            <ImageSourceHost />
             <GalleryModal />
             </HydrusProvider>
         </GalleryProvider>

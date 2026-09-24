@@ -1,20 +1,19 @@
 import { useEffect, useRef, useState } from 'react';
 import { Alert, Button, Card, Checkbox, Collapse, Dropdown, Empty, Modal, Space, Spin, Tabs, Tag, Tree, Typography } from 'antd';
-import { BASE_Z_INDEX, ComfyAppApi } from './ComfyAppApi';
+import { BASE_Z_INDEX } from './ComfyAppApi';
 import { hydrusRequest, selectRange } from './HydrusApi';
 import { HydrusSearchPanel } from './HydrusSearchPanel';
 import { downloadHydrusImages } from './HydrusDownloads';
 import { useHydrus } from './HydrusContext';
-import { useGalleryContext } from './GalleryContext';
+import { appendToImageSource } from './ImageSourceBridge';
 
 type RemoteImage = { hash: string; file_id: number; mime: string; width: number; height: number; tags?: Record<string, any>; [key: string]: any };
 type Page = { page_key: string; name: string; is_media_page: boolean; selected?: boolean; pages?: Page[] };
 type Results = { items: RemoteImage[]; total: number; offset?: number; page_name?: string; page_state?: number };
 type InputCopy = { name: string; subfolder: string; type: string; input_name: string; url: string; hash: string };
 
-export function HydrusBrowser({ open, onClose }: { open: boolean; onClose: () => void }) {
+export function HydrusBrowser({ open, onClose, embedded = false }: { open: boolean; onClose: () => void; embedded?: boolean }) {
     const { settings, setSettingsOpen, settingsOpen } = useHydrus();
-    const { setOpen: setGalleryOpen } = useGalleryContext();
     const [tab, setTab] = useState('search');
     const [tags, setTags] = useState<string[]>([]);
     const [match, setMatch] = useState<'all' | 'any'>('all');
@@ -72,9 +71,11 @@ export function HydrusBrowser({ open, onClose }: { open: boolean; onClose: () =>
     };
     const copy = async (hashes: string[], useWorkflow = false) => {
         if (actionBusy.current) return;
+        if (useWorkflow && hashes.length > 32) { setError('Select at most 32 images to append to a node.'); return; }
         actionBusy.current = true;
         setCopying(true); setError(''); setNotice(''); cancelCopies.current = false;
         let completed = 0;
+        const inputs: InputCopy[] = [];
         const failures: string[] = [];
         try {
             for (const hash of hashes) {
@@ -84,15 +85,12 @@ export function HydrusBrowser({ open, onClose }: { open: boolean; onClose: () =>
                     const input = copies[hash] || await hydrusRequest<InputCopy>('import', { hash });
                     setCopies(previous => ({ ...previous, [hash]: input }));
                     completed++;
-                    if (useWorkflow) {
-                        try {
-                            await ComfyAppApi.addInputImageNode(input.input_name, input.url);
-                            onClose(); setGalleryOpen(false);
-                        } catch {
-                            setNotice(`Copied to input. In a Load Image node select ${input.input_name}. Automatic node creation is unavailable in this ComfyUI version.`);
-                        }
-                    }
+                    if (useWorkflow) inputs.push(input);
                 } catch (reason) { failures.push(`${hash.slice(0, 10)}: ${reason instanceof Error ? reason.message : String(reason)}`); }
+            }
+            if (useWorkflow && inputs.length) {
+                try { setNotice(await appendToImageSource(inputs.map(input => ({ input_name: input.input_name, title: `Hydrus ${input.hash.slice(0, 12)}` })))); }
+                catch (reason) { failures.push(reason instanceof Error ? reason.message : String(reason)); }
             }
             if (!useWorkflow) setNotice(`${completed} image(s) copied into ComfyUI input/hydrus. Use their names in Load Image nodes.`);
             if (failures.length) setError(failures.join('\n'));
@@ -165,11 +163,12 @@ export function HydrusBrowser({ open, onClose }: { open: boolean; onClose: () =>
     const shortcutHelp = <Alert type="info" showIcon style={{ marginBottom: 12 }} message="Keyboard controls"
         description="Arrows: move between images · Shift+Arrows / Shift+click: select range · Space: toggle selection · Enter: view image · Ctrl/Cmd+A: select results · /: focus search · Ctrl/Cmd+Enter in search: run search · D: download focused image · I: use for img2img · Escape: close the top view · ?: show/hide this help. Shortcuts leave text editing and menus alone." />;
 
+    const Wrapper = embedded ? EmbeddedHydrus : Modal;
     return <>
-        <Modal title="Hydrus library" open={open} onCancel={() => { if (!working && !details && !settingsOpen) onClose(); }} width="92vw" zIndex={BASE_Z_INDEX + 30}
+        <Wrapper title="Hydrus library" open={open} onCancel={() => { if (!working && !details && !settingsOpen) onClose(); }} width="92vw" zIndex={BASE_Z_INDEX + 30}
             footer={<Button disabled={working} onClick={onClose}>Close</Button>} maskClosable={!working} keyboard={!working && !details && !settingsOpen}>
             <div onKeyDownCapture={event => handleKeys(event)}>
-            <Typography.Paragraph type="secondary">Find source images in your main client, copy their originals to ComfyUI input, or add a Load Image node for img2img.</Typography.Paragraph>
+            <Typography.Paragraph type="secondary">Find source images in your main client, copy their originals to ComfyUI input, or append them to Gallery Image Source for cropping and img2img.</Typography.Paragraph>
             {!settings?.has_access_key && <Alert type="warning" message="Configure your Hydrus connection first." action={<Button onClick={() => setSettingsOpen(true)}>Open settings</Button>} />}
             <Tabs activeKey={tab} onChange={changeTab} items={[{ key: 'search', label: 'Search Hydrus', disabled: working }, { key: 'pages', label: 'Open client pages', disabled: working }]} />
             {tab === 'search' && <HydrusSearchPanel tags={tags} setTags={setTags} match={match} setMatch={setMatch} limit={limit} setLimit={setLimit}
@@ -179,6 +178,7 @@ export function HydrusBrowser({ open, onClose }: { open: boolean; onClose: () =>
                 <Button disabled={!items.length || working} onClick={() => setSelected(items.map(item => item.hash))}>Select results ({items.length})</Button>
                 <Button disabled={!selected.length || working} onClick={() => setSelected([])}>Clear</Button>
                 <Button type="primary" disabled={!selected.length || working} onClick={() => copy(selected)}>Copy selected to input ({selected.length})</Button>
+                <Button disabled={!selected.length || working} onClick={() => copy(selected, true)}>Append selected to Image Source ({selected.length})</Button>
                 <Button disabled={!selected.length || working} onClick={() => download(selected)}>Download selected ({selected.length})</Button>
                 <Button onClick={() => setShowShortcuts(value => !value)}>Keyboard controls</Button>
                 {working && <><Spin size="small" /><span aria-live="polite">{progress}</span><Button onClick={() => { cancelCopies.current = true; cancelDownloads.current = true; }}>Cancel remaining</Button></>}
@@ -193,14 +193,14 @@ export function HydrusBrowser({ open, onClose }: { open: boolean; onClose: () =>
                     {busy ? <Spin style={{ display: 'block', margin: 60 }} /> : items.length ? <>
                         <Typography.Paragraph>{result?.page_name ? `${result.page_name} · ` : ''}{items.length} local images shown{tab === 'pages' ? ` · ${result?.total} files on page` : ''}{result?.page_state ? ' · page still loading in Hydrus; reload shortly' : ''}</Typography.Paragraph>
                         <div ref={gridRef} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(190px, 1fr))', gap: 12 }}>
-                            {items.map(item => <Dropdown key={item.hash} trigger={['contextMenu']} disabled={working} menu={{ items: [{ key: 'use', label: 'Use for img2img' }, { key: 'copy', label: 'Copy to ComfyUI input' }, { key: 'download', label: 'Download original' }, { key: 'info', label: 'View metadata' }],
-                                onClick: ({ key }) => { if (key === 'info') setDetails(item); else if (key === 'download') void download(selected.includes(item.hash) ? selected : [item.hash]); else void copy(key === 'copy' && selected.includes(item.hash) ? selected : [item.hash], key === 'use'); } }}>
+                            {items.map(item => <Dropdown key={item.hash} trigger={['contextMenu']} disabled={working} menu={{ items: [{ key: 'use', label: 'Append for img2img' }, { key: 'copy', label: 'Copy to ComfyUI input' }, { key: 'download', label: 'Download original' }, { key: 'info', label: 'View metadata' }],
+                                onClick: ({ key }) => { if (key === 'info') setDetails(item); else if (key === 'download') void download(selected.includes(item.hash) ? selected : [item.hash]); else void copy(selected.includes(item.hash) ? selected : [item.hash], key === 'use'); } }}>
                                 <Card size="small" data-hydrus-result={item.hash} role="group" aria-label={`Hydrus image ${item.file_id}`} tabIndex={item.hash === focusedHash ? 0 : -1}
                                     onFocus={() => setFocusedHash(item.hash)} style={{ borderColor: selected.includes(item.hash) ? '#1677ff' : undefined, boxShadow: item.hash === focusedHash ? '0 0 0 2px #4096ff' : undefined }}
                                     cover={<img loading="lazy" src={thumbnailUrl(item.hash)} alt={`Hydrus file ${item.file_id}`} style={{ height: 150, objectFit: 'contain', background: '#17191d', cursor: 'pointer' }} onClick={event => event.shiftKey || event.ctrlKey || event.metaKey ? toggle(item.hash, event.shiftKey) : setDetails(item)} />}>
                                     <Space><Checkbox aria-label={`Select Hydrus file ${item.file_id}`} checked={selected.includes(item.hash)} disabled={working} onClick={event => toggle(item.hash, event.shiftKey)} /><Typography.Text type="secondary">{item.width} × {item.height}</Typography.Text>{copies[item.hash] && <Tag color="green">Copied</Tag>}</Space>
                                     <Typography.Paragraph ellipsis style={{ margin: '6px 0' }} title={item.hash}>#{item.file_id} · {item.hash.slice(0, 12)}</Typography.Paragraph>
-                                    <Space wrap><Button size="small" type="primary" disabled={working} onClick={() => copy([item.hash], true)}>Use for img2img</Button><Button size="small" disabled={working} onClick={() => copy([item.hash])}>Copy to input</Button><Button size="small" disabled={working} onClick={() => download([item.hash])}>Download</Button></Space>
+                                    <Space wrap><Button size="small" type="primary" disabled={working} onClick={() => copy([item.hash], true)}>Append for img2img</Button><Button size="small" disabled={working} onClick={() => copy([item.hash])}>Copy to input</Button><Button size="small" disabled={working} onClick={() => download([item.hash])}>Download</Button></Space>
                                     {copies[item.hash] && <Typography.Paragraph copyable style={{ fontSize: 11, wordBreak: 'break-all', marginTop: 8 }}>{copies[item.hash].input_name}</Typography.Paragraph>}
                                 </Card>
                             </Dropdown>)}
@@ -210,14 +210,14 @@ export function HydrusBrowser({ open, onClose }: { open: boolean; onClose: () =>
             </div>
             {tab === 'pages' && result && <Space style={{ marginTop: 12 }}><Button disabled={!result.offset || busy || working} onClick={() => read('page', pageKey, Math.max(0, (result.offset || 0) - limit))}>Previous</Button><span>Files {(result.offset || 0) + (result.total ? 1 : 0)}–{Math.min((result.offset || 0) + limit, result.total)} of {result.total}</span><Button disabled={!hasMore || busy || working} onClick={() => read('page', pageKey, (result.offset || 0) + limit)}>Next</Button></Space>}
             </div>
-        </Modal>
+        </Wrapper>
         <Modal title="Hydrus source image" open={!!details} onCancel={() => setDetails(undefined)}
             afterOpenChange={visible => { if (visible) detailsRef.current?.focus(); }}
             modalRender={node => <div onKeyDownCapture={event => handleKeys(event, true)}>{node}</div>} footer={<Space>
             <Button disabled={working || !details || items[0]?.hash === details.hash} onClick={() => browseDetails(-1)}>Previous image</Button>
             <Button disabled={working || !details || items[items.length - 1]?.hash === details.hash} onClick={() => browseDetails(1)}>Next image</Button>
             <Button disabled={working} onClick={() => { if (details) void download([details.hash]); }}>Download</Button>
-            <Button disabled={working} type="primary" onClick={() => { if (details) { void copy([details.hash], true); setDetails(undefined); } }}>Use for img2img</Button>
+            <Button disabled={working} type="primary" onClick={() => { if (details) { void copy([details.hash], true); setDetails(undefined); } }}>Append for img2img</Button>
         </Space>} zIndex={BASE_Z_INDEX + 40} width={720}>
             <div ref={detailsRef} tabIndex={0} aria-label="Hydrus source image controls">
             <Typography.Paragraph type="secondary">← → browse · Space select · D download · I img2img · Escape close</Typography.Paragraph>
@@ -234,3 +234,5 @@ export function HydrusBrowser({ open, onClose }: { open: boolean; onClose: () =>
         </Modal>
     </>;
 }
+
+function EmbeddedHydrus({ children, open }: any) { return open ? <section aria-label="Hydrus library">{children}</section> : null; }

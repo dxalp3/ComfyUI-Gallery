@@ -15,5 +15,7 @@ class GalleryNode:
     def gallery_node(self):
         return ()
 
-NODE_CLASS_MAPPINGS = {"GalleryNode": GalleryNode}
-NODE_DISPLAY_NAME_MAPPINGS = {"GalleryNode": "Gallery Button"}
+from .image_source import GalleryImageSource
+
+NODE_CLASS_MAPPINGS = {"GalleryNode": GalleryNode, "GalleryImageSource": GalleryImageSource}
+NODE_DISPLAY_NAME_MAPPINGS = {"GalleryNode": "Gallery Button", "GalleryImageSource": "Gallery Image Source"}

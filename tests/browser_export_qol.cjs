@@ -1,0 +1,65 @@
+const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
+const assert = require('node:assert/strict');
+(async () => {
+    const browser = await chromium.launch({ executablePath: process.env.CHROME_PATH, headless: true });
+    const page = await browser.newPage({ viewport: { width: 1600, height: 1100 } });
+    const errors = [], suggestions = [];
+    let exported;
+    page.on('pageerror', error => errors.push(error.message));
+    page.on('request', req => {
+        if (req.url().endsWith('/Gallery/hydrus/suggest')) suggestions.push(req.postDataJSON());
+        if (req.url().endsWith('/Gallery/hydrus/export')) exported = req.postDataJSON();
+    });
+    try {
+        await page.goto('http://127.0.0.1:8191');
+        await page.getByRole('button', { name: 'Open Gallery', exact: true }).click();
+        await page.getByRole('button', { name: /Hydrus settings/ }).click();
+        const settings = page.getByRole('dialog', { name: 'Hydrus connection', exact: true });
+        await page.waitForTimeout(400);
+        const prefix = settings.getByRole('switch', { name: 'Prefix positive-prompt tags by default' });
+        if (await prefix.getAttribute('aria-checked') === 'true') await prefix.click();
+        await settings.getByRole('combobox', { name: 'Default export tags', exact: true }).fill('char');
+        await page.getByRole('button', { name: 'Add all suggestions (3)', exact: true }).waitFor();
+        await settings.getByText('Client API URL', { exact: true }).click();
+        await settings.getByRole('button', { name: 'Save connection', exact: true }).click();
+        await page.waitForTimeout(400);
+        await page.getByRole('checkbox', { name: 'Select study-1.png', exact: true }).check();
+        await page.getByRole('button', { name: /Export to Hydrus \(1\)/ }).click();
+        const exp = page.getByRole('dialog', { name: 'Export to Hydrus · 1 image', exact: true });
+        await exp.waitFor();
+        await page.waitForTimeout(400);
+        await exp.getByRole('combobox', { name: 'Export tag service', exact: true }).press('ArrowDown');
+        await page.getByText('generation tags', { exact: true }).last().click();
+        const tags = exp.getByRole('combobox', { name: 'Additional Hydrus tags', exact: true });
+        await tags.fill('char');
+        await tags.press('ArrowDown');
+        await page.getByRole('button', { name: 'Add all suggestions (3)', exact: true }).click();
+        assert.equal(suggestions.at(-1).tag_service_key, 'f'.repeat(64));
+        await exp.getByRole('checkbox', { name: 'Add positive-prompt tags', exact: true }).check();
+        const exportPrefix = exp.getByRole('checkbox', { name: 'Prefix positive tags with positive_prompt:', exact: true });
+        assert.equal(await exportPrefix.isChecked(), false);
+        await exp.getByText('Review and edit prompt tags per image', { exact: true }).click();
+        await exp.getByText('azure sky', { exact: true }).waitFor();
+        await exportPrefix.check();
+        await exp.getByText('positive_prompt:azure sky', { exact: true }).waitFor();
+        await exportPrefix.uncheck();
+        await exp.getByText('azure sky', { exact: true }).waitFor();
+        const perImage = exp.getByRole('combobox', { name: 'Prompt tags for study-1.png', exact: true });
+        await perImage.fill('char');
+        await page.getByRole('button', { name: 'Add all suggestions (3)', exact: true }).waitFor();
+        await perImage.fill('');
+        await exp.getByText('Additional tags for this export', { exact: true }).click();
+        await exp.getByRole('button', { name: 'Export (1)', exact: true }).click();
+        await exp.getByText('1 of 1 processed · 1 succeeded · 0 failed', { exact: true }).waitFor();
+        assert.deepEqual(exported.tags, ['character:alice', 'character:alina', 'character:allen', 'azure sky', 'mountain']);
+        assert.equal(exported.send_metadata, false);
+        const saved = await (await page.request.get('http://127.0.0.1:8191/Gallery/hydrus/settings')).json();
+        assert.equal(saved.prefix_positive_prompt_tags, false);
+        assert.deepEqual(errors, []);
+        await page.request.post('http://127.0.0.1:8191/Gallery/hydrus/settings', { data: { prefix_positive_prompt_tags: true, default_tags: [] } });
+        console.log('PASS: recommendations in default/additional/per-image export fields, selected service scope, add-all suggestions, saved prefix default, per-export plain/prefixed preview and submitted plain tags.');
+    } catch (error) {
+        console.log((await page.locator('body').innerText()).slice(0, 11000));
+        throw error;
+    } finally { await browser.close(); }
+})().catch(error => { console.error(error); process.exit(1); });

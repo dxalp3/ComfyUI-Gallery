@@ -2,7 +2,7 @@
 
 This customized Gallery adds image export to your Hydrus client, persistent export history, and a cached view of the file's Hydrus metadata. Search local files by Hydrus tags or generation prompts, browse the main client's library and open pages, and bring source images into an img2img workflow. ComfyUI sends the original file directly to Hydrus, so the two applications can run on different computers.
 
-Version **2.7.1-hydrus.3** adds tag recommendations throughout the export controls, optional positive-prompt prefixes, and faster gallery updates and thumbnails.
+Version **2.7.1-hydrus.4** adds Gallery Image Source with cropping and stitching, a separate gallery browser tab, and Local / Hydrus / Both views in the main gallery.
 
 ## Install this customized version
 
@@ -129,12 +129,16 @@ Use **Refresh folder tags** to fetch current Hydrus metadata for every image in 
 
 ## Find source images for img2img
 
-Choose **Browse Hydrus** in the Gallery toolbar:
+Choose **Local**, **Hydrus**, or **Both** at the top of Gallery. Both shows separate local and Hydrus sections with their respective search controls and selections. **Browse Hydrus** also switches directly to the Hydrus section.
+
+Local search covers file names, cached Hydrus tags, and positive/negative prompts. Minimum width/height and format filters further narrow the current folder. Dimension filters exclude files without known image dimensions. Hydrus tag search accepts its `system:` predicates for other qualities.
+
+Hydrus controls:
 
 - **Search Hydrus:** enter tags and press Enter after each, or pick live tag recommendations as you type. Choose **All tags (AND)** or **Any tag (OR)**. In OR mode, any included ordinary tag can match; excluded tags (`-portrait`) and system predicates such as `system:inbox` still apply to every result. Namespaces and wildcards are supported. An empty search returns recent local images. Choose up to 200 results; use more specific tags to narrow a large collection.
 - **Select all suggestions for OR** adds the currently displayed recommendations and switches to OR mode. At most 50 recommendations appear at once; refine the text if more exist. Recommendations require both file-search and tag-edit permissions. Manual tag entry remains available if recommendations fail.
 - **Open client pages:** loads the main client's current page tree, including nested groups and the active page. Select a media page to see its images in the client's order. Use Previous/Next for large pages, **Reload open pages** after opening/closing tabs in Hydrus, and **Reload page images** after changing its contents. This view requires **Manage Pages** permission.
-- Select result checkboxes, Shift-click a range, or use **Select results** for bulk actions. Right-click a result for copy, download, metadata, and img2img actions. Copy and download apply to the selected group when the clicked image belongs to it.
+- Select result checkboxes, Shift-click a range, or use **Select results** for bulk actions. Right-click a result for copy, download, metadata, and img2img actions. Append, copy, and download apply to the selected group when the clicked image belongs to it.
 
 ### Download originals
 
@@ -166,7 +170,23 @@ Text inputs and menus keep their normal keyboard controls, including text select
 
 **Copy to input** downloads the original image into `ComfyUI/input/hydrus/<sha256>.<extension>`. Copies preserve the original bytes and embedded metadata. The download is verified against its Hydrus hash, existing copies are reused, and unrelated files are never overwritten. Originals are capped at 256 MiB per image. These local copies remain after restarting ComfyUI.
 
-**Use for img2img** copies the image and adds a **Load Image** node to the current workflow. Connect its IMAGE output to your img2img workflow (typically VAE Encode). It does not queue a generation. If the current ComfyUI frontend does not expose node creation, the image still gets copied: use the displayed, copyable `hydrus/...` name in a Load Image node, refreshing its file list or the browser if needed. The existing workflow stays intact.
+### Gallery Image Source: append, crop, and stitch
+
+1. Use **Append to Image Source** on a local image's context menu or the selection toolbar. For Hydrus use **Append for img2img**, **Append selected to Image Source**, or the `I` shortcut. Originals are copied to ComfyUI input first; local sources live in `input/gallery_sources`, Hydrus sources in `input/hydrus`.
+2. With no source node, the first append creates **Gallery Image Source**. Otherwise choose the destination in **Img2img target**. You can create another node in this selector. A single selected source node is used automatically if no target has been chosen; multiple possible targets require a choice. Bulk append goes to one node.
+3. Click **Edit images / crop / stitch** in Gallery or on the node. Select a source, drag a crop rectangle or enter pixel/percentage coordinates. Reset crop and common aspect ratios are available. Reorder or remove sources in the list.
+4. Choose Single, horizontal stitch, vertical stitch, or grid. Single uses the first source; stitch modes include every source. Set the gap, grid columns, and background color, then **Save to node**. **Browse / append images** saves your current draft and returns to Gallery.
+5. Connect the node's **IMAGE** output to **VAE Encode** or another image input. The node also outputs **MASK**, **width**, and **height**. No generation is queued automatically.
+
+Crops remove pixels. Stitching preserves each crop's original resolution and aligns it to the top-left of its cell without stretching. Source alpha is preserved; MASK is inverted alpha, with opaque background in gaps and unused cells. EXIF orientation is applied before cropping. Animated sources use the first frame. The editor preview is reduced to at most 1024 pixels; node output remains full size. Source-list thumbnails are cached at 512 pixels.
+
+A node accepts up to 32 sources, a 64-megapixel output, and a 32768-pixel maximum side; each input file is limited to 256 MiB. Existing source files are reused by content hash. A saved workflow retains its source list, crop, and layout; retain the corresponding `input/gallery_sources` and `input/hydrus` files when moving or backing up the workflow. The editor changes the workflow only when you save or browse. Appending changes it immediately. Cancel discards unsaved editor changes.
+
+### Open Gallery in another tab
+
+Use **Open in new tab** in Gallery (or the ↗ button beside the non-floating launcher). The separate `/Gallery/app` page supports the same browsing, searches, exports, downloads, and bulk actions. **Img2img target in opening tab** controls the active workflow in the ComfyUI tab that opened it. Keep that tab open; appends and editor commands are sent only to it, even if other ComfyUI tabs are open. The detached page's Edit button opens the node editor in the original tab; browsers may require switching tabs manually.
+
+Opening `/Gallery/app` directly supports browsing and copying to input. To append to a workflow, open it through ComfyUI's **Open in new tab** button. Reopen it that way if the original ComfyUI tab was refreshed or closed. Credentials remain in the server bridge. A separate tab listens for gallery updates without restarting the folder monitor; **Reload local images** is available for manual refresh.
 
 Search and page results show supported images stored locally in Hydrus; videos, deleted files, and remote-only records are excluded. Page membership comes from a snapshot of the main client's UI and can change as downloads or searches finish. The Gallery does not modify or focus Hydrus pages. See the [page API](https://hydrusnetwork.github.io/hydrus/developer_api.html#managing-pages) for Hydrus version details.
 

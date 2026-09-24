@@ -1,4 +1,34 @@
-# Validation — Hydrus edition 2.7.1-hydrus.3
+# Validation — Hydrus edition 2.7.1-hydrus.4
+
+## Image Source and unified gallery — 2026-09-24
+
+- Python: **63 passed, 2 skipped** (65 total). Existing Windows symlink privilege skips remain.
+- JavaScript: **17 passed** across `local_search.test.cjs` and `image_source.test.cjs`.
+- TypeScript compilation and the Vite production build passed. The generated frontend is committed. Existing bundle-size and third-party directive warnings remain.
+- Chrome integration passed against the real Gallery bridge and a simulated Hydrus server/ComfyUI graph: local bulk/range/context append; dedicated node creation; numeric crop; horizontal stitch preview dimensions; save/reopen; Local/Hydrus/Both views; Hydrus search, pages and selected context append; local size filtering; and standalone-tab append back to the opening workflow. No browser page errors or stored API keys were observed.
+- Export QoL regression covers recommendations, service selection, and optional positive-prompt prefixes.
+
+New Python coverage verifies cropped pixels and dimensions, stitch placement/gaps/background, alpha preservation, EXIF orientation, malformed settings, path traversal, pixel limits, changed-file detection, byte-identical local copies, duplicate reuse, no overwrite of unrelated files, reduced previews and source thumbnails, same-origin checks, and standalone entry routes.
+
+New JavaScript coverage verifies normalized crop geometry, encoded input paths, local quality filters, target selection, preserving existing crops/layout on append, removed-node validation, and the 32-source limit.
+
+These checks use a simulated ComfyUI graph, not an installed ComfyUI session or GPU workflow. Tensor execution depends on ComfyUI's NumPy/PyTorch runtime; actual image composition is verified using Pillow. No real Hydrus library was accessed. Check the node in the installed ComfyUI version after restarting and hard-refreshing.
+
+### Reproduce the new checks
+
+```sh
+python -m unittest discover -s tests -p 'test_*.py'
+node tests/local_search.test.cjs
+node tests/image_source.test.cjs
+cd web
+pnpm build
+```
+
+For browser integration, install Playwright separately (it is not a runtime dependency), start `python tests/gallery_browser_server.py`, then run `node tests/browser_image_source.cjs` and `node tests/browser_export_qol.cjs` in another terminal. The fixture binds localhost ports 8191 and 45870 and stores mock images/settings in a temporary directory. Set `PLAYWRIGHT_MODULE` to a Playwright module path if it is not resolvable normally, and optionally `CHROME_PATH` to a Chrome executable. Stop the fixture server afterwards. The browser test never contacts your Hydrus client.
+
+---
+
+# Earlier validation — Hydrus edition 2.7.1-hydrus.3
 
 Based on PanicTitan/ComfyUI-Gallery commit `74639e68846f64c9f561f3a7745529de76376a97`.
 

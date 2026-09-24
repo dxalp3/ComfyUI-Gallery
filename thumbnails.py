@@ -136,10 +136,10 @@ class ThumbnailService:
         return await asyncio.shield(task)
 
 
-def register_thumbnail_routes(routes, get_root, cache=None):
+def register_thumbnail_routes(routes, get_root, cache=None, route_path="/Gallery/thumbnail"):
     service = ThumbnailService(get_root, cache)
 
-    @routes.get("/Gallery/thumbnail")
+    @routes.get(route_path)
     async def thumbnail(request):
         try:
             url = request.query.get("url", "")

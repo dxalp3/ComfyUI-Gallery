@@ -1,0 +1,86 @@
+const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
+const assert = require('node:assert/strict');
+(async () => {
+    const browser = await chromium.launch({ executablePath: process.env.CHROME_PATH, headless: true });
+    const context = await browser.newContext({ viewport: { width: 1550, height: 1150 } });
+    const page = await context.newPage();
+    const errors = [];
+    context.on('page', p => p.on('pageerror', e => errors.push(e.message)));
+    page.on('pageerror', e => errors.push(e.message));
+    const base = process.env.GALLERY_QA_URL || 'http://127.0.0.1:8191';
+    const value = () => page.evaluate(() => JSON.parse(window.qaNodes[0].widgets.find(w => w.name === 'sources').value));
+    const choose = async (p, label, option) => {
+        await p.getByRole('combobox', { name: label, exact: true }).press('ArrowDown');
+        await page.getByTitle(option, { exact: true }).click();
+    };
+    try {
+        await page.goto(base);
+        await page.getByRole('button', { name: 'Open Gallery', exact: true }).click();
+        await page.getByRole('checkbox', { name: 'Select study-4.png', exact: true }).click();
+        await page.getByRole('checkbox', { name: 'Select study-2.png', exact: true }).click({ modifiers: ['Shift'] });
+        await page.getByRole('button', { name: 'Append to Image Source (3)', exact: true }).click();
+        await page.waitForFunction(() => window.qaNodes.length === 1 && JSON.parse(window.qaNodes[0].widgets[0].value).images.length === 3);
+        assert.equal(await page.evaluate(() => window.qaNodes[0].type), 'GalleryImageSource');
+        assert.equal((await value()).images.length, 3);
+        await page.getByRole('button', { name: 'Edit images / crop / stitch', exact: true }).click();
+        const editor = page.getByRole('dialog', { name: 'Gallery Image Source', exact: true });
+        await editor.getByAltText('Combined image preview').waitFor();
+        await editor.getByRole('spinbutton', { name: 'Crop width', exact: true }).fill('320');
+        await editor.getByRole('spinbutton', { name: 'Crop width', exact: true }).press('Tab');
+        await choose(editor, 'Composition layout', 'Stitch horizontally');
+        await editor.getByRole('spinbutton', { name: 'Stitch gap', exact: true }).fill('10');
+        await editor.getByRole('spinbutton', { name: 'Stitch gap', exact: true }).press('Tab');
+        if (process.env.GALLERY_QA_SCREENSHOT_ROOT) await page.screenshot({ path: process.env.GALLERY_QA_SCREENSHOT_ROOT + '/image-source-editor.png' });
+        await editor.getByRole('button', { name: 'Save to node', exact: true }).click();
+        let saved = await value();
+        assert.equal(saved.layout, 'horizontal'); assert.equal(saved.gap, 10); assert.equal(saved.images[0].crop.width, .5);
+        const preview = await page.request.post(base + '/Gallery/source/preview', { data: { manifest: saved } });
+        assert.equal(preview.status(), 200); assert.equal(preview.headers()['x-image-width'], '1620');
+        await page.getByRole('button', { name: 'Edit images / crop / stitch', exact: true }).click();
+        await editor.getByRole('spinbutton', { name: 'Crop width', exact: true }).waitFor();
+        assert.equal(await editor.getByRole('spinbutton', { name: 'Crop width', exact: true }).inputValue(), '320');
+        await editor.getByRole('button', { name: 'Browse / append images', exact: true }).click();
+        await page.getByText('Both', { exact: true }).click();
+        await page.getByRole('button', { name: 'Search', exact: true }).click();
+        await page.getByRole('button', { name: 'Select results (4)', exact: true }).click();
+        await page.getByRole('button', { name: 'Append selected to Image Source (4)', exact: true }).click();
+        await page.waitForFunction(() => JSON.parse(window.qaNodes[0].widgets[0].value).images.length === 7);
+        assert.equal(await page.getByRole('region', { name: 'Local gallery' }).count(), 1);
+        if (process.env.GALLERY_QA_SCREENSHOT_ROOT) await page.screenshot({ path: process.env.GALLERY_QA_SCREENSHOT_ROOT + '/both-gallery.png' });
+        await page.getByRole('tab', { name: 'Open client pages', exact: true }).click();
+        await page.getByText('Img2img references · active', { exact: true }).click();
+        await page.getByRole('button', { name: 'Select results (4)', exact: true }).waitFor();
+        // Context-menu append respects the remote bulk selection.
+        await page.getByRole('button', { name: 'Select results (4)', exact: true }).click();
+        await page.locator('[data-hydrus-result]').first().click({ button: 'right' });
+        await page.getByRole('menuitem', { name: 'Append for img2img', exact: true }).click();
+        await page.waitForFunction(() => JSON.parse(window.qaNodes[0].widgets[0].value).images.length === 11);
+        await page.getByText('Local', { exact: true }).click();
+        await page.getByRole('spinbutton', { name: 'Local minimum width', exact: true }).fill('1000');
+        await page.waitForTimeout(300);
+        assert.equal(await page.locator('.image-card').count(), 0);
+        await page.getByRole('spinbutton', { name: 'Local minimum width', exact: true }).fill('0');
+        await page.getByRole('button', { name: 'Clear selection', exact: true }).click();
+        await page.locator('.image-card').first().click({ button: 'right' });
+        await page.getByRole('menuitem', { name: 'Append to Image Source (1)', exact: true }).click();
+        await page.waitForFunction(() => JSON.parse(window.qaNodes[0].widgets[0].value).images.length === 12);
+        const popupEvent = page.waitForEvent('popup');
+        await page.getByRole('button', { name: 'Open in new tab', exact: true }).click();
+        const popup = await popupEvent;
+        await popup.waitForURL('**/Gallery/app');
+        await popup.getByRole('checkbox', { name: 'Select study-1.png', exact: true }).click();
+        await popup.getByRole('button', { name: 'Append to Image Source (1)', exact: true }).click();
+        await page.waitForFunction(() => JSON.parse(window.qaNodes[0].widgets[0].value).images.length === 13);
+        assert.equal(await page.evaluate(() => window.qaNodes.length), 1);
+        assert.equal(await popup.getByRole('dialog', { name: 'Gallery', exact: true }).count(), 0);
+        const storage = await page.evaluate(() => JSON.stringify(localStorage));
+        assert.ok(!storage.includes('a'.repeat(64)));
+        // Workflow serialization retains the hidden source widget, editor buttons are not serialized.
+        assert.equal(await page.evaluate(() => window.qaNodes[0].widgets[0].type), 'hidden');
+        assert.deepEqual(errors, []);
+        console.log('PASS: local bulk/range/context append, dedicated node, exact crop + stitch preview, save/reopen, Both source view, Hydrus search/pages/bulk context, quality filter, standalone tab append, no browser errors or stored key.');
+    } catch (error) {
+        console.error((await page.locator('body').innerText()).slice(-9000));
+        throw error;
+    } finally { await browser.close(); }
+})().catch(error => { console.error(error); process.exitCode = 1; });

@@ -159,3 +159,14 @@ export function matchesLocalImage(file: Pick<FileDetails, 'name' | 'metadata'>, 
         ((field === 'all' || field === 'positive') && contains(parsed.positive)) ||
         ((field === 'all' || field === 'negative') && contains(parsed.negative));
 }
+
+export type ImageQualities = { minWidth: number; minHeight: number; format: string };
+export function matchesImageQualities(file: FileDetails, quality: ImageQualities): boolean {
+    if (!quality.minWidth && !quality.minHeight && !quality.format) return true;
+    if (file.type !== 'image') return false;
+    const dimensions = String(file.metadata?.fileinfo?.resolution || '').match(/(\d+)\s*[x×]\s*(\d+)/);
+    if ((quality.minWidth || quality.minHeight) && !dimensions) return false;
+    if (dimensions && (Number(dimensions[1]) < quality.minWidth || Number(dimensions[2]) < quality.minHeight)) return false;
+    const extension = file.name.split('.').pop()?.toLowerCase().replace('jpeg', 'jpg');
+    return !quality.format || extension === quality.format;
+}
