@@ -34,12 +34,18 @@ const path = require('node:path');
   const clip=fs.readFileSync(path.join(__dirname,'fixtures/solid-colours.webm'));
   const hash='e'.repeat(64);
   await page.route('**/Gallery/hydrus/search',async route=>{const response=await route.fetch();const data=await response.json();data.items.push({hash,file_id:99,mime:'video/webm',is_local:true,width:16,height:16});data.total++;await route.fulfill({json:data});});
+  const poster=await (await page.request.get('http://127.0.0.1:8191/static_gallery/study-1.png')).body();
+  await page.route('**/Gallery/hydrus/thumbnail?**',async route=>{
+   if(new URL(route.request().url()).searchParams.get('hash')===hash) await route.fulfill({body:poster,contentType:'image/png'}); else await route.continue();
+  });
   await page.route('**/Gallery/hydrus/original?**',async route=>{
    if(new URL(route.request().url()).searchParams.get('hash')===hash) await route.fulfill({body:clip,contentType:'video/webm'}); else await route.continue();
   });
   await page.getByRole('button',{name:'Search',exact:true}).click();
   const remote=page.locator('[data-gallery-entry="hydrus:'+hash+'"]');
   await remote.getByText('▶ VIDEO',{exact:true}).waitFor();
+  await remote.getByRole('img').evaluate(image=>image.decode());
+  assert.ok(await remote.getByRole('img').evaluate(image=>image.naturalWidth>0));
   await remote.getByRole('checkbox').check();
   await remote.getByRole('img').dblclick();
   const viewer=page.getByRole('dialog',{name:/Gallery viewer/});await viewer.waitFor();
