@@ -1,5 +1,6 @@
+import { FolderRules } from './FolderRules';
 import Modal from 'antd/es/modal/Modal';
-import { Button, Flex, Input, Select, Switch, Typography } from 'antd';
+import { Button, Flex, Input, Select, Switch, Typography, message } from 'antd';
 import { useGalleryContext, type SettingsState } from './GalleryContext';
 import { useSetState } from 'ahooks';
 import { useEffect, useState } from 'react';
@@ -10,6 +11,7 @@ const GallerySettingsModal = () => {
     const { showSettings, setShowSettings, settings, setSettings } = useGalleryContext();
     // Staged (unsaved) settings
     const [staged, setStaged] = useSetState<SettingsState>(settings);
+    const [saving, setSaving] = useState(false);
     const [extInput, setExtInput] = useState("");
 
     // When modal opens, reset staged to current settings
@@ -21,11 +23,11 @@ const GallerySettingsModal = () => {
     }, [showSettings, settings, setStaged]);
 
     // Save staged settings to context and close
-    const handleSave = () => {
+    const handleSave = async () => {
         const exts = extInput.split(',').map(s => s.trim().replace(/^\./, '')).filter(s => s);
         const newSettings = { ...staged, scanExtensions: exts } as SettingsState;
-        setSettings(newSettings);
-        setShowSettings(false);
+        setSaving(true);
+        try { await setSettings(newSettings); setShowSettings(false); } catch (error) { message.error(String(error)); } finally { setSaving(false); }
     };
     // Cancel: just close modal (staged will reset on next open)
     const handleCancel = () => {
@@ -37,6 +39,8 @@ const GallerySettingsModal = () => {
             zIndex={BASE_Z_INDEX + 1}
             title={"Settings"}
             open={showSettings}
+            width={850}
+            styles={{ body: { maxHeight: '70vh', overflowY: 'auto', paddingRight: 8 } }}
             centered
             afterOpenChange={setShowSettings}
             onOk={handleSave}
@@ -54,7 +58,7 @@ const GallerySettingsModal = () => {
                     </Button>
                     <div>
                         <Button key="back" onClick={handleCancel}>Return</Button>
-                        <Button key="submit" type="primary" onClick={handleSave} style={{ marginLeft: 8 }}>Save</Button>
+                        <Button key="submit" loading={saving} type="primary" onClick={handleSave} style={{ marginLeft: 8 }}>Save</Button>
                     </div>
                 </div>
             )}
@@ -67,7 +71,7 @@ const GallerySettingsModal = () => {
                     <Typography.Title
                         level={5}
                     >
-                        Relative Path:
+                        Active gallery root (absolute path or relative to output):
                     </Typography.Title>
                     <Input
                         value={staged.relativePath}
@@ -75,6 +79,8 @@ const GallerySettingsModal = () => {
                     />
                 </div>
 
+                <div><Typography.Title level={5}>Extra local folders</Typography.Title><Select mode="tags" aria-label="Extra local folders" value={staged.extraFolders || []} onChange={extraFolders => setStaged({ extraFolders })} style={{ width: '100%' }} placeholder="Absolute folder path — Enter to add" /><Typography.Text type="secondary">Saved roots appear beside the folder selector and can be routing destinations.</Typography.Text></div>
+                <FolderRules settings={staged} change={value => setStaged(previous => ({ ...previous, ...value }))} />
                 <div>
                     <Typography.Title
                         level={5}

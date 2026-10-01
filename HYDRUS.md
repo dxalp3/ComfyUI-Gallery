@@ -296,12 +296,12 @@ There are two explicit ordering controls:
   time. **Search / folder order** preserves the server order and is the default
   in Hydrus-only mode. In Both it retains each source's order, local first.
 
-Use **Advanced OR groups → Add OR group** for expressions such as
+Use **Add OR group** beside the main tag field for expressions such as
 `portrait AND (blue eyes OR green eyes) AND (landscape OR city)`:
-put `portrait` in the normal tag input and create the two OR rows. Press Enter
-after each term. Rows are ANDed together; terms within a row are ORed. Negated
-tags and supported `system:` predicates can be included in a row. Remove empty
-rows before searching. The normal Any-tag mode still keeps exclusions and system
+put `portrait` in the normal tag input and create two OR chip groups. Press Enter
+after each term. Groups are ANDed together; terms within a group are ORed. Negated
+tags and supported `system:` predicates can be included in a group. Remove empty
+groups before searching. The normal Any-tag mode still keeps exclusions and system
 filters outside its OR group. Examples of system predicates:
 
 - `system:filetype = image/png`
@@ -322,3 +322,48 @@ Hydrus originals are hash-verified before inline display. Unsupported originals
 fall back to a clearly labelled thumbnail and remain downloadable. Metadata,
 export and Image Source dialogs remain available from the viewer. Existing local
 video, audio and 3D files can also be opened in the viewer.
+
+## Selection, local organization and prompt vocabulary (hydrus.7)
+
+The floating **Selection mode** toggle makes thumbnail clicks select/deselect;
+double-click opens the viewer and restores the selection from before that double
+click. Larger checkboxes, Shift ranges, Space/Enter and **Invert shown selection**
+also work. Selection mode remains active until you turn it off.
+
+Right-click offers **Delete local file(s)** for the targeted local selection,
+with a filename list and permanent-deletion confirmation. **Delete from Hydrus —
+send to trash** is a separate confirmation for remote selections. It uses the
+Hydrus [delete API's default trash operation](https://hydrusnetwork.github.io/hydrus/developer_api.html#add_files_delete_files),
+requires Import Files permission, and never requests physical deletion. Hydrus's
+own trash retention applies. Neither action deletes the other source's copies.
+
+In **Gallery settings**, save **Extra local folders** as absolute paths, then
+switch roots with **Local library root**. The backend serves and monitors one
+active root at a time, shared by gallery windows. **Local folder rules** match
+positive or negative prompt substrings, with All/Any terms and first-match order.
+Destinations must be subfolders of the current root or a saved extra root.
+**Preview moves** does not change files. Saving with **Automatically organize on
+scan** enabled applies rules to existing and newly scanned local images. The
+watcher waits for writes to settle; Reload retries deferred files. Destination
+trees are excluded from subsequent rules to prevent repeated moves. Existing
+destination names are skipped, never overwritten. Rules move image originals
+only, not sidecars, video files, or any file on the Hydrus server. Routing uses
+embedded API conditioning/text connections (including Prompt Library STRING
+prefixes), explicit positive/negative fields, or parameters text. Images without
+those embedded prompts do not match. Workflow-only prompt extraction remains
+available to the browser search index but is not used by folder rules.
+
+The local search box suggests comma/newline phrases from embedded prompts across
+the currently loaded root, with separate positive/negative labels and file counts.
+The index is held in browser memory and rebuilds when scanned metadata changes;
+it does not rewrite images. **Prompts & prefixes** browses and copies those phrases
+alongside the existing `comfyui-prompt-library` version 1/2 tags and prefixes. The
+adapter reads ComfyUI user data when exposed by its API, otherwise the node's
+browser-storage fallback. Use **Refresh library** after editing. Library data is
+read-only in the gallery; edit definitions through the Prompt Library node.
+
+Local `.mp4`, `.webm`, and `.mov` files use browser video previews and player
+controls. **Auto Play Videos** remains configurable. Actual playback depends on
+the container/codec supported by your browser; an unsupported viewer video shows
+a download fallback message. Hydrus search/page results remain image/animation
+only; Hydrus video browsing and video-to-Image-Source are not implemented.

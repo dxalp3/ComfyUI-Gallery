@@ -741,6 +741,20 @@ class HydrusBridge:
                 break
         return {"tags": tags[:limit], "has_more": len(tags) > limit}
 
+    async def trash(self, data):
+        settings = self.settings.load()
+        if data.get('target') != settings['url'] + '|' + settings['profile']:
+            raise HydrusError('Hydrus connection changed; reload before deleting.')
+        hashes = data.get('hashes')
+        if not isinstance(hashes, list) or not 1 <= len(hashes) <= MAX_BATCH_SIZE:
+            raise HydrusError('Select between 1 and 200 Hydrus files.')
+        hashes = list(dict.fromkeys(self.validate_hash(value) for value in hashes))
+        async with self.client_factory(settings) as client:
+            # Deliberately omit file-service parameters: the default sends to trash.
+            # "hydrus local file storage" would physically delete originals.
+            await client.request('POST', '/add_files/delete_files', json={'hashes': hashes, 'reason': 'Deleted from ComfyUI Gallery'})
+        return {'trashed': hashes}
+
     async def import_from_hydrus(self, data, get_input_root):
         digest = self.validate_hash(data.get("hash"))
         if get_input_root is None:
@@ -890,6 +904,8 @@ def register_hydrus_routes(routes, get_root, storage_dir=None, get_input_root=No
                     result = await bridge.browse(action, data)
                 elif action == "import":
                     result = await bridge.import_from_hydrus(data, get_input_root)
+                elif action == "trash":
+                    result = await bridge.trash(data)
                 else:
                     result = await bridge.batch(action, data)
             return web.json_response(result, headers={"Cache-Control": "no-store"})
@@ -900,7 +916,7 @@ def register_hydrus_routes(routes, get_root, storage_dir=None, get_input_root=No
 
     for method, path, action in (("get", "settings", "get_settings"), ("post", "settings", "save_settings"),
                                  ("post", "test", "test"), ("post", "status", "status"),
-                                 ("post", "services", "services"),
+                                 ("post", "services", "services"), ("post", "trash", "trash"),
                                  ("post", "export", "export"), ("post", "refresh", "refresh"),
                                  ("post", "search", "search"), ("post", "pages", "pages"),
                                  ("post", "suggest", "suggest"), ("get", "download", "download"), ("get", "original", "original"),

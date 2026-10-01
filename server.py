@@ -54,6 +54,7 @@ def save_settings_to_file(settings):
             json.dump(settings, f, indent=4)
     except Exception as e:
         gallery_log(f"Error saving settings: {e}")
+        raise
 
 
 def get_gallery_static_root():
@@ -75,6 +76,11 @@ register_hydrus_routes(PromptServer.instance.routes, get_gallery_static_root,
 register_thumbnail_routes(PromptServer.instance.routes, get_gallery_static_root)
 register_source_routes(PromptServer.instance.routes, get_gallery_static_root,
                        folder_paths.get_input_directory)
+
+from .local_library import register_library_routes, root_path, plan
+register_library_routes(PromptServer.instance.routes, get_gallery_static_root, load_settings,
+                        folder_paths.get_output_directory,
+                        lambda root: _scan_for_images(str(root), root.name, True, organize_files=False)[0])
 
 def sanitize_json_data(data):
     """Recursively sanitizes data to be JSON serializable."""
@@ -99,8 +105,15 @@ async def get_settings(request):
 
 @PromptServer.instance.routes.post("/Gallery/settings")
 async def save_settings(request):
+    from urllib.parse import urlsplit
+    origin = request.headers.get("Origin")
+    if request.headers.get("Sec-Fetch-Site") == "cross-site" or (origin and urlsplit(origin).netloc.lower() != request.host.lower()):
+        return web.Response(status=403, text="Cross-origin settings changes are not allowed")
     try:
         data = await request.json()
+        if not isinstance(data, dict): return web.Response(status=400, text="Settings must be an object")
+        try: plan(root_path(data.get('relativePath'), folder_paths.get_output_directory()), {}, data, folder_paths.get_output_directory())
+        except (ValueError, TypeError, AttributeError) as error: return web.Response(status=400, text=str(error))
         save_settings_to_file(data)
         return web.Response(text="Settings saved")
     except Exception as e:
@@ -167,7 +180,7 @@ async def get_gallery_images(request):
     scan_thread = threading.Thread(target=thread_target)
     scan_thread.start()
     # Wait result and process it.
-    result = result_queue.get() # BLOCKING call
+    result = await asyncio.to_thread(result_queue.get)
     return on_scan_complete(result)
 
 
@@ -240,38 +253,6 @@ async def stop_gallery_monitor(request):
 async def newSettings(request):
     # This route is no longer used
     return web.Response(status=200)
-
-@PromptServer.instance.routes.post("/Gallery/delete")
-async def delete_image(request):
-    """Endpoint to delete an image."""
-    from .gallery_config import gallery_log
-    try:
-        data = await request.json()
-        image_url = data.get("image_path")
-        if not image_url:
-            return web.Response(status=400, text="image_path is required")
-        if image_url.startswith("/static_gallery/"):
-            relative_path = image_url[len("/static_gallery/"):]
-
-        else:
-            return web.Response(status=400, text="Invalid image_path format")
-        static_route = next((r for r in PromptServer.instance.app.router.routes() if getattr(r, 'name', None) == 'static_gallery_placeholder'), None)
-        if static_route is not None:
-            static_dir = str(static_route.resource._directory)
-        else:
-            static_dir = folder_paths.get_output_directory()
-        full_image_path = os.path.normpath(os.path.join(static_dir, relative_path))
-        if not os.path.exists(full_image_path):
-            return web.Response(status=404, text=f"File not found: {full_image_path}")
-        real_full_path = os.path.realpath(full_image_path)
-        real_static_dir = os.path.realpath(static_dir)
-        if not os.path.commonpath([real_full_path, real_static_dir]) == real_static_dir:
-            return web.Response(status=403, text="Access denied: File outside of static directory")
-        os.remove(full_image_path)
-        return web.Response(text=f"Image deleted: {image_url}")
-    except Exception as e:
-        gallery_log(f"Error deleting image: {e}")
-        return web.Response(status=500, text=str(e))
 
 @PromptServer.instance.routes.post("/Gallery/move")
 async def move_image(request):

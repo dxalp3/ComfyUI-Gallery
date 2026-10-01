@@ -1,3 +1,4 @@
+import { hydrusRequest } from './HydrusApi';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Checkbox, Collapse, Dropdown, Empty, Input, Modal, Select, Space, Slider, Tooltip, Tag, Typography, message } from 'antd';
 import { AutoSizer } from 'react-virtualized';
@@ -6,8 +7,7 @@ import type { GridChildComponentProps } from 'react-window';
 function GalleryCell(props: GridChildComponentProps) { return props.data.render(props); }
 import { useGalleryContext } from './GalleryContext';
 import { useHydrus } from './HydrusContext';
-import { hydrusStatus } from './HydrusApi';
-import { BASE_PATH, BASE_Z_INDEX } from './ComfyAppApi';
+import { ComfyAppApi, BASE_PATH, BASE_Z_INDEX } from './ComfyAppApi';
 import { appendLocalImages } from './ImageSourceBridge';
 import { ModelViewer } from './ModelViewer';
 import { use3DThumbnail } from './GlobalModelRenderer';
@@ -21,12 +21,17 @@ function ModelThumbnail({ file }: { file: FileDetails }) {
     return thumbnail ? <img src={thumbnail} alt={file.name} style={{ width: '100%', height: '100%', objectFit: 'contain' }} /> : <div style={{ padding: 40, color: 'white' }}>3D · Open viewer</div>;
 }
 
-export function UnifiedGallery({ source, remote, selectedRemote, setSelectedRemote, copy, download, working, scope, active }: {
+export function UnifiedGallery({ source, remote, selectedRemote, setSelectedRemote, copy, download, working, scope, active, onTrashed }: {
+    onTrashed: (hashes: string[]) => void;
     source: string; remote: RemoteImage[]; selectedRemote: string[]; setSelectedRemote: React.Dispatch<React.SetStateAction<string[]>>;
     copy: (hashes: string[], append?: boolean) => Promise<void>; download: (hashes: string[]) => Promise<void>; working: boolean; scope: string; active: boolean;
 }) {
     const gallery = useGalleryContext();
     const hydrus = useHydrus();
+    const [selectionMode, setSelectionMode] = useState(false);
+    const [trashing, setTrashing] = useState<GalleryEntry[]>([]);
+    const [deleting, setDeleting] = useState<GalleryEntry[]>([]);
+    const lastClick = useRef<{ id: string; selected: boolean } | undefined>(undefined);
     const [tileSize, setTileSize] = useState(210);
     const [order, setOrder] = useState<GalleryOrder>('date');
     const [ascending, setAscending] = useState(false);
@@ -36,6 +41,7 @@ export function UnifiedGallery({ source, remote, selectedRemote, setSelectedRemo
     const [raw, setRaw] = useState(false);
     const [zoom, setZoom] = useState(1);
     const [actionBusy, setActionBusy] = useState(false);
+    const [mediaError, setMediaError] = useState(false);
     const [failedOriginal, setFailedOriginal] = useState<string>();
     const anchor = useRef<string | undefined>(undefined);
     const grid = useRef<FixedSizeGrid>(null);
@@ -59,9 +65,9 @@ export function UnifiedGallery({ source, remote, selectedRemote, setSelectedRemo
     const current = entries[index];
     const thumbnail = (entry: GalleryEntry) => entry.local ? `${BASE_PATH}/Gallery/thumbnail?url=${encodeURIComponent(entry.local.url)}&v=${entry.local.timestamp || 0}&root=${encodeURIComponent(gallery.settings.relativePath)}` : `${BASE_PATH}/Gallery/hydrus/thumbnail?hash=${entry.hash}&target=${encodeURIComponent(scope)}`;
     const original = (entry: GalleryEntry) => entry.local ? `${BASE_PATH}${entry.local.url}` : `${BASE_PATH}/Gallery/hydrus/original?hash=${entry.hash}&target=${encodeURIComponent(scope)}`;
-    useEffect(() => { setZoom(1); setFailedOriginal(undefined); }, [viewer]);
+    useEffect(() => { setZoom(1); setFailedOriginal(undefined); setMediaError(false); }, [viewer]);
     useEffect(() => { if (!active || (viewer && index < 0)) setViewer(undefined); }, [active, index, viewer]);
-    useEffect(() => { setViewer(undefined); }, [scope]);
+    useEffect(() => { setViewer(undefined); setTrashing([]); }, [scope]);
     const setSelection = (ids: Set<string>) => {
         gallery.setSelectedImages([...ids].filter(id => id.startsWith('local:')).map(id => id.slice(6)));
         setSelectedRemote([...ids].filter(id => id.startsWith('hydrus:')).map(id => id.slice(7)));
@@ -85,6 +91,8 @@ export function UnifiedGallery({ source, remote, selectedRemote, setSelectedRemo
         const list = targets(entry);
         const local = list.flatMap(item => item.local?.type === 'image' ? [item.local.url] : []);
         const hashes = list.flatMap(item => item.remote ? [item.remote.hash] : []);
+        if (key === 'trash') { setTrashing(list.filter(item => item.remote)); return; }
+        if (key === 'delete') { setDeleting(list.filter(item => item.local)); return; }
         if (key === 'select' && entry) return toggle(entry);
         if (key === 'info' && entry) { setInfo(entry); return; }
         if (key === 'metadata' && entry?.local) { hydrus.setDetailsUrl(entry.local.url); return; }
@@ -115,6 +123,8 @@ export function UnifiedGallery({ source, remote, selectedRemote, setSelectedRemo
         { key: 'download', label: 'Download original(s)' },
         ...(entry.local ? [{ key: 'export', label: 'Export local selection to Hydrus' }, { key: 'refresh', label: 'Refresh Hydrus status' }, { key: 'metadata', label: 'Hydrus metadata' }] : [{ key: 'copy', label: 'Copy Hydrus selection to input' }]),
         { key: 'info', label: 'View metadata' },
+        ...(targets(entry).some(item => item.remote) ? [{ key: 'trash', danger: true, label: `Delete from Hydrus — send to trash (${targets(entry).filter(item => item.remote).length})` }] : []),
+        ...(targets(entry).some(item => item.local) ? [{ key: 'delete', danger: true, label: `Delete local file(s) (${targets(entry).filter(item => item.local).length})` }] : []),
     ], onClick: ({ key }: { key: string }) => { void act(key, entry); } });
     const move = (step: number) => { const next = entries[index + step]; if (next) setViewer(next.id); };
     const closeViewer = () => {
@@ -134,10 +144,22 @@ export function UnifiedGallery({ source, remote, selectedRemote, setSelectedRemo
                                         grid.current?.scrollToItem({ rowIndex: Math.floor(nextIndex / count), columnIndex: nextIndex % count });
                                         requestAnimationFrame(() => document.querySelector<HTMLElement>('[data-gallery-entry="' + CSS.escape(next.id) + '"]')?.focus());
                                     } if (event.key === 'Enter') { event.preventDefault(); setViewer(entry.id); } if (event.key === ' ') { event.preventDefault(); toggle(entry, event.shiftKey); } }}>
-                                <div draggable={!!entry.local} onDragStart={event => { if (entry.local) { event.dataTransfer.setData('text/uri-list', original(entry)); event.dataTransfer.setData('custom', JSON.stringify({ name: entry.name, folder: gallery.currentFolder, type: entry.local.type, url: entry.local.url })); } }} style={{ height: 'calc(100% - 54px)', background: '#17191d', cursor: 'pointer' }} onClick={event => event.shiftKey || event.ctrlKey || event.metaKey ? toggle(entry, event.shiftKey) : setViewer(entry.id)}>
+                                <div draggable={!!entry.local && !selectionMode} onDragStart={event => { if (entry.local) { event.dataTransfer.setData('text/uri-list', original(entry)); event.dataTransfer.setData('custom', JSON.stringify({ name: entry.name, folder: gallery.currentFolder, type: entry.local.type, url: entry.local.url })); } }} style={{ height: 'calc(100% - 54px)', background: '#17191d', cursor: 'pointer' }} onClick={event => {
+                                    if (selectionMode) {
+                                        if (event.detail > 1) return;
+                                        lastClick.current = { id: entry.id, selected: selected.has(entry.id) };
+                                        toggle(entry, event.shiftKey);
+                                    } else if (event.shiftKey || event.ctrlKey || event.metaKey) toggle(entry, event.shiftKey);
+                                    else setViewer(entry.id);
+                                }} onDoubleClick={() => {
+                                    if (!selectionMode) return;
+                                    const previous = lastClick.current;
+                                    if (previous?.id === entry.id) { const next = new Set(selected); if (previous.selected) next.add(entry.id); else next.delete(entry.id); setSelection(next); }
+                                    setViewer(entry.id);
+                                }}>
                                     {entry.local?.type === '3d' ? <ModelThumbnail file={entry.local} /> : entry.local?.type === 'media' ? <video muted loop={gallery.settings.autoPlayVideos} autoPlay={gallery.settings.autoPlayVideos} preload="metadata" src={original(entry)} style={{ width: '100%', height: '100%', objectFit: 'contain' }} /> : entry.local?.type === 'audio' ? <div style={{ padding: 40, color: 'white' }}>AUDIO · Open viewer</div> : <img src={thumbnail(entry)} alt={entry.name} loading="lazy" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />}
                                 </div>
-                                <div style={{ padding: 6 }}><Checkbox aria-label={'Select ' + entry.name} checked={selected.has(entry.id)} disabled={disabled} onClick={event => toggle(entry, event.shiftKey)} /> <Tag color={entry.remote ? 'blue' : undefined}>{entry.source === 'local' ? 'Local' : 'Hydrus'}</Tag><Typography.Text ellipsis title={entry.name} style={{ maxWidth: '90%' }}>{entry.name}</Typography.Text></div>
+                                <div style={{ padding: 6 }}><Checkbox className="cg-file-checkbox" aria-label={'Select ' + entry.name} checked={selected.has(entry.id)} disabled={disabled} onClick={event => toggle(entry, event.shiftKey)} /> <Tag color={entry.remote ? 'blue' : undefined}>{entry.source === 'local' ? 'Local' : 'Hydrus'}</Tag><Typography.Text ellipsis title={entry.name} style={{ maxWidth: '90%' }}>{entry.name}</Typography.Text></div>
                             </div>
                         </Dropdown></div>;
                     };
@@ -150,6 +172,7 @@ export function UnifiedGallery({ source, remote, selectedRemote, setSelectedRemo
         if (focused && (key === 'd' || key === 'i')) { event.preventDefault(); event.stopPropagation(); void act(key === 'd' ? 'download' : 'source', focused); }
     };
     return <div className="cg-grid-layout" onKeyDown={shortcuts}>
+        <div className="cg-selection-float"><Button aria-pressed={selectionMode} type={selectionMode ? 'primary' : 'default'} onClick={() => setSelectionMode(value => !value)}>{selectionMode ? 'Selection mode ON' : 'Selection mode'}</Button>{selectionMode && <span>Click selects · Double-click opens</span>}</div>
         <div className="cg-grid-toolbar">
             <span className="cg-grid-summary">{entries.length.toLocaleString()} files{selected.size ? ' · ' + selected.size + ' selected' : ''}</span>
             <Select aria-label="Gallery order" value={order} onChange={setOrder} style={{ width: 155 }} options={[
@@ -159,13 +182,15 @@ export function UnifiedGallery({ source, remote, selectedRemote, setSelectedRemo
             {order === 'random' && <Button onClick={() => setSeed(value => value + 1)}>Reshuffle</Button>}
             <Tooltip title="Thumbnail size"><Slider aria-label="Thumbnail size" min={140} max={340} step={20} value={tileSize} onChange={setTileSize} style={{ width: 90, margin: '0 12px' }} /></Tooltip>
             <Button disabled={disabled || !entries.length} onClick={() => setSelection(new Set([...selected, ...entries.map(item => item.id)]))}>Select all shown ({entries.length})</Button>
-            <Tooltip title="Ctrl/Cmd+click toggles selection; Shift+click selects a range. Right-click for actions. Gallery order sorts loaded files; missing hashes sort last. Dates use local file time or Hydrus import time."><Button aria-label="Gallery help">?</Button></Tooltip>
+            <Tooltip title="Selection mode: click selects, double-click opens. Space selects; Enter opens. Ctrl/Cmd+click toggles selection; Shift+click selects a range. Right-click for actions. Gallery order sorts loaded files; missing hashes sort last. Dates use local file time or Hydrus import time."><Button aria-label="Gallery help">?</Button></Tooltip>
         </div>
         {selected.size > 0 && <div className="cg-selection">
             <strong>{selected.size} selected</strong><span>{selected.size - shownSelected.length ? (selected.size - shownSelected.length) + ' outside this view' : ''}</span>
             <Button disabled={disabled || !shownSelected.length} onClick={() => void act('source')}>Append to Image Source ({shownSelected.length})</Button>
             <Button disabled={disabled || !shownSelected.length} onClick={() => void act('download')}>Download selected</Button>
             <Button disabled={disabled || !shownSelected.some(item => item.local?.type === 'image')} onClick={() => void act('export')}>Export local selection to Hydrus</Button>
+            <Button disabled={disabled || !shownSelected.length} onClick={() => { const next = new Set(selected); entries.forEach(item => next.has(item.id) ? next.delete(item.id) : next.add(item.id)); setSelection(next); }}>Invert shown selection</Button>
+            <Button danger disabled={disabled || !shownSelected.some(item => item.local)} onClick={() => void act('delete')}>Delete local selected</Button>
             <div className="cg-spacer" /><Button disabled={disabled} onClick={() => setSelection(new Set())}>Clear selection</Button>
         </div>}
         <div style={{ flex: 1, minHeight: 120, position: 'relative' }} aria-label="Unified gallery">
@@ -180,7 +205,7 @@ export function UnifiedGallery({ source, remote, selectedRemote, setSelectedRemo
                 </FixedSizeGrid>;
             }}</AutoSizer>}
         </div>
-        <Modal title={current ? `Gallery viewer · ${index + 1} / ${entries.length} · ${current.name}` : 'Gallery viewer'} open={!!current && active} onCancel={closeViewer} width="96vw" zIndex={BASE_Z_INDEX + 10} footer={null}
+        <Modal className="cg-viewer" title={current ? `Gallery viewer · ${index + 1} / ${entries.length} · ${current.name}` : 'Gallery viewer'} open={!!current && active} onCancel={closeViewer} width="96vw" zIndex={BASE_Z_INDEX + 10} footer={null}
             afterOpenChange={opened => { if (opened) viewerRef.current?.focus(); }}>
             {current && <div ref={viewerRef} tabIndex={-1} onKeyDown={event => {
                 if ((event.target as HTMLElement).closest('input,textarea,select,button,[role="menu"],[role="combobox"]') || info) return;
@@ -189,17 +214,18 @@ export function UnifiedGallery({ source, remote, selectedRemote, setSelectedRemo
             }}>
                 <Space wrap style={{ marginBottom: 12 }}>
                     <Button disabled={index === 0} onClick={() => move(-1)}>Previous image</Button><Button disabled={index === entries.length - 1} onClick={() => move(1)}>Next image</Button>
-                    <Checkbox checked={selected.has(current.id)} disabled={disabled} onClick={event => toggle(current, event.shiftKey)}>Selected</Checkbox>
+                    <Checkbox className="cg-file-checkbox" checked={selected.has(current.id)} disabled={disabled} onClick={event => toggle(current, event.shiftKey)}>Selected</Checkbox>
                     <Button onClick={() => setZoom(value => Math.max(.25, value / 1.5))}>Zoom out</Button><Button onClick={() => setZoom(value => Math.min(8, value * 1.5))}>Zoom in</Button><Button onClick={() => setZoom(1)}>Fit</Button>
                     <Button onClick={() => setInfo(current)}>Metadata</Button><Button disabled={disabled} onClick={() => void act('source', current)}>Append for img2img</Button>
                     <span>{Math.round(zoom * 100)}% · Arrow keys browse · Space selects · Right-click for actions</span>
                 </Space>
                 <Dropdown trigger={['contextMenu']} disabled={disabled} menu={menu(current)}>
                     <div style={{ height: '62vh', overflow: 'auto', background: '#111', textAlign: 'center' }}>
-                        {current.local?.type === '3d' ? <ModelViewer url={original(current)} type={current.name.split('.').pop() || ''} /> : current.local?.type === 'media' ? <video key={current.id} controls autoPlay={gallery.settings.autoPlayVideos} src={original(current)} style={{ maxWidth: '100%', height: '100%' }} /> : current.local?.type === 'audio' ? <audio key={current.id} controls src={original(current)} /> :
+                        {current.local?.type === '3d' ? <ModelViewer url={original(current)} type={current.name.split('.').pop() || ''} /> : current.local?.type === 'media' ? <video onError={() => setMediaError(true)} key={current.id} controls autoPlay={gallery.settings.autoPlayVideos} src={original(current)} style={{ maxWidth: '100%', height: '100%' }} /> : current.local?.type === 'audio' ? <audio key={current.id} controls src={original(current)} /> :
                         <img key={current.id} src={failedOriginal === current.id ? thumbnail(current) : original(current)} alt={'Viewing ' + current.name} onError={() => setFailedOriginal(current.id)} style={{ height: zoom === 1 ? '100%' : `${zoom * 100}%`, maxWidth: zoom === 1 ? '100%' : 'none', objectFit: 'contain' }} />}
                     </div>
                 </Dropdown>
+                {mediaError && <Typography.Text type="warning">This browser cannot play this video or its codec. Download the original from the context menu to play it externally.</Typography.Text>}
                 {failedOriginal === current.id && <Typography.Text type="warning">Original could not be displayed; showing thumbnail. Download original is available in the context menu.</Typography.Text>}
                 <div aria-label="Viewer filmstrip" style={{ display: 'flex', gap: 6, overflowX: 'auto', marginTop: 10 }}>
                     {entries.slice(Math.max(0, index - 8), index + 9).map(entry => <Button key={entry.id} title={entry.name} aria-label={'View ' + entry.name} type={entry.id === viewer ? 'primary' : 'default'} onClick={() => setViewer(entry.id)} style={{ height: 65, minWidth: 80, borderColor: selected.has(entry.id) ? '#52c41a' : undefined }}>
@@ -208,6 +234,20 @@ export function UnifiedGallery({ source, remote, selectedRemote, setSelectedRemo
                 </div>
             </div>}
         </Modal>
+        <Modal title={`Send ${trashing.length} Hydrus file(s) to trash?`} open={!!trashing.length} onCancel={() => setTrashing([])} zIndex={BASE_Z_INDEX + 80} okText="Send to Hydrus trash" okButtonProps={{ danger: true }} confirmLoading={actionBusy} onOk={() => run(async () => {
+            const result = await hydrusRequest<{ trashed: string[] }>('trash', { hashes: trashing.map(entry => entry.hash), target: scope });
+            onTrashed(result.trashed); setSelectedRemote(old => old.filter(hash => !result.trashed.includes(hash))); setTrashing([]);
+            message.success(`Sent ${result.trashed.length} file(s) to Hydrus trash`);
+        })}><p>This removes the selected Hydrus files from its local file services and sends them to Hydrus trash. Your separate local gallery copies stay intact. Hydrus controls trash retention.</p></Modal>
+        <Modal title={`Delete ${deleting.length} local file(s)?`} open={!!deleting.length} onCancel={() => setDeleting([])} zIndex={BASE_Z_INDEX + 80} okText="Delete permanently" okButtonProps={{ danger: true }} confirmLoading={actionBusy} onOk={() => run(async () => {
+            const removed = new Set<string>();
+            for (const entry of deleting) if (entry.local && await ComfyAppApi.deleteImage(entry.local.url, gallery.settings.relativePath)) removed.add(entry.local.url);
+            gallery.setSelectedImages(old => old.filter(url => !removed.has(url)));
+            gallery.mutate(old => old ? { folders: Object.fromEntries(Object.entries(old.folders).map(([folder, files]) => [folder, Object.fromEntries(Object.entries(files).filter(([, file]) => !removed.has(file.url)))])) } : old);
+            if (removed.size !== deleting.length) message.error(`${deleting.length - removed.size} file(s) could not be deleted. Reload and try again.`);
+            else message.success(`Deleted ${removed.size} local file(s)`);
+            setDeleting([]);
+        })}><p>This permanently deletes these local originals. Files on the Hydrus server are untouched.</p><ul style={{ maxHeight: 240, overflow: 'auto' }}>{deleting.map(entry => <li key={entry.id}>{entry.local?.url}</li>)}</ul></Modal>
         <Modal title="Image metadata" open={!!info} onCancel={() => setInfo(undefined)} footer={null} width="85vw" zIndex={BASE_Z_INDEX + 60}>
             {info?.local ? <MetadataView image={info.local} onShowRaw={() => setRaw(true)} showRawMetadata={raw} setShowRawMetadata={setRaw} /> : <pre style={{ maxHeight: '70vh', overflow: 'auto', whiteSpace: 'pre-wrap' }}>{JSON.stringify(info?.remote, null, 2)}</pre>}
         </Modal>

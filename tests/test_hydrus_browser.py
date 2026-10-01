@@ -26,6 +26,7 @@ class BrowserTests(unittest.IsolatedAsyncioTestCase):
         self.original = buffer.getvalue()
         self.digest = hashlib.sha256(self.original).hexdigest()
         self.calls = []
+        self.trash_payload = None
         self.page_mode = 'nested'
         self.suggestion_payload = {'tags': [{'value': 'landscape', 'count': 12},
                                             {'value': 'landscape:mountain', 'count': 5}]}
@@ -38,6 +39,9 @@ class BrowserTests(unittest.IsolatedAsyncioTestCase):
                        'width': 16, 'height': 12, 'is_trashed': False}
 
         async def upstream(request):
+            if request.path == '/add_files/delete_files':
+                self.trash_payload = await request.json()
+                return web.Response(status=200)
             self.assertEqual(request.headers.get('Hydrus-Client-API-Access-Key'), 'ab' * 32)
             self.calls.append((request.path, dict(request.query)))
             if request.path == '/verify_access_key':
@@ -93,6 +97,18 @@ class BrowserTests(unittest.IsolatedAsyncioTestCase):
         response = await self.client.post('/Gallery/hydrus/' + endpoint, json=data)
         self.assertEqual(response.status, 200, await response.text())
         return await response.json()
+
+    async def test_trash_uses_default_domain_and_rejects_stale_connection(self):
+        settings = self.bridge.settings.load()
+        target = settings['url'] + '|' + settings['profile']
+        response = await self.client.post('/Gallery/hydrus/trash', json={'hashes': [self.digest], 'target': 'stale'})
+        self.assertEqual(response.status, 400)
+        self.assertIsNone(self.trash_payload)
+        response = await self.post('trash', {'hashes': [self.digest], 'target': target, 'file_service_key': 'must never forward'})
+        self.assertEqual(response['trashed'], [self.digest])
+        self.assertEqual(set(self.trash_payload), {'hashes', 'reason'})
+        response = await self.client.post('/Gallery/hydrus/trash', json={'hashes': ['bad'], 'target': target})
+        self.assertEqual(response.status, 400)
 
     async def test_grouped_or_and_sort_are_forwarded(self):
         await self.post('search', {'tags': ['portrait', '-bad'],

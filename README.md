@@ -1,6 +1,6 @@
 # ComfyUI Gallery
 
-## Hydrus edition — 2.7.1-hydrus.6
+## Hydrus edition — 2.7.1-hydrus.7
 
 This customized edition adds image export to the Hydrus Client API, persistent
 SHA-256 export history, cached Hydrus metadata, bulk actions, checkboxes, range
@@ -18,7 +18,13 @@ open Gallery in a separate browser tab. Bulk-append sources to **Gallery Image
 Source**, crop with pixel controls or a drag rectangle, and stitch horizontally,
 vertically, or in a grid for img2img. The compiled frontend is included.
 
-**New in hydrus.6:** a **Gallery workspace tab** beside ComfyUI's workflow tabs
+**New in hydrus.7:** larger selection checkboxes, a floating selection mode
+(click selects; double-click opens without changing selection), inline OR groups,
+source-specific delete actions, local prompt suggestions and a shared view of
+Prompt Library tags/prefixes. Gallery settings now provide saved extra roots and
+optional prompt-based folder rules with a move preview and collision protection.
+
+A **Gallery workspace tab** beside ComfyUI's workflow tabs
 opens a full-width, non-modal grid. Click a workflow tab or **Workflow** to return
 to the canvas; gallery selection, filters and scroll position are retained.
 Compact controls, an adjustable thumbnail size, and selection-only bulk actions

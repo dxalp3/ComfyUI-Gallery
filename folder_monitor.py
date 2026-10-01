@@ -27,9 +27,11 @@ class GalleryEventHandler(PatternMatchingEventHandler):
         self.extensions = extensions
         self.deduplicate_symlinks = deduplicate_symlinks
         self.last_known_folders = {} # Ensure last_known_folders is initialized empty
+        self.stopped = threading.Event()
 
     def on_any_event(self, event):
         """Handles events, including symlinks, with debouncing and duplicate prevention."""
+        if self.stopped.is_set(): return
         if event.is_directory:
             return
 
@@ -59,14 +61,19 @@ class GalleryEventHandler(PatternMatchingEventHandler):
 
     def debounce_event(self):
         """Debounces the file system event."""
+        if self.stopped.is_set(): return
         if self.debounce_timer and self.debounce_timer.is_alive():
             self.debounce_timer.cancel()
 
-        self.debounce_timer = threading.Timer(self.debounce_interval, self.rescan_and_send_changes)
+        from .local_library import routing_enabled
+        delay = max(2.5, self.debounce_interval) if routing_enabled(self.base_path) else self.debounce_interval
+        self.debounce_timer = threading.Timer(delay, self.rescan_and_send_changes)
+        self.debounce_timer.daemon = True
         self.debounce_timer.start()
 
     def rescan_and_send_changes(self):
         """Rescans, detects changes, sends updates, now thread-safe."""
+        if self.stopped.is_set(): return
         if self.running_scan:
             gallery_log("Another scan is running, skipping")
             return
@@ -97,6 +104,7 @@ class GalleryEventHandler(PatternMatchingEventHandler):
             try:
 
                 result = self.result_queue.get()  # Use get - BLOCKING
+                if self.stopped.is_set(): return
 
                 if isinstance(result, Exception):
                     gallery_log(f"FileSystemMonitor: Error during scan: {result}")
@@ -155,10 +163,12 @@ class FileSystemMonitor:
         # Do NOT perform a blocking scan in __init__ to avoid startup freeze.
         # Initial scan will be performed in the observer thread.
         self.thread = None
+        self.stopped = self.event_handler.stopped
 
     def start_monitoring(self):
         """Starts the Watchdog observer."""
         if self.thread is None or not self.thread.is_alive():
+            self.stopped.clear()
             self.thread = threading.Thread(target=self._start_observer_thread, daemon=True)
             self.thread.start()
             gallery_log("FileSystemMonitor: Watchdog monitoring thread started.")
@@ -176,18 +186,22 @@ class FileSystemMonitor:
         except Exception as e:
             gallery_log(f"FileSystemMonitor: Error during initial scan: {e}")
 
+        if self.stopped.is_set(): return
         self.observer.schedule(self.event_handler, self.base_path, recursive=True)
         self.observer.follow_directory_symlinks = True  # Ensure symlinks are followed
         self.observer.start()
+        from .local_library import routing_enabled
+        if routing_enabled(self.base_path): self.event_handler.debounce_event()
         try:
-            while True:
-                time.sleep(0.1)
+            self.stopped.wait()
         except KeyboardInterrupt:
             self.stop_monitoring()
 
     def stop_monitoring(self):
         """Stops the Watchdog observer."""
-        if self.thread and self.thread.is_alive():
+        self.stopped.set()
+        if self.event_handler.debounce_timer: self.event_handler.debounce_timer.cancel()
+        if self.thread:
             self.observer.stop()
             if self.observer.is_alive():
                 self.observer.join()

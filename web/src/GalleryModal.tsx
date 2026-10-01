@@ -1,3 +1,4 @@
+import { LocalPromptSearch } from './LocalPromptLibrary';
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Button, Dropdown, Input, Modal, Segmented, Select, Space, message, theme } from 'antd';
@@ -68,8 +69,9 @@ const GalleryModal = () => {
             </header>
             <div className="cg-filters">
                 {source !== 'hydrus' && <>
+                    {gallery.settings.extraFolders?.length > 0 && <Select aria-label="Local library root" value={gallery.settings.relativePath} style={{ width: 190 }} onChange={relativePath => { void gallery.setSettings({ ...gallery.settings, relativePath }).catch(error => message.error(String(error))); }} options={[...new Set(['./', gallery.settings.relativePath, ...gallery.settings.extraFolders])].map(value => ({ value, label: value === './' ? 'ComfyUI output' : value }))} />}
                     <Select aria-label="Local folder" value={gallery.currentFolder} onChange={gallery.setCurrentFolder} style={{ width: 180 }} options={Object.keys(gallery.data?.folders || {}).map(value => ({ value, label: value || 'Root folder' }))} />
-                    <Input aria-label="Filter local files" placeholder="Search files, prompts or cached tags…" value={gallery.searchFileName} onChange={event => gallery.setSearchFileName(event.target.value)} className="cg-search" allowClear />
+                    <LocalPromptSearch />
                     <Button aria-label="Filters & tools" icon={<FilterOutlined />} onClick={() => setTools(true)}>Filters & tools</Button>
                 </>}
                 {source !== 'local' && <Button type={searchOpen ? 'primary' : 'default'} onClick={() => setSearchOpen(value => !value)}>{searchOpen ? 'Hide Hydrus search' : 'Search Hydrus'}</Button>}

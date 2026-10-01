@@ -29,5 +29,15 @@ export const galleryStyles = `
 .cg-workspace .ant-segmented-item-selected { background:var(--cg-control); color:var(--cg-text); }
 .cg-workspace [data-gallery-entry] { background:var(--cg-control); transition:border-color .12s; }
 .cg-workspace [data-gallery-entry]:hover { border-color:var(--cg-accent) !important; }
+.cg-grid-layout { position:relative; }
+.cg-selection-float { position:absolute; bottom:22px; right:26px; z-index:5; display:flex; align-items:center; gap:10px; padding:8px 12px; border:1px solid var(--cg-border); border-radius:24px; background:var(--cg-control); box-shadow:0 4px 20px #0006; }
+.cg-selection-float span { font-size:12px; color:var(--cg-muted); }
+.cg-workspace .cg-file-checkbox { min-width:34px; min-height:34px; display:inline-flex; align-items:center; justify-content:center; margin:-3px 3px -3px -3px; }
+.cg-workspace .cg-file-checkbox .ant-checkbox-inner { width:24px; height:24px; border-width:2px; }
+.cg-workspace .cg-file-checkbox .ant-checkbox-inner:after { width:7px; height:12px; }
+.cg-viewer .cg-file-checkbox { min-height:34px; }
+.cg-viewer .cg-file-checkbox .ant-checkbox-inner { width:24px; height:24px; border-width:2px; }
+.cg-viewer .cg-file-checkbox .ant-checkbox-inner:after { width:7px; height:12px; }
+.cg-workspace [data-gallery-entry]:focus-visible { outline:3px solid var(--cg-accent); outline-offset:-3px; }
 @media(max-width:750px) { .cg-header { gap:8px; padding:10px; flex-wrap:wrap; } .cg-brand { margin-right:0; font-size:16px; } .cg-filters { padding:10px 10px 0; } .cg-browser { padding:0 4px 6px; } }
 `;

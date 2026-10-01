@@ -138,13 +138,13 @@ export const ComfyAppApi = {
             return false;
         }
     },
-    deleteImage: async (imagePath: string) => {
+    deleteImage: async (imagePath: string, root?: string) => {
         // Confirmation should be handled in the UI before calling this method
         try {
             const response = await app.api.fetchApi("/Gallery/delete", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ image_path: imagePath })
+                body: JSON.stringify({ image_path: imagePath, root })
             });
             if (response.ok) {
                 console.log(`Image deleted: ${imagePath}`);
@@ -168,12 +168,9 @@ export const ComfyAppApi = {
         return {};
     },
     saveSettings: async (settings: any) => {
-        try {
-            await app.api.fetchApi("/Gallery/settings", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(settings)
-            });
-        } catch(e) { console.error(e); }
+        const response = await app.api.fetchApi("/Gallery/settings", {
+            method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(settings)
+        });
+        if (!response.ok) throw new Error(await response.text());
     },
 };

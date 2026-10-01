@@ -131,3 +131,9 @@ test('local search is case-insensitive and field-specific, including namespaced 
     assert.equal(matchesLocalImage(file, 'character:Alice', 'all', tags), true);
     assert.equal(matchesLocalImage(file, ' ', 'all', tags), true);
 });
+
+
+test('Prompt Library STRING prefix is indexed through its encoder connection', () => {
+    const metadata = {prompt: {'1': {inputs:{positive:['2',0]}}, '2': {class_type:'CLIPTextEncode',inputs:{text:['3',0]}}, '3': {class_type:'PromptLibrary',inputs:{prefix:'soft light, portrait'}}}};
+    assert.deepEqual(extractLocalPrompts(metadata), {positive:'soft light, portrait',negative:''});
+});

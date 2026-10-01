@@ -32,7 +32,7 @@ const encoderTextInputs: Record<string, string[]> = {
 };
 
 function isPromptInput(name: string, nodeType: string): boolean {
-    return /^(text(?:_\w+)?|prompt(?:_\w+)?|wildcard(?:_text)?|populated_text|value|string|conditioning(?:_\w+)?|conditioning\d*)$/i.test(name)
+    return /^(text(?:_\w+)?|prompt(?:_\w+)?|wildcard(?:_text)?|populated_text|prefix|value|string|conditioning(?:_\w+)?|conditioning\d*)$/i.test(name)
         || !!encoderTextInputs[nodeType]?.includes(name);
 }
 

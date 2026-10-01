@@ -28,7 +28,6 @@ const assert = require('node:assert/strict');
   assert.equal(await page.getByRole('checkbox',{name:'Select study-3.png',exact:true}).isChecked(),true);
   await page.getByText('Both',{exact:true}).click();
   await choose('Hydrus search order','Pixel hash');
-  await page.getByText('Advanced OR groups (0)',{exact:true}).click();
   await page.getByRole('button',{name:'Add OR group',exact:true}).click();
   const group=page.getByRole('combobox',{name:'OR group 1',exact:true});
   await group.fill('blue eyes');await group.press('Enter');await group.fill('green eyes');await group.press('Enter');await group.press('Escape');
@@ -68,7 +67,7 @@ const assert = require('node:assert/strict');
   await page.getByRole('button',{name:'Select all shown (4)',exact:true}).waitFor();
   // Local prompt filter stays authoritative when advanced tools mount.
   await page.locator('.ant-segmented-item').filter({hasText:'Local'}).click();
-  await page.getByRole('textbox',{name:'Filter local files',exact:true}).fill('winter');
+  await page.getByRole('combobox',{name:'Filter local files',exact:true}).fill('winter');
   await page.waitForFunction(()=>document.querySelectorAll('[data-gallery-entry]').length===1);
   await page.getByRole('button',{name:'Filters & tools',exact:true}).click();
   assert.equal(await page.getByRole('combobox',{name:'Search local images',exact:true}).inputValue(),'winter');
@@ -79,4 +78,3 @@ const assert = require('node:assert/strict');
  } catch(error) { if(process.env.GALLERY_QA_SCREENSHOT) await page.screenshot({path:process.env.GALLERY_QA_SCREENSHOT,fullPage:true});throw error; }
  finally {await browser.close();}
 })().catch(error=>{console.error(error);process.exit(1);});
-

@@ -144,3 +144,29 @@ ComfyUI and Hydrus were not connected for these checks. The tab integration
 depends on the frontend tab-bar markup; sidebar and floating launchers provide
 access when that container is unavailable. Synthetic-library checks validate
 rendering and state retention, not real storage scanning or Hydrus throughput.
+
+## Selection, prompt library and local routing — 2026-10-01 (hydrus.7)
+
+- Python suite: **76 passed, 2 skipped** (78 tests). New coverage verifies preview
+  versus apply, real scanner integration, prompt-prefix connections, polarity,
+  All/Any routing, first-match order, saved extra roots, destination traversal,
+  collisions, new-file deferral, failed-copy preservation, delete root/origin
+  checks, and Hydrus trash payloads with no physical-deletion service parameters.
+- All **22 JavaScript helper tests**, TypeScript compilation, and the production
+  build passed. The updated bundle is included; existing bundle warnings remain.
+- `browser_gallery_qol.cjs` passed in headless Chrome: larger selection targets,
+  single/double-click selection behavior, viewer selection retention, local delete
+  cancel/apply, Hydrus trash confirmation, indexed prompt suggestions, shared
+  Prompt Library browser data, folder-rule previews, and actual VP8/WebM decoding
+  and viewer controls using an original 352-byte synthetic fixture.
+- Unified gallery, Image Source and 10,000-file workspace browser regressions
+  passed, including inline OR request payloads, source mixing, crop/stitch,
+  selection/scroll retention, light mode and fallback access.
+
+Browser file mutations use intercepted responses; Python endpoint and routing
+tests exercise real temporary files and fake Hydrus servers. No installed
+ComfyUI folder, actual image library, saved prefix library, or live Hydrus server
+was modified. The Prompt Library adapter was checked against the supplied node's
+source and its version-2 browser-data format; actual installed user-data API
+integration and other video codecs were not exercised. Routing intentionally
+does not infer missing prompts or move sidecars.

@@ -35,7 +35,7 @@ def _extract_metadata_safe(full_path):
         print(f"Gallery Node: Error building metadata for {full_path}: {e}")
         return (full_path, {})
 
-def _scan_for_images(full_base_path, base_path, include_subfolders, allowed_extensions=None, deduplicate_symlinks=True):
+def _scan_for_images(full_base_path, base_path, include_subfolders, allowed_extensions=None, deduplicate_symlinks=True, organize_files=True):
     """Scans directories for files matching allowed extensions."""
     if allowed_extensions is None:
         allowed_extensions = DEFAULT_EXTENSIONS
@@ -147,4 +147,13 @@ def _scan_for_images(full_base_path, base_path, include_subfolders, allowed_exte
                 except Exception as e:
                     print(f"Gallery Node: Error in metadata thread for {filename}: {e}")
 
+    if organize_files:
+        from .local_library import auto_organize
+        try:
+            results = auto_organize(full_base_path, folders_data)
+            changed = any(row.get("moved") for row in results)
+            for row in results:
+                if row.get("error"): print("Gallery routing:", row["url"], row["error"])
+        except (ValueError, OSError, TypeError) as error:
+            print("Gallery routing:", error)
     return folders_data, changed

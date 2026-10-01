@@ -32,6 +32,9 @@ function getImages(): Promise<FilesTree> {
 
 export interface SettingsState {
     relativePath: string;
+    extraFolders: string[];
+    autoOrganize: boolean;
+    routingRules: { name: string; terms: string[]; field: string; match: string; folder: string; destinationRoot?: string; enabled?: boolean }[];
     buttonBoxQuery: string;
     buttonLabel: string;
     showDateDivider: boolean;
@@ -51,6 +54,7 @@ export interface SettingsState {
 
 export const DEFAULT_SETTINGS: SettingsState = {
     relativePath: './',
+    extraFolders: [], autoOrganize: false, routingRules: [],
     buttonBoxQuery: 'div.flex.gap-2.mx-2',
     buttonLabel: 'Open Gallery',
     showDateDivider: true,
@@ -111,7 +115,7 @@ export interface GalleryContextType {
     autoCompleteOptions: NonNullable<AutoCompleteProps['options']>;
     setAutoCompleteOptions: React.Dispatch<React.SetStateAction<NonNullable<AutoCompleteProps['options']>>>;
     settings: SettingsState;
-    setSettings: (v: SettingsState) => void;
+    setSettings: (v: SettingsState) => Promise<void>;
     selectedImages: string[];
     setSelectedImages: React.Dispatch<React.SetStateAction<string[]>>;
     selectImage: (url: string, range?: boolean) => void;
@@ -204,24 +208,25 @@ export function GalleryProvider({ children }: { children: React.ReactNode }) {
 
     // Watch for changes to settingsState.relativePath, disableLogs, usePollingObserver and update monitoring and data
     // Start monitoring when settings change
-    const saveSettings = useCallback((newSettings: SettingsState) => {
+    const saveSettings = useCallback(async (newSettings: SettingsState) => {
+        await ComfyAppApi.saveSettings(newSettings);
         setSettings(newSettings);
-        ComfyAppApi.saveSettings(newSettings);
     }, [setSettings]);
 
     useEffect(() => {
         if (settingsLoaded && settingsState?.relativePath) {
             setCurrentFolder("");
-            if (!STANDALONE) ComfyAppApi.startMonitoring(
+            const start = ComfyAppApi.startMonitoring(
                 settingsState.relativePath,
                 settingsState.disableLogs,
                 settingsState.usePollingObserver,
                 settingsState.scanExtensions,
                 settingsState.deduplicateSymlinks
             );
-            void runAsync().catch(() => {});
+            setSelectedImages([]);
+            void start.then(() => runAsync()).catch(() => {});
         }
-    }, [settingsLoaded, settingsState?.relativePath, settingsState?.disableLogs, settingsState?.usePollingObserver, JSON.stringify(settingsState?.scanExtensions), settingsState?.deduplicateSymlinks]);
+    }, [settingsLoaded, settingsState?.relativePath, settingsState?.disableLogs, settingsState?.usePollingObserver, JSON.stringify(settingsState?.scanExtensions), settingsState?.deduplicateSymlinks, settingsState?.autoOrganize, JSON.stringify(settingsState?.routingRules)]);
 
     // Keep the complete folder available to Hydrus status lookup even when a search hides its files.
     const currentFolderFiles = data?.folders?.[currentFolder];
