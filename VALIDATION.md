@@ -170,3 +170,29 @@ was modified. The Prompt Library adapter was checked against the supplied node's
 source and its version-2 browser-data format; actual installed user-data API
 integration and other video codecs were not exercised. Routing intentionally
 does not infer missing prompts or move sidecars.
+
+## Shared search, Hydrus video and Danbooru filtering — 2026-10-01 (hydrus.8)
+
+- Backend: 81 tests, 79 passed and 2 skipped. Added mixed-media filtering,
+  verified WebM byte/suffix ranges and invalid-range handling, output download
+  reuse/collision protection, downloaded-file tag correspondence, and offline
+  Danbooru filtering of quality terms and weighted prompts.
+- All 23 JavaScript helper tests pass, including source-specific AND/OR branches,
+  exclusions, cached tag matching and normalized weighted prompt phrases.
+- TypeScript compilation and production build pass. The compiled bundle is
+  included. Existing bundle-size and react-virtualized directive warnings remain.
+- Five Chrome suites pass: gallery QoL, unified gallery, Image Source, 10,000-file
+  workspace, and the new library-search suite. They cover automatic checkbox
+  selection, retained double-click selection, stacked local terms, counted Hydrus
+  suggestions, empty-Enter search, popup OR suggestions, mixed-source queries,
+  synthetic remote WebM decoding, output-download requests, cached-tag local
+  search and Danbooru export preview. The large-grid suite retains over 76% of
+  viewport height and verifies responsive/light-theme layouts.
+
+All verification used temporary files and simulated Hydrus services. The installed
+ComfyUI and real Hydrus libraries were not modified or tested. Remote playback
+was exercised with the tiny synthetic WebM fixture; other codecs and large-video
+latency remain environment-dependent. Download integrity/ranges and file writes
+are checked by backend tests; browser download actions are intercepted. Dictionary
+provenance is recorded in data/. Shared searches match local phrases, not Hydrus
+system predicates. Tag memory is a refreshable snapshot, not two-way editing.

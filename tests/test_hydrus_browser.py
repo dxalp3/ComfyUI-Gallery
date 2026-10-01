@@ -62,12 +62,12 @@ class BrowserTests(unittest.IsolatedAsyncioTestCase):
                 for predicate in predicates:
                     if isinstance(predicate, str) and predicate.startswith('system:filetype'):
                         formats = [part.strip() for part in predicate.split('=', 1)[1].split(',')]
-                        if any(value not in {'image', 'animation'} for value in formats):
+                        if any(value not in {'image', 'animation', 'video'} for value in formats):
                             return web.Response(status=400, text='Could not parse filetype predicate')
                 return web.json_response(self.search_payload)
             if request.path == '/get_files/file_metadata':
-                # Mixed video and image results verify image-only filtering.
-                return web.json_response({'metadata': [dict(self.record, file_id=13, mime='video/mp4'), self.record]})
+                # Mixed media retain videos but exclude unsupported documents.
+                return web.json_response({'metadata': [self.record, dict(self.record, hash='e' * 64, file_id=13, mime='video/mp4'), dict(self.record, hash='d' * 64, mime='application/pdf')]})
             if request.path == '/manage_pages/get_pages':
                 return web.json_response({'pages': {'pages': [{'name': 'References', 'page_key': 'cd' * 32, 'is_media_page': True}]}})
             if request.path == '/manage_pages/get_page_info':
@@ -142,15 +142,15 @@ class BrowserTests(unittest.IsolatedAsyncioTestCase):
         response = await self.client.get('/Gallery/hydrus/original?hash=' + 'f' * 64)
         self.assertEqual(response.status, 400)
 
-    async def test_search_filters_images_and_bounds_query(self):
+    async def test_search_retains_video_excludes_documents_and_bounds_query(self):
         result = await self.post('search', {'tags': ['landscape', '-portrait'], 'limit': 10})
-        self.assertEqual([item['hash'] for item in result['items']], [self.digest])
+        self.assertEqual([item['hash'] for item in result['items']], [self.digest, 'e' * 64])
         params = next(query for endpoint, query in self.calls if endpoint.endswith('search_files'))
         self.assertIn('system:limit=10', json.loads(params['tags']))
         self.assertIn('-portrait', json.loads(params['tags']))
         self.assertEqual(params['file_sort_asc'], 'false')
         self.assertEqual(params['return_file_ids'], 'true')
-        self.assertIn('system:filetype = image, animation', json.loads(params['tags']))
+        self.assertIn('system:filetype = image, animation, video', json.loads(params['tags']))
 
     async def test_connection_probes_image_search_and_services_independently(self):
         result = await self.post('test', {})
@@ -158,7 +158,7 @@ class BrowserTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result['capabilities'], {'search': {'ok': True}, 'services': {'ok': True}})
         self.assertEqual(result['services'][0]['name'], 'my tags')
         query = next(query for path, query in self.calls if path.endswith('search_files'))
-        self.assertEqual(json.loads(query['tags']), ['system:filetype = image, animation', 'system:limit=1'])
+        self.assertEqual(json.loads(query['tags']), ['system:filetype = image, animation, video', 'system:limit=1'])
         self.assertFalse(any(path.endswith('file_metadata') for path, _ in self.calls))
 
     async def test_connection_reports_failed_search_without_hiding_working_services(self):
@@ -332,6 +332,41 @@ class BrowserTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await response.read(), self.original)
         self.assertEqual(response.headers['Content-Disposition'], 'attachment; filename="' + digest + '.bin"')
         self.assertEqual(response.headers['Content-Type'], 'application/octet-stream')
+
+    async def test_video_original_ranges_and_invalid_range(self):
+        self.original = (Path(__file__).parent / 'fixtures/solid-colours.webm').read_bytes()
+        digest = hashlib.sha256(self.original).hexdigest()
+        for header, expected in [('bytes=0-31', self.original[:32]), ('bytes=-10', self.original[-10:])]:
+            response = await self.client.get('/Gallery/hydrus/original', params={'hash': digest}, headers={'Range': header})
+            self.assertEqual(response.status, 206)
+            self.assertEqual(response.headers['Content-Type'], 'video/webm')
+            self.assertEqual(await response.read(), expected)
+            self.assertIn('Content-Range', response.headers)
+        response = await self.client.get('/Gallery/hydrus/original', params={'hash': digest}, headers={'Range': 'bytes=999999-'})
+        self.assertEqual(response.status, 416)
+
+    async def test_save_output_verified_reusable_and_never_overwrites(self):
+        settings = self.bridge.settings.load()
+        data = {'hash': self.digest, 'target': settings['url'] + '|' + settings['profile']}
+        self.record['tags'] = {'local': {'display_tags': {'0': ['blue hair']}}}
+        result = await self.post('save_output', data)
+        destination = self.root / 'downloads' / (self.digest + '.png')
+        self.assertEqual(destination.read_bytes(), self.original)
+        self.assertEqual(result['folder'], 'downloads')
+        cached = await self.post('status', {'urls': ['/static_gallery/downloads/' + destination.name]})
+        self.assertEqual(cached['items'][0]['metadata']['tags'], self.record['tags'])
+        await self.post('save_output', data)
+        destination.write_bytes(b'preserve existing content')
+        response = await self.client.post('/Gallery/hydrus/save_output', json=data)
+        self.assertEqual(response.status, 400)
+        self.assertEqual(destination.read_bytes(), b'preserve existing content')
+        response = await self.client.post('/Gallery/hydrus/save_output', json={**data, 'target': 'stale'})
+        self.assertEqual(response.status, 400)
+
+    async def test_danbooru_preview_runs_offline(self):
+        result = await self.post('danbooru_tags', {'texts': ['masterpiece, best quality, blue hair, (red_eyes:1.2), blue_hair']})
+        self.assertEqual(result['tags'], [['blue_hair', 'red_eyes']])
+        self.assertEqual(self.calls, [])
 
     async def test_input_does_not_overwrite_other_content(self):
         (self.input / 'hydrus').mkdir()

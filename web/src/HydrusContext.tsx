@@ -20,6 +20,7 @@ interface HydrusContextValue {
     requestExport: (urls: string[]) => void;
     refresh: (urls: string[]) => Promise<HydrusItem[]>;
     mergeItems: (items: HydrusItem[]) => void;
+    reloadMemory: () => void;
     settingsSaved: (settings: HydrusSettings) => void;
 }
 
@@ -40,9 +41,10 @@ export function HydrusProvider({ children }: { children: ReactNode }) {
     const statusRead = useRef<Promise<void>>(Promise.resolve());
     const imageFiles = useMemo(() => Object.fromEntries(Object.values(data?.folders || {})
         .flatMap(folder => Object.values(folder)).filter(file => file.type === 'image').map(file => [file.url, file])), [data]);
-    const imageFilesRef = useRef(imageFiles);
-    imageFilesRef.current = imageFiles;
-    const folderImages = useMemo(() => unfilteredFolderImages.filter(file => file.type === 'image'), [unfilteredFolderImages]);
+    const statusFiles = useMemo(() => Object.fromEntries(Object.values(data?.folders || {}).flatMap(folder => Object.values(folder)).filter(file => ['image', 'media'].includes(file.type)).map(file => [file.url, file])), [data]);
+    const imageFilesRef = useRef(statusFiles);
+    imageFilesRef.current = statusFiles;
+    const folderImages = useMemo(() => unfilteredFolderImages.filter(file => ['image', 'media'].includes(file.type)), [unfilteredFolderImages]);
     const mergeItems = useCallback((next: HydrusItem[]) => {
         setItems(previous => {
             const result = { ...previous };
@@ -147,8 +149,9 @@ export function HydrusProvider({ children }: { children: ReactNode }) {
         setRevision(value => value + 1);
     }, [setLocalHydrusTags]);
 
+    const reloadMemory = useCallback(() => { loadedStamps.current.clear(); setRevision(value => value + 1); }, []);
     const value = useMemo(() => ({ settings, settingsError, items, imageFiles, settingsOpen, setSettingsOpen,
-        exportUrls, setExportUrls, detailsUrl, setDetailsUrl, requestExport, refresh, mergeItems, settingsSaved }),
+        exportUrls, setExportUrls, detailsUrl, setDetailsUrl, requestExport, refresh, mergeItems, settingsSaved, reloadMemory }),
         [settings, settingsError, items, imageFiles, settingsOpen, exportUrls, detailsUrl, requestExport, refresh, mergeItems, settingsSaved]);
     return <HydrusContext.Provider value={value}>
         {children}

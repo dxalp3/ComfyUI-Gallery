@@ -1,6 +1,6 @@
 # ComfyUI Gallery
 
-## Hydrus edition — 2.7.1-hydrus.7
+## Hydrus edition — 2.7.1-hydrus.8
 
 This customized edition adds image export to the Hydrus Client API, persistent
 SHA-256 export history, cached Hydrus metadata, bulk actions, checkboxes, range
@@ -12,17 +12,18 @@ negative tags use `negative_prompt:`. Live tag recommendations and **Add all
 suggestions** are available in export tags, per-image prompt tags, and saved default tags.
 
 Browse Hydrus by tags or open client pages, use live tag recommendations with
-AND/OR searches and select-all suggestions, download originals or a bulk ZIP,
+AND/OR searches and select-all suggestions, save originals into ComfyUI output/downloads,
 and use keyboard controls. View Local, Hydrus, or Both in the main gallery, or
 open Gallery in a separate browser tab. Bulk-append sources to **Gallery Image
 Source**, crop with pixel controls or a drag rectangle, and stitch horizontally,
 vertically, or in a grid for img2img. The compiled frontend is included.
 
-**New in hydrus.7:** larger selection checkboxes, a floating selection mode
-(click selects; double-click opens without changing selection), inline OR groups,
-source-specific delete actions, local prompt suggestions and a shared view of
-Prompt Library tags/prefixes. Gallery settings now provide saved extra roots and
-optional prompt-based folder rules with a move preview and collision protection.
+**New in hydrus.8:** Hydrus video results and playback, checkbox-triggered
+selection mode, counted autocomplete and Enter-to-search, compact OR-group
+editors, stacked local terms, and shared searches with separate Local/Hydrus/Both
+result tabs. Optional offline Danbooru filtering keeps recognized positive prompt
+tags and excludes quality/meta terms. Downloads and imports retain cached Hydrus
+tag correspondence by file hash. See [search and export details](HYDRUS.md).
 
 A **Gallery workspace tab** beside ComfyUI's workflow tabs
 opens a full-width, non-modal grid. Click a workflow tab or **Workflow** to return

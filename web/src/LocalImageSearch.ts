@@ -2,6 +2,29 @@ import type { FileDetails } from './types';
 
 export type LocalSearchField = 'all' | 'name' | 'hydrus' | 'positive' | 'negative';
 export interface LocalPrompts { positive: string; negative: string }
+export type LibrarySearch = { tags: string[]; match: 'all' | 'any'; orGroups: string[][]; share: boolean; localTerms: string[]; localField: LocalSearchField };
+
+/** Source branches are ORed. Terms inside each branch retain their AND/OR choice. */
+export function matchesLibrarySearch(file: FileDetails, search: LibrarySearch, tags: string[], prompts: LocalPrompts): boolean {
+    const hasRemote = search.tags.length > 0 || search.orGroups.length > 0;
+    if (!hasRemote && !search.localTerms.length) return true;
+    const normalize = (value: string) => value.toLocaleLowerCase().replace(/_/g, ' ').trim();
+    const phrases = prompts.positive.split(/[,\n]+/).map(value => normalize(value.trim().replace(/^\((.*):[\d.]+\)$/, '$1')));
+    const cached = tags.map(normalize);
+    const term = (value: string): boolean => {
+        const negative = value.startsWith('-');
+        const wanted = normalize(negative ? value.slice(1) : value);
+        if (wanted.startsWith('system:')) return false;
+        const found = cached.includes(wanted) || phrases.includes(wanted);
+        return negative ? !found : found;
+    };
+    const positive = search.tags.filter(value => !value.startsWith('-') && !value.startsWith('system:'));
+    const filters = search.tags.filter(value => value.startsWith('-') || value.startsWith('system:'));
+    const shared = search.share && hasRemote && filters.every(term) &&
+        (!positive.length || (search.match === 'any' ? positive.some(term) : positive.every(term))) && search.orGroups.every(group => group.some(term));
+    const local = search.localTerms.length > 0 && search.localTerms.every(value => matchesLocalImage(file, value, search.localField, tags, prompts));
+    return shared || local;
+}
 type Polarity = keyof LocalPrompts;
 type Node = { type: string; title: string; inputs: Record<string, unknown>; widgets?: unknown[] };
 

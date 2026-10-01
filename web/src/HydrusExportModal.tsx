@@ -12,6 +12,10 @@ export function HydrusExportModal() {
     const { exportUrls, setExportUrls, settings, setSettingsOpen, imageFiles, mergeItems } = useHydrus();
     const [tags, setTags] = useState<string[]>([]);
     const [sendMetadata, setSendMetadata] = useState(false);
+    const [danbooru, setDanbooru] = useState(false);
+    const [dictionaryTags, setDictionaryTags] = useState<Record<string, string[]>>({});
+    const [dictionaryReady, setDictionaryReady] = useState('');
+    const [dictionaryError, setDictionaryError] = useState('');
     const [positiveTags, setPositiveTags] = useState(false);
     const [negativeTags, setNegativeTags] = useState(false);
     const [prefixPositive, setPrefixPositive] = useState(true);
@@ -31,6 +35,7 @@ export function HydrusExportModal() {
     useEffect(() => {
         setTags([]); setResults({}); setStopping(false); stop.current = false;
         setSendMetadata(settings?.send_metadata || false);
+        setDanbooru(settings?.danbooru_prompt_tags || false);
         setPositiveTags(settings?.positive_prompt_tags || false);
         setNegativeTags(settings?.negative_prompt_tags || false);
         setPrefixPositive(settings?.prefix_positive_prompt_tags ?? true);
@@ -57,12 +62,30 @@ export function HydrusExportModal() {
         return () => { ++serviceRequest.current; };
     }, [urlsKey, settings?.url, settings?.profile, settings?.has_access_key]);
 
+    useEffect(() => {
+        let cancelled = false;
+        setDictionaryReady(''); setDictionaryError('');
+        if (!danbooru || !exportUrls.length) return;
+        void (async () => {
+            try {
+                const mapped: Record<string, string[]> = {};
+                for (let start = 0; start < exportUrls.length; start += 200) {
+                    const batch = exportUrls.slice(start, start + 200);
+                    const result = await hydrusRequest<{ tags: string[][] }>('danbooru_tags', { texts: batch.map(url => extractLocalPrompts(imageFiles[url]?.metadata).positive) });
+                    batch.forEach((url, index) => { mapped[url] = result.tags[index]; });
+                }
+                if (!cancelled) { setDictionaryTags(mapped); setDictionaryReady(urlsKey); }
+            } catch (error) { if (!cancelled) setDictionaryError(String(error)); }
+        })();
+        return () => { cancelled = true; };
+    }, [danbooru, urlsKey, imageFiles]);
+
     const proposedTags = useMemo(() => Object.fromEntries(exportUrls.map(url => {
-        if (!positiveTags && !negativeTags) return [url, []];
+        if (!danbooru && !positiveTags && !negativeTags) return [url, []];
         const prompts = extractLocalPrompts(imageFiles[url]?.metadata);
-        return [url, [...(positiveTags ? promptTags(prompts.positive, prefixPositive ? 'positive_prompt' : '') : []),
+        return [url, [...(danbooru ? dictionaryTags[url] || [] : positiveTags ? promptTags(prompts.positive, prefixPositive ? 'positive_prompt' : '') : []),
             ...(negativeTags ? promptTags(prompts.negative, 'negative_prompt') : [])]];
-    })), [urlsKey, imageFiles, positiveTags, negativeTags, prefixPositive]);
+    })), [urlsKey, imageFiles, positiveTags, negativeTags, prefixPositive, danbooru, dictionaryTags]);
     const imageTags = (url: string): string[] => editedPromptTags[url] ?? proposedTags[url] ?? [];
     const serviceOptions = services.filter(service => [0, 5].includes(service.type)).map(service => ({ value: service.service_key, label: service.name }));
     if (serviceKey && !serviceOptions.some(option => option.value === serviceKey)) serviceOptions.push({ value: serviceKey, label: `Saved service (${serviceKey.slice(0, 12)}…)` });
@@ -97,7 +120,7 @@ export function HydrusExportModal() {
         const values = [...(settings?.default_tags || []), ...tags, ...imageTags(url)];
         return values.length > 500 || values.some(tag => tag.length > 1024);
     });
-    const ready = !!settings?.has_access_key && (!hasTags || !!serviceKey) && !invalidTags;
+    const ready = !!settings?.has_access_key && (!hasTags || !!serviceKey) && !invalidTags && (!danbooru || dictionaryReady === urlsKey);
 
     return <Modal title={`Export to Hydrus · ${exportUrls.length} image${exportUrls.length === 1 ? '' : 's'}`}
         open={exportUrls.length > 0} zIndex={BASE_Z_INDEX + 20} width={680}
@@ -129,12 +152,15 @@ export function HydrusExportModal() {
             serviceKey={serviceKey} style={{ width: '100%', margin: '6px 0 16px' }} />
         {hasTags && !serviceKey && <Alert type="warning" showIcon message="Choose a tag service above to send tags." style={{ marginBottom: 12 }} />}
         <Space direction="vertical" style={{ marginBottom: 8 }}>
-            <Checkbox checked={positiveTags} disabled={running} onChange={event => { setPositiveTags(event.target.checked); setEditedPromptTags({}); }}>Add positive-prompt tags</Checkbox>
-            {positiveTags && <Checkbox checked={prefixPositive} disabled={running} onChange={event => { setPrefixPositive(event.target.checked); setEditedPromptTags({}); }} style={{ marginLeft: 24 }}>Prefix positive tags with positive_prompt:</Checkbox>}
+            <Checkbox checked={danbooru} disabled={running} onChange={event => { setDanbooru(event.target.checked); setEditedPromptTags({}); }}>Only recognized Danbooru tags from positive prompts</Checkbox>
+            {danbooru && <Typography.Text type="secondary">Offline vocabulary; canonical plain tags. Quality/meta terms and unknown prose are excluded. {dictionaryReady !== urlsKey && !dictionaryError ? 'Building preview…' : ''}</Typography.Text>}
+            {dictionaryError && <Alert type="error" message={dictionaryError} />}
+            <Checkbox checked={positiveTags} disabled={running || danbooru} onChange={event => { setPositiveTags(event.target.checked); setEditedPromptTags({}); }}>Add positive-prompt tags</Checkbox>
+            {positiveTags && !danbooru && <Checkbox checked={prefixPositive} disabled={running} onChange={event => { setPrefixPositive(event.target.checked); setEditedPromptTags({}); }} style={{ marginLeft: 24 }}>Prefix positive tags with positive_prompt:</Checkbox>}
             <Checkbox checked={negativeTags} disabled={running} onChange={event => { setNegativeTags(event.target.checked); setEditedPromptTags({}); }}>Add negative-prompt tags</Checkbox>
         </Space>
         <Typography.Paragraph type="secondary">Split on commas and newlines. Positive tags can be plain (blue sky) or prefixed (positive_prompt:blue sky); negative tags use negative_prompt:. Review each image below. Changing these options resets the preview edits.</Typography.Paragraph>
-        {(positiveTags || negativeTags) && <Collapse style={{ marginBottom: 16 }} items={[{ key: 'preview', label: 'Review and edit prompt tags per image', children: exportUrls.map(url => <div key={url} style={{ marginBottom: 12 }}>
+        {(danbooru || positiveTags || negativeTags) && <Collapse style={{ marginBottom: 16 }} items={[{ key: 'preview', label: 'Review and edit prompt tags per image', children: exportUrls.map(url => <div key={url} style={{ marginBottom: 12 }}>
             <Typography.Text>{imageFiles[url]?.name || url}</Typography.Text>
             <HydrusTagSelect label={`Prompt tags for ${imageFiles[url]?.name || url}`} value={imageTags(url)} onChange={values => setEditedPromptTags(previous => ({ ...previous, [url]: values }))} disabled={running} active={exportUrls.length > 0} serviceKey={serviceKey} style={{ width: '100%' }} placeholder="Type to find or add tags" />
         </div>) }]} />}

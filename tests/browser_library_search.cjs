@@ -1,0 +1,71 @@
+const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+(async () => {
+ const browser = await chromium.launch({executablePath:process.env.CHROME_PATH,headless:true});
+ const page = await browser.newPage({viewport:{width:1500,height:1000}});
+ const errors=[]; page.on('pageerror', e=>errors.push(e.message));
+ try {
+  await page.goto('http://127.0.0.1:8191');
+  await page.getByRole('tab',{name:'Gallery workspace',exact:true}).click();
+  await page.locator('[data-gallery-entry]').first().waitFor();
+  const quick=page.getByRole('combobox',{name:'Filter local files',exact:true});
+  await quick.fill('azure');await quick.press('Enter');await quick.fill('mountain');await quick.press('Enter');await quick.press('Enter');await quick.press('Escape');
+  assert.equal(await page.locator('[data-gallery-entry]').count(),1);
+  await page.getByRole('button',{name:'Search library',exact:true}).click();
+  const input=page.getByRole('combobox',{name:'Hydrus search tags',exact:true});
+  await input.fill('character:al');
+  await page.getByText('25 files',{exact:true}).waitFor();
+  await page.locator('.ant-select-item-option').filter({hasText:'character:alice'}).click();
+  const request=page.waitForRequest(r=>r.url().endsWith('/Gallery/hydrus/search'));
+  await input.press('Enter');
+  assert.deepEqual((await request).postDataJSON().tags,['character:alice']);
+  await page.waitForFunction(()=>document.querySelectorAll('[data-gallery-entry^="hydrus:"]').length===4);
+  await page.getByRole('button',{name:'Search library',exact:true}).click();
+  await page.getByRole('button',{name:'Add OR group',exact:true}).click();
+  const group=page.getByRole('combobox',{name:'OR group tags',exact:true});
+  await group.fill('character:al');await page.getByText('10 files',{exact:true}).waitFor();
+  await page.locator('.ant-select-item-option').filter({hasText:'character:alina'}).click();
+  await page.getByRole('button',{name:'Apply OR group',exact:true}).click();
+  await page.getByRole('button',{name:'Edit OR group 1',exact:true}).waitFor();
+  await page.getByRole('dialog',{name:'OR tag group',exact:true}).waitFor({state:'hidden'});
+  // Include a synthetic remote video in the real result response.
+  const clip=fs.readFileSync(path.join(__dirname,'fixtures/solid-colours.webm'));
+  const hash='e'.repeat(64);
+  await page.route('**/Gallery/hydrus/search',async route=>{const response=await route.fetch();const data=await response.json();data.items.push({hash,file_id:99,mime:'video/webm',is_local:true,width:16,height:16});data.total++;await route.fulfill({json:data});});
+  await page.route('**/Gallery/hydrus/original?**',async route=>{
+   if(new URL(route.request().url()).searchParams.get('hash')===hash) await route.fulfill({body:clip,contentType:'video/webm'}); else await route.continue();
+  });
+  await page.getByRole('button',{name:'Search',exact:true}).click();
+  const remote=page.locator('[data-gallery-entry="hydrus:'+hash+'"]');
+  await remote.getByText('▶ VIDEO',{exact:true}).waitFor();
+  await remote.getByRole('checkbox').check();
+  await remote.getByRole('img').dblclick();
+  const viewer=page.getByRole('dialog',{name:/Gallery viewer/});await viewer.waitFor();
+  assert.equal(await viewer.getByRole('checkbox',{name:'Selected',exact:true}).isChecked(),true);
+  await page.waitForFunction(()=>[...document.querySelectorAll('.ant-modal video')].some(v=>v.readyState>=2));
+  await viewer.getByRole('button',{name:'Close',exact:true}).click();
+  let saved;
+  await page.route('**/Gallery/hydrus/save_output',async route=>{saved=route.request().postDataJSON();await route.fulfill({json:{hash,name:hash+'.webm',folder:'downloads'}});});
+  await remote.click({button:'right'});await page.getByRole('menuitem',{name:'Download original(s)',exact:true}).click();
+  await page.getByText('1 file(s) saved to ComfyUI output/downloads.',{exact:true}).waitFor();assert.equal(saved.hash,hash);
+  // Quick search returns to Local; the cached correspondence is searchable.
+  await quick.fill('source:qa');await quick.press('Escape');
+  assert.equal(await page.locator('[data-gallery-entry^="hydrus:"]').count(),0);
+  await page.waitForFunction(()=>document.querySelectorAll('[data-gallery-entry^="local:"]').length===4);
+  await quick.fill('');await quick.press('Escape');
+  await page.getByRole('button',{name:'Clear selection',exact:true}).click();
+  await page.getByAltText('study-1.png',{exact:true}).click({button:'right'});
+  await page.getByRole('menuitem',{name:'Export local selection to Hydrus',exact:true}).click();
+  const exporter=page.getByRole('dialog',{name:/Export to Hydrus/});
+  await exporter.getByRole('checkbox',{name:'Only recognized Danbooru tags from positive prompts',exact:true}).check();
+  await exporter.getByText('Review and edit prompt tags per image',{exact:true}).click();
+  await exporter.locator('.ant-select-selection-item').filter({hasText:'mountain'}).waitFor();
+  assert.equal(await exporter.locator('.ant-select-selection-item').filter({hasText:'positive_prompt:'}).count(),0);
+  await exporter.getByRole('button',{name:'Cancel',exact:true}).click();
+  assert.deepEqual(errors,[]);
+  if(process.env.GALLERY_QA_SCREENSHOT) await page.screenshot({path:process.env.GALLERY_QA_SCREENSHOT});
+  console.log('PASS: stacked local terms, Hydrus counts/Enter, OR popup autocomplete, remote WebM grid/viewer, automatic selection, output download, cached tags and Danbooru preview.');
+ } finally {await browser.close();}
+})().catch(error=>{console.error(error);process.exit(1);});

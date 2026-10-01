@@ -7,7 +7,8 @@ import { useHydrus } from './HydrusContext';
 type Suggestion = { value: string; count?: number };
 
 /** Reusable tag entry for export fields and saved defaults, including manual tags. */
-export function HydrusTagSelect({ value = [], onChange, disabled = false, active = true, serviceKey, label, placeholder, style }: {
+export function HydrusTagSelect({ value = [], onChange, disabled = false, active = true, serviceKey, label, placeholder, style, onSubmit, onChooseAll, inputRef }: {
+    onSubmit?: () => void; onChooseAll?: () => void; inputRef?: React.RefObject<any>;
     value?: string[]; onChange?: (tags: string[]) => void; disabled?: boolean; active?: boolean;
     serviceKey?: string; label: string; placeholder?: string; style?: CSSProperties;
 }) {
@@ -38,18 +39,23 @@ export function HydrusTagSelect({ value = [], onChange, disabled = false, active
     }, [query, open, active, disabled, serviceKey, settings?.url, settings?.profile, settings?.has_access_key]);
     useEffect(() => { if (!active) { setQuery(''); setOpen(false); } }, [active]);
     const change = (tags: string[]) => { onChange?.(Array.from(new Set(tags))); setQuery(''); };
-    return <Select aria-label={label} mode="tags" value={value} onChange={change} disabled={disabled}
+    const prefix = query.trim().startsWith('-') ? '-' : '';
+    return <div className="cg-tag-input" style={style} onKeyDownCapture={event => {
+        if (event.key === 'Enter' && !event.nativeEvent.isComposing && (!query.trim() || value.includes(query.trim()) || event.ctrlKey || event.metaKey)) {
+            event.preventDefault(); event.stopPropagation(); setQuery(''); setOpen(false); onSubmit?.();
+        }
+    }}><Select ref={inputRef} aria-label={label} mode="tags" value={value} onChange={change} disabled={disabled}
         searchValue={query} onSearch={setQuery} open={open && active} onOpenChange={setOpen}
         loading={loading} filterOption={false} optionLabelProp="value" autoClearSearchValue={false}
-        style={style} placeholder={placeholder || 'Type for Hydrus recommendations · Enter adds a tag'}
-        options={suggestions.map(tag => ({ value: tag.value, label: <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}><span>{tag.value}</span><Typography.Text type="secondary">{tag.count?.toLocaleString() || ''}</Typography.Text></div> }))}
+        style={{ width: '100%' }} popupMatchSelectWidth={440} placeholder={placeholder || 'Type for Hydrus recommendations · Enter adds a tag'}
+        options={suggestions.map(tag => ({ ...tag, value: prefix + tag.value.replace(/^-/, '') })).filter(tag => !value.includes(tag.value)).map(tag => ({ value: tag.value, label: <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}><span>{tag.value}</span><Typography.Text type="secondary"><strong>{tag.count?.toLocaleString() ?? '—'} files</strong></Typography.Text></div> }))}
         notFoundContent={loading ? 'Loading recommendations…' : 'Press Enter to add your own tag.'}
         popupRender={menu => <div>
             <div style={{ padding: 8, borderBottom: '1px solid #8884' }} onMouseDown={event => event.preventDefault()}>
-                <Button size="small" disabled={loading || !suggestions.length} onClick={() => { change([...value, ...suggestions.map(tag => tag.value)]); setOpen(false); }}>Add all suggestions ({suggestions.length})</Button>
+                <Button size="small" disabled={loading || !suggestions.length} onClick={() => { change([...value, ...suggestions.map(tag => prefix + tag.value.replace(/^-/, ''))]); onChooseAll?.(); setOpen(false); }}>{onChooseAll ? 'Select all suggestions for OR' : 'Add all suggestions'} ({suggestions.length})</Button>
                 {hasMore && <div>First 50 shown; refine your text to narrow the list.</div>}
                 {error && <Typography.Text type="warning">Recommendations unavailable: {error} Manual tags still work.</Typography.Text>}
                 {!settings?.has_access_key && <Typography.Text type="secondary">Save a Hydrus connection to load recommendations.</Typography.Text>}
             </div>{menu}
-        </div>} />;
+        </div>} /></div>;
 }

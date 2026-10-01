@@ -142,9 +142,9 @@ Hydrus controls:
 
 ### Download originals
 
-**Download** saves a Hydrus original to your browser's download location. **Download selected** saves one image directly or multiple images as `hydrus-images.zip`. Filenames use the verified SHA-256 hash and detected image extension. These downloads do not create ComfyUI input files.
+**Download original(s)** and **Download selected** save Hydrus originals into `ComfyUI/output/downloads`. Filenames use the verified SHA-256 hash and detected extension. These downloads do not create ComfyUI input files. Local-file downloads use the browser.
 
-Single originals are capped at 256 MiB. A bulk ZIP is capped at 128 MiB of original image data to bound browser memory use; choose a smaller group if that limit is reached. Progress and individual failures are reported. **Cancel remaining** stops after the current image, and successful downloads collected so far are still saved.
+Hydrus originals are capped at 1 GiB. Selected files are saved sequentially, with progress and individual failures reported. **Cancel remaining** stops after the current file; completed downloads remain saved.
 
 ### Keyboard controls
 
@@ -168,7 +168,7 @@ Text inputs and menus keep their normal keyboard controls, including text select
 
 ### Copy to ComfyUI for img2img
 
-**Copy to input** downloads the original image into `ComfyUI/input/hydrus/<sha256>.<extension>`. Copies preserve the original bytes and embedded metadata. The download is verified against its Hydrus hash, existing copies are reused, and unrelated files are never overwritten. Originals are capped at 256 MiB per image. These local copies remain after restarting ComfyUI.
+**Copy to input** downloads the original image into `ComfyUI/input/hydrus/<sha256>.<extension>`. Copies preserve the original bytes and embedded metadata. The download is verified against its Hydrus hash, existing copies are reused, and unrelated files are never overwritten. Hydrus downloads are capped at 1 GiB; Image Source processing has a separate 256 MiB per-image limit. These local copies remain after restarting ComfyUI.
 
 ### Gallery Image Source: append, crop, and stitch
 
@@ -308,7 +308,7 @@ filters outside its OR group. Examples of system predicates:
 - `system:modified date > 2025-01-01`
 - `system:hash = <SHA-256>` (replace the placeholder with an actual hash)
 
-The bridge always applies its image/animation filter and result limit. OR groups
+The bridge always applies its image/animation/video filter and result limit. OR groups
 cannot override that limit. Advanced predicates apply to Hydrus; local filtering
 continues to use local filenames, prompt metadata, cached tags and quality fields.
 See the authoritative [Hydrus search API](https://hydrusnetwork.github.io/hydrus/developer_api.html#get_filessearch_files)
@@ -365,5 +365,64 @@ read-only in the gallery; edit definitions through the Prompt Library node.
 Local `.mp4`, `.webm`, and `.mov` files use browser video previews and player
 controls. **Auto Play Videos** remains configurable. Actual playback depends on
 the container/codec supported by your browser; an unsupported viewer video shows
-a download fallback message. Hydrus search/page results remain image/animation
-only; Hydrus video browsing and video-to-Image-Source are not implemented.
+a download fallback message. Hydrus search/page results now include video thumbnails and a video badge.
+Video-to-Image-Source and local-video export remain unsupported; img2img actions
+only include images.
+
+## Shared searches, video and tag correspondence (hydrus.8)
+
+Checking a checkbox activates click-to-select automatically. Double-click opens
+the viewer without changing selection. Click the viewer image to toggle its
+selection; the filmstrip shares selection too. Use the viewer checkbox for video,
+where clicking the player retains its playback behavior. The floating selection
+button can also enable selection with no selected files; turning it off clears
+selection. Clear selection exits automatic selection mode.
+
+The top local search stacks Enter-confirmed terms with AND, filters immediately,
+and switches to **Local**. Categories include filename, positive/negative prompt,
+and **Hydrus tag**. **Search library** opens the shared query editor. Hydrus tag
+suggestions show actual file counts returned by your client, including zero;
+these are counts in the API's default combined-local-file domain, not global
+Danbooru counts. Enter adds a tag; Enter with no pending text runs the search.
+**Add OR group** opens an autocomplete popup and saves a compact editable chip.
+Each OR chip is ANDed with the other Hydrus terms.
+
+With **Match these Hydrus tags against local prompts and cached tags too** checked,
+the tag query also matches local positive prompt phrases and remembered Hydrus
+tags across the loaded root. Spaces/underscores and simple numeric prompt weights
+are normalized; Hydrus system predicates are only evaluated remotely. This is
+exact phrase matching, not natural-language semantic search. Add **OR local
+group** for an independent local branch, for example `(Hydrus tag1 AND tag2) OR
+(local positive prompt1 AND prompt2)`. Uncheck shared matching to keep those
+branches source-specific. Local branch terms use substring matching. Local,
+Hydrus and Both switch result views without rebuilding the query. The quick
+local bar clears the shared local query. Remote results retain the configured
+Hydrus result limit; searches do not scan the entire remote database locally.
+
+The optional **Only recognized Danbooru tags from positive prompts** export toggle
+uses a bundled, pinned 140,782-row vocabulary snapshot. Canonical tags and aliases
+are matched after comma/newline splitting and simple weight normalization. General,
+artist, character and copyright tags are eligible; quality/meta tags and unknown
+prose are excluded. This overrides raw positive-prompt export while enabled;
+negative tags can still be exported as `negative_prompt:`. Preview/edit each
+image's tags before export, and save the default in Hydrus settings. The offline
+snapshot is not exhaustive or automatically updated; see [provenance and license](data/README.md).
+
+Hydrus **Download original(s)** now saves verified originals under the actual
+ComfyUI **output/downloads** directory, even while another gallery root is active.
+Names use the SHA-256 hash and detected extension; identical files are reused,
+other content is never overwritten. Local downloads still use the browser.
+Image copies for img2img continue to use **input/hydrus**. Downloads, input copies,
+exports, and browsed Hydrus records preserve tag snapshots in Gallery's existing
+SQLite memory, keyed by Hydrus connection/profile and file hash. Local copies with
+identical bytes can therefore use the **Hydrus tag** category. Files are not
+rewritten. Existing export history remains usable; select older local images and
+**Refresh Hydrus status** to backfill their tags. This is a snapshot, not continuous
+bidirectional tag synchronization; remote edits need a refresh or new browse.
+
+Remote WebM and MP4/MOV originals are verified before playback and support byte
+ranges. Original downloads are bounded to 1 GiB; each playback/range request may
+fetch the full file from Hydrus before responding. Large clips can therefore take
+time to start or seek. Browser codec support still determines playback; download
+unsupported formats for an external player. Grid thumbnails use Hydrus's thumbnail
+API rather than downloading every full video.

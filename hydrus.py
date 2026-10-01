@@ -26,7 +26,7 @@ MAX_BATCH_SIZE = 200
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".tif", ".tiff", ".avif", ".jxl"}
 # Use Hydrus's broad aliases, including newly supported formats. Bare "bmp" is
 # not an accepted alias and made the previous mandatory filetype filter invalid.
-HYDRUS_IMAGE_PREDICATE = "system:filetype = image, animation"
+HYDRUS_IMAGE_PREDICATE = "system:filetype = image, animation, video"
 DEFAULTS = {
     "url": "http://127.0.0.1:45869",
     "access_key": "",
@@ -34,6 +34,7 @@ DEFAULTS = {
     "default_tags": [],
     "send_metadata": False,
     "positive_prompt_tags": False,
+    "danbooru_prompt_tags": False,
     "negative_prompt_tags": False,
     "prefix_positive_prompt_tags": True,
     "profile": "main",
@@ -109,7 +110,7 @@ class HydrusSettings:
                 raise HydrusError(key + " must contain hexadecimal characters.")
         if not result["profile"]:
             raise HydrusError("Profile cannot be empty.")
-        for key in ("send_metadata", "positive_prompt_tags", "negative_prompt_tags", "prefix_positive_prompt_tags"):
+        for key in ("send_metadata", "positive_prompt_tags", "negative_prompt_tags", "prefix_positive_prompt_tags", "danbooru_prompt_tags"):
             if type(result[key]) is not bool:
                 raise HydrusError(key + " must be true or false.")
         if type(result["timeout_seconds"]) not in (int, float) or not 5 <= result["timeout_seconds"] <= 300:
@@ -160,7 +161,7 @@ def target_identity(settings):
     return hashlib.sha256((settings["url"] + "\n" + settings["profile"]).encode()).hexdigest()
 
 
-def resolve_image(root, url):
+def resolve_image(root, url, allow_video=False):
     # Scanner URLs are raw identifiers, not encoded HTTP URLs. Keep literal %/#.
     if not isinstance(url, str) or not url.startswith("/static_gallery/"):
         raise HydrusError("Image must belong to /static_gallery/.")
@@ -179,7 +180,7 @@ def resolve_image(root, url):
         raise HydrusError("Gallery image no longer exists; reload the gallery.") from None
     except (OSError, ValueError, RuntimeError):
         raise HydrusError("Image is outside the gallery root or is inaccessible.") from None
-    if path.suffix.lower() not in IMAGE_EXTENSIONS:
+    if path.suffix.lower() not in (IMAGE_EXTENSIONS | ({".mp4", ".webm", ".mov", ".mkv"} if allow_video else set())):
         raise HydrusError("Hydrus export currently supports images only.")
     return path
 
@@ -377,7 +378,7 @@ class HydrusClient:
     async def download(self, digest, thumbnail=False):
         """Download through the server; credentials never enter image URLs."""
         stream = tempfile.SpooledTemporaryFile(max_size=8 * 1024 * 1024)
-        limit = (16 if thumbnail else 256) * 1024 * 1024
+        limit = (16 if thumbnail else 1024) * 1024 * 1024
         try:
             endpoint = "/get_files/thumbnail" if thumbnail else "/get_files/file"
             async with self.session.get(self.settings["url"] + endpoint,
@@ -419,7 +420,7 @@ class HydrusBridge:
         return list(dict.fromkeys(urls))
 
     async def cached_item(self, root, target, url):
-        path = resolve_image(root, url)
+        path = resolve_image(root, url, allow_video=True)
         digest = await asyncio.to_thread(self.memory.hash_file, path)
         return path, await asyncio.to_thread(self.memory.get, target, digest, url)
 
@@ -618,7 +619,7 @@ class HydrusBridge:
         services = service_list(result)
         images = [dict(record, services_v2=services) for record in records
                   if isinstance(record, dict) and record.get("file_id") is not None
-                  and str(record.get("mime", "")).startswith("image/")
+                  and str(record.get("mime", "")).startswith(("image/", "video/"))
                   and record.get("is_local") is True and not record.get("is_trashed")
                   and re.fullmatch(r"[0-9a-f]{64}", str(record.get("hash", "")))]
         order = {value: n for n, value in enumerate(identifiers)}
@@ -666,6 +667,16 @@ class HydrusBridge:
             raise HydrusError("Hydrus image search (/get_files/search_files) returned invalid file IDs.")
         return identifiers
 
+    async def cache_records(self, records, settings):
+        target = target_identity(settings)
+        def store():
+            for record in records:
+                item = self.memory.get(target, record['hash'], '')
+                item.update(metadata=record, metadata_checked_at=now(), last_checked_at=now(), current_present=True, status='present', error=None)
+                self.memory.put(target, item)
+        await asyncio.to_thread(store)
+        return records
+
     async def browse(self, action, data):
         settings = self.settings.load()
         limit = data.get("limit", 100)
@@ -678,7 +689,7 @@ class HydrusBridge:
                 return {"pages": result.get("pages", {})}
             if action == "search":
                 identifiers = await self.search_identifiers(client, data, limit)
-                return {"items": await self.remote_metadata(client, identifiers[:limit]),
+                return {"items": await self.cache_records(await self.remote_metadata(client, identifiers[:limit]), settings),
                         "total": len(identifiers), "limit": limit}
             page_key = data.get("page_key")
             if not isinstance(page_key, str) or not re.fullmatch(r"[0-9a-fA-F]{64}", page_key):
@@ -695,7 +706,7 @@ class HydrusBridge:
             if not isinstance(identifiers, list):
                 raise HydrusError("This Hydrus version did not return page files.")
             batch = identifiers[offset:offset + limit]
-            return {"items": await self.remote_metadata(client, batch, by_hash),
+            return {"items": await self.cache_records(await self.remote_metadata(client, batch, by_hash), settings),
                     "total": len(identifiers), "offset": offset, "limit": limit,
                     "page_name": page.get("name", ""), "page_state": page.get("page_state", 0)}
 
@@ -755,14 +766,53 @@ class HydrusBridge:
             await client.request('POST', '/add_files/delete_files', json={'hashes': hashes, 'reason': 'Deleted from ComfyUI Gallery'})
         return {'trashed': hashes}
 
+    async def remember_remote(self, digest, settings):
+        item = await asyncio.to_thread(self.memory.get, target_identity(settings), digest, '')
+        async with self.client_factory(settings) as client: await self.refresh_item(client, target_identity(settings), item)
+
+    async def save_output(self, data, get_output_root):
+        digest = self.validate_hash(data.get('hash'))
+        settings = self.settings.load()
+        if data.get('target') != settings['url'] + '|' + settings['profile']:
+            raise HydrusError('Hydrus connection changed; reload before downloading.')
+        async with self.client_factory(settings) as client: stream = await client.download(digest)
+        try:
+            headers = await asyncio.to_thread(inspect_original_download, stream, digest)
+            extension = Path(headers['Content-Disposition'].split('"')[1]).suffix
+            root = Path(get_output_root()).resolve(strict=True)
+            directory = root / 'downloads'; directory.mkdir(exist_ok=True)
+            if directory.is_symlink() or directory.resolve().parent != root: raise HydrusError('Downloads must remain inside ComfyUI output.')
+            destination = directory / (digest + extension)
+            def save():
+                created = False
+                try:
+                    with destination.open('xb') as output:
+                        created = True; stream.seek(0)
+                        for chunk in iter(lambda: stream.read(1024 * 1024), b''): output.write(chunk)
+                except FileExistsError:
+                    if destination.is_symlink() or self.memory.hash_file(destination) != digest: raise HydrusError('Download name is occupied by a different file.')
+                except BaseException:
+                    if created: destination.unlink(missing_ok=True)
+                    raise
+            await asyncio.to_thread(save)
+            warning = None
+            try: await self.remember_remote(digest, settings)
+            except (HydrusError, OSError, sqlite3.Error) as error: warning = 'File saved; tag snapshot failed: ' + str(error)
+            return {'hash': digest, 'name': destination.name, 'folder': 'downloads', 'warning': warning}
+        finally: stream.close()
+
     async def import_from_hydrus(self, data, get_input_root):
         digest = self.validate_hash(data.get("hash"))
         if get_input_root is None:
             raise HydrusError("ComfyUI input directory is unavailable.")
-        async with self.client_factory(self.settings.load()) as client:
+        settings = self.settings.load()
+        async with self.client_factory(settings) as client:
             stream = await client.download(digest)
         try:
-            return await asyncio.to_thread(save_input_image, stream, digest, get_input_root())
+            result = await asyncio.to_thread(save_input_image, stream, digest, get_input_root())
+            try: await self.remember_remote(digest, settings)
+            except (HydrusError, OSError, sqlite3.Error) as error: result['warning'] = 'File saved; tag snapshot failed: ' + str(error)
+            return result
         finally:
             stream.close()
 
@@ -835,12 +885,18 @@ def inspect_original_download(stream, digest):
         # Their verified bytes remain safe attachments with a .bin extension.
         pass
     stream.seek(0)
+    head = stream.read(128)
+    if mime == "application/octet-stream":
+        if head.startswith(b'\x1a\x45\xdf\xa3') and b'webm' in head: extension, mime = '.webm', 'video/webm'
+        elif len(head) >= 12 and head[4:8] == b'ftyp':
+            extension, mime = ('.mov', 'video/quicktime') if head[8:12] == b'qt  ' else ('.mp4', 'video/mp4')
+    stream.seek(0)
     return {"Content-Disposition": 'attachment; filename="' + digest + extension + '"',
             "Content-Type": mime, "Content-Length": str(size),
             "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"}
 
 
-def register_hydrus_routes(routes, get_root, storage_dir=None, get_input_root=None):
+def register_hydrus_routes(routes, get_root, storage_dir=None, get_input_root=None, get_output_root=None):
     bridge = HydrusBridge(get_root, storage_dir)
 
     async def handle(request, action):
@@ -872,13 +928,28 @@ def register_hydrus_routes(routes, get_root, storage_dir=None, get_input_root=No
                 try:
                     headers = await asyncio.to_thread(inspect_original_download, stream, digest)
                     if action == "original":
-                        if not headers["Content-Type"].startswith("image/"):
+                        if not headers["Content-Type"].startswith(("image/", "video/")):
                             raise HydrusError("This original cannot be displayed; download it instead.")
                         headers["Content-Disposition"] = "inline"
-                    response = web.StreamResponse(headers=headers)
+                    size = int(headers['Content-Length']); start, end, status = 0, size - 1, 200
+                    headers['Accept-Ranges'] = 'bytes'
+                    requested_range = request.headers.get('Range')
+                    if requested_range:
+                        match = re.fullmatch(r'bytes=(\d*)-(\d*)', requested_range)
+                        if not match or not any(match.groups()): return web.Response(status=416, headers={'Content-Range': f'bytes */{size}'})
+                        left, right = match.groups()
+                        start = int(left) if left else max(0, size - int(right))
+                        end = min(size - 1, int(right)) if left and right else size - 1
+                        if start > end or start >= size: return web.Response(status=416, headers={'Content-Range': f'bytes */{size}'})
+                        status = 206; headers['Content-Range'] = f'bytes {start}-{end}/{size}'
+                    remaining = end - start + 1; headers['Content-Length'] = str(remaining)
+                    stream.seek(start)
+                    response = web.StreamResponse(status=status, headers=headers)
                     await response.prepare(request)
-                    while chunk := await asyncio.to_thread(stream.read, 1024 * 1024):
-                        await response.write(chunk)
+                    while remaining:
+                        chunk = await asyncio.to_thread(stream.read, min(remaining, 1024 * 1024))
+                        if not chunk: break
+                        await response.write(chunk); remaining -= len(chunk)
                     await response.write_eof()
                     return response
                 finally:
@@ -898,6 +969,17 @@ def register_hydrus_routes(routes, get_root, storage_dir=None, get_input_root=No
                     result = await bridge.services(data)
                 elif action == "status":
                     result = await bridge.status(data)
+                elif action == "danbooru_tags":
+                    try:
+                        from .tag_dictionary import prompt_tags
+                    except ImportError:
+                        from tag_dictionary import prompt_tags
+                    texts = data.get('texts', [])
+                    if not isinstance(texts, list) or len(texts) > 200: raise HydrusError('Use at most 200 prompt texts.')
+                    try: result = {'tags': await asyncio.to_thread(lambda: [prompt_tags(value) for value in texts])}
+                    except ValueError as error: raise HydrusError(str(error)) from None
+                elif action == "save_output":
+                    result = await bridge.save_output(data, get_output_root or get_root)
                 elif action == "suggest":
                     result = await bridge.suggest(data)
                 elif action in ("search", "pages", "page"):
@@ -916,7 +998,7 @@ def register_hydrus_routes(routes, get_root, storage_dir=None, get_input_root=No
 
     for method, path, action in (("get", "settings", "get_settings"), ("post", "settings", "save_settings"),
                                  ("post", "test", "test"), ("post", "status", "status"),
-                                 ("post", "services", "services"), ("post", "trash", "trash"),
+                                 ("post", "services", "services"), ("post", "danbooru_tags", "danbooru_tags"), ("post", "save_output", "save_output"), ("post", "trash", "trash"),
                                  ("post", "export", "export"), ("post", "refresh", "refresh"),
                                  ("post", "search", "search"), ("post", "pages", "pages"),
                                  ("post", "suggest", "suggest"), ("get", "download", "download"), ("get", "original", "original"),

@@ -7,6 +7,7 @@ export const galleryStyles = `
 .cg-brand .anticon { color:var(--cg-accent); font-size:23px; }
 .cg-spacer { flex:1; }
 .cg-filters { display:flex; align-items:center; gap:10px; padding:12px 24px 0; flex-wrap:wrap; flex:none; }
+.cg-search .ant-select-selection-search, .cg-tag-input .ant-select-selection-search { min-width:24px; }
 .cg-search { flex:1 1 220px; max-width:480px; }
 .cg-target { padding:10px 24px; border-bottom:1px solid var(--cg-border); }
 .cg-browser, .cg-grid-layout { display:flex; flex:1; flex-direction:column; min-height:0; min-width:0; }

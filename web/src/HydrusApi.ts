@@ -7,6 +7,7 @@ export interface HydrusSettings {
     default_tags: string[];
     send_metadata?: boolean;
     positive_prompt_tags?: boolean;
+    danbooru_prompt_tags?: boolean;
     negative_prompt_tags?: boolean;
     prefix_positive_prompt_tags?: boolean;
     profile?: string;

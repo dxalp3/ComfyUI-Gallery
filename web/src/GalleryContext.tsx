@@ -9,8 +9,8 @@ import type { FileDetails, FilesTree } from './types';
 import type { AutoCompleteProps } from 'antd/es/auto-complete';
 import { ComfyAppApi, BASE_PATH, OPEN_BUTTON_ID, STANDALONE } from './ComfyAppApi';
 import { selectRange } from './HydrusApi';
-import { extractLocalPrompts, matchesLocalImage, matchesImageQualities } from './LocalImageSearch';
-import type { LocalSearchField, LocalPrompts } from './LocalImageSearch';
+import { extractLocalPrompts, matchesLocalImage, matchesImageQualities, matchesLibrarySearch } from './LocalImageSearch';
+import type { LocalSearchField, LocalPrompts, LibrarySearch } from './LocalImageSearch';
 
 function getImages(): Promise<FilesTree> {
     return new Promise(async (resolve, reject) => {
@@ -81,6 +81,11 @@ export interface GalleryContextType {
     qualities: ImageQualities;
     setQualities: Dispatch<SetStateAction<ImageQualities>>;
     localSearchField: LocalSearchField;
+    localTerms: string[];
+    setLocalTerms: Dispatch<SetStateAction<string[]>>;
+    localHydrusTags: Record<string, string[]>;
+    librarySearch: LibrarySearch | null;
+    setLibrarySearch: Dispatch<SetStateAction<LibrarySearch | null>>;
     setLocalSearchField: Dispatch<SetStateAction<LocalSearchField>>;
     setLocalHydrusTags: Dispatch<SetStateAction<Record<string, string[]>>>;
     unfilteredFolderImages: FileDetails[];
@@ -140,6 +145,8 @@ export function GalleryProvider({ children }: { children: React.ReactNode }) {
     const [currentFolder, setCurrentFolder] = useState("output");
     const [searchFileName, setSearchFileName] = useState("");
     const [qualities, setQualities] = useState<ImageQualities>({ minWidth: 0, minHeight: 0, format: '' });
+    const [localTerms, setLocalTerms] = useState<string[]>([]);
+    const [librarySearch, setLibrarySearch] = useState<LibrarySearch | null>(null);
     const [localSearchField, setLocalSearchField] = useState<LocalSearchField>('all');
     const [localHydrusTags, setLocalHydrusTags] = useState<Record<string, string[]>>({});
     const promptSearchCache = useRef(new WeakMap<object, LocalPrompts>());
@@ -230,8 +237,8 @@ export function GalleryProvider({ children }: { children: React.ReactNode }) {
 
     // Keep the complete folder available to Hydrus status lookup even when a search hides its files.
     const currentFolderFiles = data?.folders?.[currentFolder];
-    const unfilteredFolderImages = useMemo<FileDetails[]>(() => Object.values(currentFolderFiles ?? {}), [currentFolderFiles]);
-    const searchNeedsPrompts = !!searchFileName.trim() && ['all', 'positive', 'negative'].includes(localSearchField);
+    const unfilteredFolderImages = useMemo<FileDetails[]>(() => librarySearch ? Object.values(data?.folders || {}).flatMap(folder => Object.values(folder)) : Object.values(currentFolderFiles ?? {}), [currentFolderFiles, data, librarySearch]);
+    const searchNeedsPrompts = !!librarySearch || (!!searchFileName.trim() || !!localTerms.length) && ['all', 'positive', 'negative'].includes(localSearchField);
     const localPrompts = useMemo(() => {
         const result = new Map<string, LocalPrompts>();
         if (!searchNeedsPrompts) return result;
@@ -256,10 +263,13 @@ export function GalleryProvider({ children }: { children: React.ReactNode }) {
         if (sortMethod === 'Name ↓') return list.sort((a, b) => b.name.localeCompare(a.name));
         return list.sort((a, b) => sortMethod === 'Newest' ? (b.timestamp || 0) - (a.timestamp || 0) : (a.timestamp || 0) - (b.timestamp || 0));
     }, [unfilteredFolderImages, sortMethod]);
-    const searchedHydrusTags = searchFileName.trim() && ['all', 'hydrus'].includes(localSearchField) ? localHydrusTags : undefined;
-    const filteredFolderImages = useMemo(() => sortedFolderImages.filter(file =>
-        matchesImageQualities(file, qualities) && (!searchFileName.trim() || matchesLocalImage(file, searchFileName, localSearchField, searchedHydrusTags?.[file.url], localPrompts.get(file.url)))),
-    [sortedFolderImages, searchFileName, localSearchField, searchedHydrusTags, localPrompts, qualities]);
+    const filteredFolderImages = useMemo(() => sortedFolderImages.filter(file => {
+        if (!matchesImageQualities(file, qualities)) return false;
+        const tags = localHydrusTags[file.url] || [];
+        const prompts = localPrompts.get(file.url) || { positive: '', negative: '' };
+        if (librarySearch) return matchesLibrarySearch(file, librarySearch, tags, prompts);
+        return [...localTerms, ...(searchFileName.trim() ? [searchFileName] : [])].every(term => matchesLocalImage(file, term, localSearchField, tags, prompts));
+    }), [sortedFolderImages, searchFileName, localSearchField, localHydrusTags, localPrompts, qualities, localTerms, librarySearch]);
 
     // Search the complete folder before adding layout dividers or applying virtualized rendering.
     const imagesDetailsList = useMemo(() => {
@@ -391,6 +401,7 @@ export function GalleryProvider({ children }: { children: React.ReactNode }) {
     const value = useMemo(() => ({
         currentFolder, setCurrentFolder,
         searchFileName, setSearchFileName,
+        localTerms, setLocalTerms, localHydrusTags, librarySearch, setLibrarySearch,
         qualities, setQualities, localSearchField, setLocalSearchField, setLocalHydrusTags, unfilteredFolderImages,
         showDateDivider, setShowDateDivider,
         showSettings, setShowSettings,
@@ -418,7 +429,7 @@ export function GalleryProvider({ children }: { children: React.ReactNode }) {
     }), [
         currentFolder,
         searchFileName,
-        localSearchField, qualities,
+        localSearchField, qualities, localTerms, localHydrusTags, librarySearch,
         unfilteredFolderImages,
         showDateDivider,
         showSettings,

@@ -60,6 +60,9 @@ export function UnifiedGallery({ source, remote, selectedRemote, setSelectedRemo
     }, [source, gallery.imagesDetailsList, hydrus.items, remote, order, ascending, seed]);
     useEffect(() => { setOrder(source === 'hydrus' ? 'result' : 'date'); }, [source]);
     const selected = new Set([...gallery.selectedImages.map(url => 'local:' + url), ...selectedRemote.map(hash => 'hydrus:' + hash)]);
+    const selectionActive = selectionMode || selected.size > 0;
+    const isVideo = (entry: GalleryEntry) => entry.local?.type === 'media' || entry.remote?.mime?.startsWith('video/');
+    const isImage = (entry: GalleryEntry) => entry.local?.type === 'image' || entry.remote?.mime?.startsWith('image/');
     const shownSelected = entries.filter(entry => selected.has(entry.id));
     const index = entries.findIndex(entry => entry.id === viewer);
     const current = entries[index];
@@ -90,7 +93,7 @@ export function UnifiedGallery({ source, remote, selectedRemote, setSelectedRemo
     const act = async (key: string, entry?: GalleryEntry) => {
         const list = targets(entry);
         const local = list.flatMap(item => item.local?.type === 'image' ? [item.local.url] : []);
-        const hashes = list.flatMap(item => item.remote ? [item.remote.hash] : []);
+        const hashes = list.flatMap(item => item.remote && (key === 'download' || isImage(item)) ? [item.remote.hash] : []);
         if (key === 'trash') { setTrashing(list.filter(item => item.remote)); return; }
         if (key === 'delete') { setDeleting(list.filter(item => item.local)); return; }
         if (key === 'select' && entry) return toggle(entry);
@@ -119,9 +122,9 @@ export function UnifiedGallery({ source, remote, selectedRemote, setSelectedRemo
     };
     const menu = (entry: GalleryEntry) => ({ items: [
         { key: 'select', label: selected.has(entry.id) ? 'Deselect image' : 'Select image' },
-        { key: 'source', label: `Append to Image Source (${targets(entry).filter(item => item.remote || item.local?.type === 'image').length})` },
+        { key: 'source', disabled: !targets(entry).some(isImage), label: `Append to Image Source (${targets(entry).filter(item => isImage(item)).length})` },
         { key: 'download', label: 'Download original(s)' },
-        ...(entry.local ? [{ key: 'export', label: 'Export local selection to Hydrus' }, { key: 'refresh', label: 'Refresh Hydrus status' }, { key: 'metadata', label: 'Hydrus metadata' }] : [{ key: 'copy', label: 'Copy Hydrus selection to input' }]),
+        ...(entry.local ? [{ key: 'export', label: 'Export local selection to Hydrus' }, { key: 'refresh', label: 'Refresh Hydrus status' }, { key: 'metadata', label: 'Hydrus metadata' }] : [{ key: 'copy', disabled: !targets(entry).some(item => item.remote && isImage(item)), label: 'Copy Hydrus selection to input' }]),
         { key: 'info', label: 'View metadata' },
         ...(targets(entry).some(item => item.remote) ? [{ key: 'trash', danger: true, label: `Delete from Hydrus — send to trash (${targets(entry).filter(item => item.remote).length})` }] : []),
         ...(targets(entry).some(item => item.local) ? [{ key: 'delete', danger: true, label: `Delete local file(s) (${targets(entry).filter(item => item.local).length})` }] : []),
@@ -144,20 +147,20 @@ export function UnifiedGallery({ source, remote, selectedRemote, setSelectedRemo
                                         grid.current?.scrollToItem({ rowIndex: Math.floor(nextIndex / count), columnIndex: nextIndex % count });
                                         requestAnimationFrame(() => document.querySelector<HTMLElement>('[data-gallery-entry="' + CSS.escape(next.id) + '"]')?.focus());
                                     } if (event.key === 'Enter') { event.preventDefault(); setViewer(entry.id); } if (event.key === ' ') { event.preventDefault(); toggle(entry, event.shiftKey); } }}>
-                                <div draggable={!!entry.local && !selectionMode} onDragStart={event => { if (entry.local) { event.dataTransfer.setData('text/uri-list', original(entry)); event.dataTransfer.setData('custom', JSON.stringify({ name: entry.name, folder: gallery.currentFolder, type: entry.local.type, url: entry.local.url })); } }} style={{ height: 'calc(100% - 54px)', background: '#17191d', cursor: 'pointer' }} onClick={event => {
-                                    if (selectionMode) {
-                                        if (event.detail > 1) return;
+                                <div draggable={!!entry.local && !selectionActive} onDragStart={event => { if (entry.local) { event.dataTransfer.setData('text/uri-list', original(entry)); event.dataTransfer.setData('custom', JSON.stringify({ name: entry.name, folder: gallery.currentFolder, type: entry.local.type, url: entry.local.url })); } }} style={{ height: 'calc(100% - 54px)', background: '#17191d', cursor: 'pointer' }} onClick={event => {
+                                    if (event.detail > 1) return;
+                                    lastClick.current = undefined;
+                                    if (selectionActive) {
                                         lastClick.current = { id: entry.id, selected: selected.has(entry.id) };
                                         toggle(entry, event.shiftKey);
                                     } else if (event.shiftKey || event.ctrlKey || event.metaKey) toggle(entry, event.shiftKey);
                                     else setViewer(entry.id);
                                 }} onDoubleClick={() => {
-                                    if (!selectionMode) return;
                                     const previous = lastClick.current;
                                     if (previous?.id === entry.id) { const next = new Set(selected); if (previous.selected) next.add(entry.id); else next.delete(entry.id); setSelection(next); }
                                     setViewer(entry.id);
                                 }}>
-                                    {entry.local?.type === '3d' ? <ModelThumbnail file={entry.local} /> : entry.local?.type === 'media' ? <video muted loop={gallery.settings.autoPlayVideos} autoPlay={gallery.settings.autoPlayVideos} preload="metadata" src={original(entry)} style={{ width: '100%', height: '100%', objectFit: 'contain' }} /> : entry.local?.type === 'audio' ? <div style={{ padding: 40, color: 'white' }}>AUDIO · Open viewer</div> : <img src={thumbnail(entry)} alt={entry.name} loading="lazy" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />}
+                                    {entry.remote && isVideo(entry) ? <><img src={thumbnail(entry)} alt={entry.name} loading="lazy" style={{ width: '100%', height: '100%', objectFit: 'contain' }} /><span style={{ position: 'absolute', top: 14, right: 14, background: '#111d', color: '#fff', padding: '3px 7px', borderRadius: 5 }}>▶ VIDEO</span></> : entry.local?.type === '3d' ? <ModelThumbnail file={entry.local} /> : entry.local?.type === 'media' ? <video muted loop={gallery.settings.autoPlayVideos} autoPlay={gallery.settings.autoPlayVideos} preload="metadata" src={original(entry)} style={{ width: '100%', height: '100%', objectFit: 'contain' }} /> : entry.local?.type === 'audio' ? <div style={{ padding: 40, color: 'white' }}>AUDIO · Open viewer</div> : <img src={thumbnail(entry)} alt={entry.name} loading="lazy" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />}
                                 </div>
                                 <div style={{ padding: 6 }}><Checkbox className="cg-file-checkbox" aria-label={'Select ' + entry.name} checked={selected.has(entry.id)} disabled={disabled} onClick={event => toggle(entry, event.shiftKey)} /> <Tag color={entry.remote ? 'blue' : undefined}>{entry.source === 'local' ? 'Local' : 'Hydrus'}</Tag><Typography.Text ellipsis title={entry.name} style={{ maxWidth: '90%' }}>{entry.name}</Typography.Text></div>
                             </div>
@@ -172,7 +175,7 @@ export function UnifiedGallery({ source, remote, selectedRemote, setSelectedRemo
         if (focused && (key === 'd' || key === 'i')) { event.preventDefault(); event.stopPropagation(); void act(key === 'd' ? 'download' : 'source', focused); }
     };
     return <div className="cg-grid-layout" onKeyDown={shortcuts}>
-        <div className="cg-selection-float"><Button aria-pressed={selectionMode} type={selectionMode ? 'primary' : 'default'} onClick={() => setSelectionMode(value => !value)}>{selectionMode ? 'Selection mode ON' : 'Selection mode'}</Button>{selectionMode && <span>Click selects · Double-click opens</span>}</div>
+        <div className="cg-selection-float"><Button aria-pressed={selectionActive} type={selectionActive ? 'primary' : 'default'} onClick={() => { if (selectionActive) { setSelectionMode(false); setSelection(new Set()); } else setSelectionMode(true); }}>{selectionActive ? 'Selection mode ON' : 'Selection mode'}</Button>{selectionActive && <span>Click selects · Double-click opens</span>}</div>
         <div className="cg-grid-toolbar">
             <span className="cg-grid-summary">{entries.length.toLocaleString()} files{selected.size ? ' · ' + selected.size + ' selected' : ''}</span>
             <Select aria-label="Gallery order" value={order} onChange={setOrder} style={{ width: 155 }} options={[
@@ -186,7 +189,7 @@ export function UnifiedGallery({ source, remote, selectedRemote, setSelectedRemo
         </div>
         {selected.size > 0 && <div className="cg-selection">
             <strong>{selected.size} selected</strong><span>{selected.size - shownSelected.length ? (selected.size - shownSelected.length) + ' outside this view' : ''}</span>
-            <Button disabled={disabled || !shownSelected.length} onClick={() => void act('source')}>Append to Image Source ({shownSelected.length})</Button>
+            <Button disabled={disabled || !shownSelected.some(isImage)} onClick={() => void act('source')}>Append to Image Source ({shownSelected.filter(isImage).length})</Button>
             <Button disabled={disabled || !shownSelected.length} onClick={() => void act('download')}>Download selected</Button>
             <Button disabled={disabled || !shownSelected.some(item => item.local?.type === 'image')} onClick={() => void act('export')}>Export local selection to Hydrus</Button>
             <Button disabled={disabled || !shownSelected.length} onClick={() => { const next = new Set(selected); entries.forEach(item => next.has(item.id) ? next.delete(item.id) : next.add(item.id)); setSelection(next); }}>Invert shown selection</Button>
@@ -216,19 +219,19 @@ export function UnifiedGallery({ source, remote, selectedRemote, setSelectedRemo
                     <Button disabled={index === 0} onClick={() => move(-1)}>Previous image</Button><Button disabled={index === entries.length - 1} onClick={() => move(1)}>Next image</Button>
                     <Checkbox className="cg-file-checkbox" checked={selected.has(current.id)} disabled={disabled} onClick={event => toggle(current, event.shiftKey)}>Selected</Checkbox>
                     <Button onClick={() => setZoom(value => Math.max(.25, value / 1.5))}>Zoom out</Button><Button onClick={() => setZoom(value => Math.min(8, value * 1.5))}>Zoom in</Button><Button onClick={() => setZoom(1)}>Fit</Button>
-                    <Button onClick={() => setInfo(current)}>Metadata</Button><Button disabled={disabled} onClick={() => void act('source', current)}>Append for img2img</Button>
+                    <Button onClick={() => setInfo(current)}>Metadata</Button><Button disabled={disabled || !targets(current).some(isImage)} onClick={() => void act('source', current)}>Append for img2img</Button>
                     <span>{Math.round(zoom * 100)}% · Arrow keys browse · Space selects · Right-click for actions</span>
                 </Space>
                 <Dropdown trigger={['contextMenu']} disabled={disabled} menu={menu(current)}>
                     <div style={{ height: '62vh', overflow: 'auto', background: '#111', textAlign: 'center' }}>
-                        {current.local?.type === '3d' ? <ModelViewer url={original(current)} type={current.name.split('.').pop() || ''} /> : current.local?.type === 'media' ? <video onError={() => setMediaError(true)} key={current.id} controls autoPlay={gallery.settings.autoPlayVideos} src={original(current)} style={{ maxWidth: '100%', height: '100%' }} /> : current.local?.type === 'audio' ? <audio key={current.id} controls src={original(current)} /> :
-                        <img key={current.id} src={failedOriginal === current.id ? thumbnail(current) : original(current)} alt={'Viewing ' + current.name} onError={() => setFailedOriginal(current.id)} style={{ height: zoom === 1 ? '100%' : `${zoom * 100}%`, maxWidth: zoom === 1 ? '100%' : 'none', objectFit: 'contain' }} />}
+                        {current.local?.type === '3d' ? <ModelViewer url={original(current)} type={current.name.split('.').pop() || ''} /> : isVideo(current) ? <video onError={() => setMediaError(true)} key={current.id} controls autoPlay={gallery.settings.autoPlayVideos} src={original(current)} style={{ maxWidth: '100%', height: '100%' }} /> : current.local?.type === 'audio' ? <audio key={current.id} controls src={original(current)} /> :
+                        <img onClick={event => { if (event.detail === 1) toggle(current); }} key={current.id} src={failedOriginal === current.id ? thumbnail(current) : original(current)} alt={'Viewing ' + current.name} onError={() => setFailedOriginal(current.id)} style={{ height: zoom === 1 ? '100%' : `${zoom * 100}%`, maxWidth: zoom === 1 ? '100%' : 'none', objectFit: 'contain' }} />}
                     </div>
                 </Dropdown>
                 {mediaError && <Typography.Text type="warning">This browser cannot play this video or its codec. Download the original from the context menu to play it externally.</Typography.Text>}
                 {failedOriginal === current.id && <Typography.Text type="warning">Original could not be displayed; showing thumbnail. Download original is available in the context menu.</Typography.Text>}
                 <div aria-label="Viewer filmstrip" style={{ display: 'flex', gap: 6, overflowX: 'auto', marginTop: 10 }}>
-                    {entries.slice(Math.max(0, index - 8), index + 9).map(entry => <Button key={entry.id} title={entry.name} aria-label={'View ' + entry.name} type={entry.id === viewer ? 'primary' : 'default'} onClick={() => setViewer(entry.id)} style={{ height: 65, minWidth: 80, borderColor: selected.has(entry.id) ? '#52c41a' : undefined }}>
+                    {entries.slice(Math.max(0, index - 8), index + 9).map(entry => <Button key={entry.id} title={entry.name} aria-label={'View ' + entry.name} type={entry.id === viewer ? 'primary' : 'default'} onClick={event => { if (event.detail > 1) return; lastClick.current = undefined; if (selectionActive) { lastClick.current = { id: entry.id, selected: selected.has(entry.id) }; toggle(entry, event.shiftKey); } else setViewer(entry.id); }} onDoubleClick={() => { const previous = lastClick.current; if (previous?.id === entry.id) { const next = new Set(selected); if (previous.selected) next.add(entry.id); else next.delete(entry.id); setSelection(next); } setViewer(entry.id); }} style={{ height: 65, minWidth: 80, borderColor: selected.has(entry.id) ? '#52c41a' : undefined }}>
                         {entry.local && entry.local.type !== 'image' ? entry.local.type : <img alt="" src={thumbnail(entry)} style={{ width: 60, height: 48, objectFit: 'contain' }} />}{selected.has(entry.id) ? '✓' : ''}
                     </Button>)}
                 </div>

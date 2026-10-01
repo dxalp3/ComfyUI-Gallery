@@ -137,3 +137,22 @@ test('Prompt Library STRING prefix is indexed through its encoder connection', (
     const metadata = {prompt: {'1': {inputs:{positive:['2',0]}}, '2': {class_type:'CLIPTextEncode',inputs:{text:['3',0]}}, '3': {class_type:'PromptLibrary',inputs:{prefix:'soft light, portrait'}}}};
     assert.deepEqual(extractLocalPrompts(metadata), {positive:'soft light, portrait',negative:''});
 });
+
+const { matchesLibrarySearch } = compiled.exports;
+test('source branches preserve AND, OR, exclusions and exact normalized prompt tags', () => {
+ const file={name:'winter.png',type:'image',metadata:{}};
+ const prompts={positive:'blue_hair, (red eyes:1.2)',negative:'blur'};
+ const search={tags:['blue hair','red_eyes'],match:'all',orGroups:[],share:true,localTerms:[],localField:'name'};
+ const match=patch=>matchesLibrarySearch(file,{...search,...patch},['series:example'],prompts);
+ assert.equal(match({}),true);
+ assert.equal(match({tags:['blue hair','green eyes']}),false);
+ assert.equal(match({tags:['blue hair','green eyes'],match:'any'}),true);
+ assert.equal(match({tags:['blue hair','-red eyes']}),false);
+ assert.equal(match({orGroups:[['series:example','missing']]}),true);
+ assert.equal(match({orGroups:[['missing']]}),false);
+ assert.equal(match({share:false}),false);
+ assert.equal(match({share:false,localTerms:['winter','png']}),true);
+ assert.equal(match({share:false,localTerms:['winter','summer']}),false);
+ assert.equal(match({tags:['system:inbox']}),false);
+ assert.equal(match({tags:[],share:false,localTerms:[]}),true);
+});
