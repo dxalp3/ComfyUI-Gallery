@@ -1,3 +1,6 @@
+import JSZip from 'jszip';
+import FileSaver from 'file-saver';
+import { AppendImagesModal } from './AppendImagesModal';
 import { hydrusRequest } from './HydrusApi';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Checkbox, Collapse, Dropdown, Empty, Input, Modal, Select, Space, Slider, Tooltip, Tag, Typography, message } from 'antd';
@@ -14,20 +17,22 @@ import { use3DThumbnail } from './GlobalModelRenderer';
 import { MetadataView } from './MetadataView';
 import type { FileDetails } from './types';
 import type { RemoteImage } from './HydrusBrowser';
-import { orderGallery, type GalleryEntry, type GalleryOrder } from './GalleryOrder';
+import { galleryDate, orderGallery, type GalleryEntry, type GalleryOrder } from './GalleryOrder';
 
 function ModelThumbnail({ file }: { file: FileDetails }) {
     const thumbnail = use3DThumbnail(BASE_PATH + file.url, file.name.split('.').pop()?.toLowerCase() || '');
     return thumbnail ? <img src={thumbnail} alt={file.name} style={{ width: '100%', height: '100%', objectFit: 'contain' }} /> : <div style={{ padding: 40, color: 'white' }}>3D · Open viewer</div>;
 }
 
-export function UnifiedGallery({ source, remote, selectedRemote, setSelectedRemote, copy, download, working, scope, active, onTrashed }: {
+export function UnifiedGallery({ sortRequest, source, remote, selectedRemote, setSelectedRemote, copy, download, working, scope, active, onTrashed }: {
+    sortRequest?: { type: number; ascending: boolean; revision: number };
     onTrashed: (hashes: string[]) => void;
     source: string; remote: RemoteImage[]; selectedRemote: string[]; setSelectedRemote: React.Dispatch<React.SetStateAction<string[]>>;
     copy: (hashes: string[], append?: boolean) => Promise<void>; download: (hashes: string[]) => Promise<void>; working: boolean; scope: string; active: boolean;
 }) {
     const gallery = useGalleryContext();
     const hydrus = useHydrus();
+    const [appending, setAppending] = useState<GalleryEntry[]>([]);
     const [selectionMode, setSelectionMode] = useState(false);
     const [trashing, setTrashing] = useState<GalleryEntry[]>([]);
     const [deleting, setDeleting] = useState<GalleryEntry[]>([]);
@@ -35,7 +40,7 @@ export function UnifiedGallery({ source, remote, selectedRemote, setSelectedRemo
     const [tileSize, setTileSize] = useState(210);
     const [order, setOrder] = useState<GalleryOrder>('date');
     const [ascending, setAscending] = useState(false);
-    const [seed, setSeed] = useState(1);
+    const [seed, setSeed] = useState(() => Date.now());
     const [viewer, setViewer] = useState<string>();
     const [info, setInfo] = useState<GalleryEntry>();
     const [raw, setRaw] = useState(false);
@@ -50,15 +55,19 @@ export function UnifiedGallery({ source, remote, selectedRemote, setSelectedRemo
     const disabled = working || actionBusy;
     const entries = useMemo(() => {
         const local: GalleryEntry[] = source === 'hydrus' ? [] : gallery.imagesDetailsList.filter(file => !['divider', 'empty-space'].includes(file.type)).map(file => ({
-            id: 'local:' + file.url, local: file, name: file.name, date: file.timestamp, hash: hydrus.items[file.url]?.hash,
+            id: 'local:' + file.url, local: file, name: file.name, date: galleryDate(hydrus.items[file.url]?.metadata, file.timestamp), hash: hydrus.items[file.url]?.hash,
             mime: file.name.split('.').pop()?.toLowerCase().replace('jpeg', 'jpg'), source: 'local',
         }));
         const library: GalleryEntry[] = source === 'local' ? [] : remote.map(file => ({ id: 'hydrus:' + file.hash, remote: file, name: '#' + file.file_id,
-            date: file.time_imported ?? Math.max(0, ...Object.values(file.file_services?.current || {}).map((service: any) => Number(service.time_imported || 0))),
+            date: galleryDate(file),
             hash: file.hash, mime: file.mime?.split('/')[1]?.replace('jpeg', 'jpg'), source: 'hydrus' }));
         return orderGallery([...local, ...library], order, ascending, seed);
     }, [source, gallery.imagesDetailsList, hydrus.items, remote, order, ascending, seed]);
-    useEffect(() => { setOrder(source === 'hydrus' ? 'result' : 'date'); }, [source]);
+    useEffect(() => {
+        if (!sortRequest) return;
+        const order = ({ 2: 'date', 4: 'random', 3: 'mime', 20: 'hash' } as Record<number, GalleryOrder>)[sortRequest.type];
+        if (order) { setOrder(order); setAscending(sortRequest.ascending); if (order === 'random') setSeed(value => value + 1); }
+    }, [sortRequest]);
     const selected = new Set([...gallery.selectedImages.map(url => 'local:' + url), ...selectedRemote.map(hash => 'hydrus:' + hash)]);
     const selectionActive = selectionMode || selected.size > 0;
     const isVideo = (entry: GalleryEntry) => entry.local?.type === 'media' || entry.remote?.mime?.startsWith('video/');
@@ -94,6 +103,7 @@ export function UnifiedGallery({ source, remote, selectedRemote, setSelectedRemo
         const list = targets(entry);
         const local = list.flatMap(item => item.local?.type === 'image' ? [item.local.url] : []);
         const hashes = list.flatMap(item => item.remote && (key === 'download' || isImage(item)) ? [item.remote.hash] : []);
+        if (key === 'source') { setAppending(list.filter(isImage)); return; }
         if (key === 'trash') { setTrashing(list.filter(item => item.remote)); return; }
         if (key === 'delete') { setDeleting(list.filter(item => item.local)); return; }
         if (key === 'select' && entry) return toggle(entry);
@@ -113,8 +123,20 @@ export function UnifiedGallery({ source, remote, selectedRemote, setSelectedRemo
                 if (failed) throw new Error(failed.error || 'Refresh failed');
             }
             if (key === 'download') {
-                for (const item of list.filter(item => item.local)) {
-                    const link = document.createElement('a'); link.href = original(item); link.download = item.name; link.click();
+                const locals = list.filter(item => item.local);
+                if (locals.length) {
+                    const zip = new JSZip(); let bytes = 0;
+                    for (const item of locals) {
+                        const response = await fetch(original(item));
+                        if (!response.ok) throw new Error('Could not download ' + item.name);
+                        const blob = await response.blob(); bytes += blob.size;
+                        if (bytes > 128 * 1024 * 1024) throw new Error('Select fewer local files: metadata ZIPs are limited to 128 MiB.');
+                        const digest = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', await blob.arrayBuffer()))).map(byte => byte.toString(16).padStart(2, '0')).join('');
+                        const name = digest.slice(0, 12) + '-' + item.name;
+                        zip.file(name, blob);
+                        zip.file(name + '.gallery.json', JSON.stringify({ version: 1, sha256: digest, metadata: { ...item.local?.metadata, hydrus: hydrus.items[item.local!.url]?.metadata } }, null, 2));
+                    }
+                    FileSaver.saveAs(await zip.generateAsync({ type: 'blob' }), 'gallery-with-metadata.zip');
                 }
                 if (hashes.length) await download(hashes);
             }
@@ -124,7 +146,7 @@ export function UnifiedGallery({ source, remote, selectedRemote, setSelectedRemo
         { key: 'select', label: selected.has(entry.id) ? 'Deselect image' : 'Select image' },
         { key: 'source', disabled: !targets(entry).some(isImage), label: `Append to Image Source (${targets(entry).filter(item => isImage(item)).length})` },
         { key: 'download', label: 'Download original(s)' },
-        ...(entry.local ? [{ key: 'export', label: 'Export local selection to Hydrus' }, { key: 'refresh', label: 'Refresh Hydrus status' }, { key: 'metadata', label: 'Hydrus metadata' }] : [{ key: 'copy', disabled: !targets(entry).some(item => item.remote && isImage(item)), label: 'Copy Hydrus selection to input' }]),
+        ...(entry.local ? [{ key: 'export', label: 'Export local selection to Hydrus' }, { key: 'refresh', label: 'Refresh Hydrus status' }, { key: 'metadata', label: 'Hydrus metadata' }] : [{ key: 'copy', disabled: !targets(entry).some(item => item.remote && isImage(item)), label: 'Save copy to input only (no workflow append)' }]),
         { key: 'info', label: 'View metadata' },
         ...(targets(entry).some(item => item.remote) ? [{ key: 'trash', danger: true, label: `Delete from Hydrus — send to trash (${targets(entry).filter(item => item.remote).length})` }] : []),
         ...(targets(entry).some(item => item.local) ? [{ key: 'delete', danger: true, label: `Delete local file(s) (${targets(entry).filter(item => item.local).length})` }] : []),
@@ -175,17 +197,18 @@ export function UnifiedGallery({ source, remote, selectedRemote, setSelectedRemo
         if (focused && (key === 'd' || key === 'i')) { event.preventDefault(); event.stopPropagation(); void act(key === 'd' ? 'download' : 'source', focused); }
     };
     return <div className="cg-grid-layout" onKeyDown={shortcuts}>
+        <AppendImagesModal entries={appending} onClose={() => setAppending([])} />
         <div className="cg-selection-float"><Button aria-pressed={selectionActive} type={selectionActive ? 'primary' : 'default'} onClick={() => { if (selectionActive) { setSelectionMode(false); setSelection(new Set()); } else setSelectionMode(true); }}>{selectionActive ? 'Selection mode ON' : 'Selection mode'}</Button>{selectionActive && <span>Click selects · Double-click opens</span>}</div>
         <div className="cg-grid-toolbar">
             <span className="cg-grid-summary">{entries.length.toLocaleString()} files{selected.size ? ' · ' + selected.size + ' selected' : ''}</span>
             <Select aria-label="Gallery order" value={order} onChange={setOrder} style={{ width: 155 }} options={[
-                { value: 'date', label: 'Date' }, { value: 'name', label: 'Name' }, { value: 'mime', label: 'Filetype' }, { value: 'hash', label: 'SHA-256 hash' }, { value: 'random', label: 'Random' }, { value: 'result', label: 'Search order' }
+                { value: 'date', label: 'Import / file date' }, { value: 'name', label: 'Name' }, { value: 'mime', label: 'Filetype' }, { value: 'hash', label: 'SHA-256 hash' }, { value: 'random', label: 'Random' }, { value: 'result', label: 'Search order' }
             ]} />
             <Select aria-label="Gallery sort direction" value={ascending ? 'asc' : 'desc'} onChange={value => setAscending(value === 'asc')} style={{ width: 120 }} disabled={order === 'random' || order === 'result'} options={[{ value: 'desc', label: 'Descending' }, { value: 'asc', label: 'Ascending' }]} />
             {order === 'random' && <Button onClick={() => setSeed(value => value + 1)}>Reshuffle</Button>}
             <Tooltip title="Thumbnail size"><Slider aria-label="Thumbnail size" min={140} max={340} step={20} value={tileSize} onChange={setTileSize} style={{ width: 90, margin: '0 12px' }} /></Tooltip>
             <Button disabled={disabled || !entries.length} onClick={() => setSelection(new Set([...selected, ...entries.map(item => item.id)]))}>Select all shown ({entries.length})</Button>
-            <Tooltip title="Selection mode: click selects, double-click opens. Space selects; Enter opens. Ctrl/Cmd+click toggles selection; Shift+click selects a range. Right-click for actions. Gallery order sorts loaded files; missing hashes sort last. Dates use local file time or Hydrus import time."><Button aria-label="Gallery help">?</Button></Tooltip>
+            <Tooltip title="Selection mode: click selects, double-click opens. Space selects; Enter opens. Ctrl/Cmd+click toggles selection; Shift+click selects a range. Right-click for actions. Gallery order sorts loaded files; missing hashes sort last. Dates use Hydrus import time for remote files and cached matching copies; otherwise local file time."><Button aria-label="Gallery help">?</Button></Tooltip>
         </div>
         {selected.size > 0 && <div className="cg-selection">
             <strong>{selected.size} selected</strong><span>{selected.size - shownSelected.length ? (selected.size - shownSelected.length) + ' outside this view' : ''}</span>

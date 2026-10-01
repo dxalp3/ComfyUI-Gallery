@@ -70,7 +70,6 @@ const assert = require('node:assert/strict');
   await viewer.getByRole('button',{name:'Close',exact:true}).click();
   await viewer.waitFor({state:'hidden'});
   await page.getByText('Hydrus',{exact:true}).first().click();
-  await page.getByRole('button',{name:'Search library',exact:true}).click();
   await page.getByRole('button',{name:'Search',exact:true}).click();
   const remote=page.locator('[data-gallery-entry^="hydrus:"]');
   await remote.first().waitFor();

@@ -1,13 +1,13 @@
 # ComfyUI Gallery
 
-## Hydrus edition — 2.7.1-hydrus.8
+## Hydrus edition — 2.7.1-hydrus.9
 
 This customized edition adds image export to the Hydrus Client API, persistent
 SHA-256 export history, cached Hydrus metadata, bulk actions, checkboxes, range
 selection, and image context menus. Search local files by filename, cached Hydrus
 tags, or positive/negative generation prompts. Choose a default tag service and
 override it per export. Optional prompt tags have an editable preview, independent
-of generation notes. Positive tags can be plain or prefixed with `positive_prompt:`;
+of the automatically preserved generation notes. Positive tags can be plain or prefixed with `positive_prompt:`;
 negative tags use `negative_prompt:`. Live tag recommendations and **Add all
 suggestions** are available in export tags, per-image prompt tags, and saved default tags.
 
@@ -18,12 +18,13 @@ open Gallery in a separate browser tab. Bulk-append sources to **Gallery Image
 Source**, crop with pixel controls or a drag rectangle, and stitch horizontally,
 vertically, or in a grid for img2img. The compiled frontend is included.
 
-**New in hydrus.8:** Hydrus video results and playback, checkbox-triggered
-selection mode, counted autocomplete and Enter-to-search, compact OR-group
-editors, stacked local terms, and shared searches with separate Local/Hydrus/Both
-result tabs. Optional offline Danbooru filtering keeps recognized positive prompt
-tags and excludes quality/meta terms. Downloads and imports retain cached Hydrus
-tag correspondence by file hash. See [search and export details](HYDRUS.md).
+**New in hydrus.9:** persistent Hydrus/Both searches, combined-grid randomization,
+automatic source-only result tabs, and AND/OR metadata groups. Appending opens
+per-image prompt controls, can replace/prepend/append chosen workflow prompts,
+and retains source metadata. Dictionary-backed tag fields expand saved prefixes;
+the gallery and Prompt Library share prefix definitions. Transfers always preserve
+metadata, with hash-bound companion files for local copies and downloads.
+See [behavior and limits](HYDRUS.md#hybrid-search-and-prompt-aware-appending-hydrus9).
 
 A **Gallery workspace tab** beside ComfyUI's workflow tabs
 opens a full-width, non-modal grid. Click a workflow tab or **Workflow** to return

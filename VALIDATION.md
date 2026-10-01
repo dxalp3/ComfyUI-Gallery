@@ -196,3 +196,27 @@ latency remain environment-dependent. Download integrity/ranges and file writes
 are checked by backend tests; browser download actions are intercepted. Dictionary
 provenance is recorded in data/. Shared searches match local phrases, not Hydrus
 system predicates. Tag memory is a refreshable snapshot, not two-way editing.
+
+## Hybrid search and prompt-aware workflow append — 2026-10-01 (hydrus.9)
+
+- Backend suite: 85 tests, 83 passed and 2 skipped. New tests cover metadata
+  AND/OR searches, dictionary lookup, additive scoped tag syncing, hash-bound
+  sidecars, unchanged original bytes, sidecar collision protection and source
+  manifest metadata retention. Notes are attempted even when an older client
+  submits send_metadata=false.
+- 26 JavaScript tests pass: explicit prompt targets, replacement/prepend behavior,
+  missing-target rejection before source changes, metadata retention, sidecar tags,
+  prompt notes, shared dates and hybrid predicates. TypeScript/build pass.
+- Six isolated Chrome suites pass, including the new hybrid/prompt suite. It
+  verifies mixed results through random API sampling, API-free reshuffling,
+  exclusive-source fallback, persistent search, source selection override,
+  per-image prefix expansion and filtering, positive/negative target writes,
+  source metadata, and shared prefix saving. Existing image-source, unified-grid,
+  video/selection, library-search and 10,000-file workspace checks pass.
+
+Tests use a mock Hydrus and temporary files. The installed node was read only;
+no live workflow or live Hydrus library was modified. Actual arbitrary third-party
+prompt widgets and codec behavior remain environment-dependent. Cross-source
+prompt search is bounded to the documented 200-candidate metadata scan. There is
+no automatic rewiring of an existing workflow, continuous two-way tag sync, or
+bulk migration of the dictionary into Prompt Library storage.

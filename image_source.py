@@ -100,6 +100,10 @@ def parse_manifest(value):
                     or crop["y"] + crop["height"] > 1 + 1e-9):
                 raise ImageSourceError("Crop must stay inside the image and have a positive width and height.")
             item["crop"] = crop
+        for field in ('metadata', 'prompt'):
+            if field in raw:
+                if not isinstance(raw[field], dict): raise ImageSourceError('Source metadata and prompt controls must be objects.')
+                item[field] = raw[field]
         result["images"].append(item)
     return result
 
@@ -235,8 +239,8 @@ def preview_composition(manifest, input_root):
 
 class GalleryImageSource:
     CATEGORY = "image/gallery"
-    RETURN_TYPES = ("IMAGE", "MASK", "INT", "INT")
-    RETURN_NAMES = ("image", "mask", "width", "height")
+    RETURN_TYPES = ("IMAGE", "MASK", "INT", "INT", "STRING", "STRING", "STRING")
+    RETURN_NAMES = ("image", "mask", "width", "height", "positive", "negative", "source_metadata")
     FUNCTION = "compose"
     DESCRIPTION = "Choose local or Hydrus images in Gallery, crop them, and join them without rescaling."
 
@@ -278,6 +282,9 @@ class GalleryImageSource:
             pixels = np.asarray(image, dtype=np.float32) / 255.0
             rgb = torch.from_numpy(pixels[:, :, :3].copy()).unsqueeze(0)
             mask = torch.from_numpy(1.0 - pixels[:, :, 3]).unsqueeze(0)
-            return rgb, mask, plan.width, plan.height
+            manifest = parse_manifest(sources)
+            def text(side):
+                return ', '.join(str(item.get('prompt', {}).get(side, '')) for item in manifest['images'] if item.get('prompt', {}).get(side))
+            return rgb, mask, plan.width, plan.height, text('positive'), text('negative'), json.dumps(manifest['images'], ensure_ascii=False)
         finally:
             image.close()

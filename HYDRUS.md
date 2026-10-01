@@ -58,7 +58,7 @@ If Git reports local code changes or diverged history, preserve those changes an
 | Import and Delete Files | Import image files. |
 | Search for and Fetch Files, with access to all files | Look up matching hashes and retrieve metadata. |
 | Edit File Tags | Optional tags on export and live search-tag recommendations. |
-| Edit File Notes | Optional generation metadata notes on export. |
+| Edit File Notes | Generation metadata notes are always attempted on export. |
 | Manage Pages | Browse pages open in the main Hydrus client. |
 
 Tag-restricted search keys are unsuitable for the direct hash lookups used here. Setup follows the [official Client API guide](https://hydrusnetwork.github.io/hydrus/client_api.html#enabling-the-api); permission details are in the [Hydrus API reference](https://hydrusnetwork.github.io/hydrus/developer_api.html#access-and-permissions).
@@ -98,7 +98,7 @@ Right-click an image for export, refresh, and metadata actions. If that image is
 
 ### Tags, prompt tags, and generation notes
 
-**Send generation metadata as a note by default** only preselects the note option in the export dialog. It does **not** add prompts as tags. The original image retains its embedded metadata regardless of whether notes or tags are enabled.
+Generation metadata notes are always sent when available; there is no opt-out in the export dialog. This does **not** automatically create tags. Original bytes and embedded metadata remain unchanged. Missing note permission is reported as a partial-transfer warning.
 
 The note is named **ComfyUI Gallery generation metadata**. It includes embedded `prompt`, `workflow`, and `parameters` entries available to Pillow, commonly in ComfyUI PNGs. It does not reconstruct missing metadata or automatically turn prompts into tags. Conflicting existing notes are preserved with a separate name. Notes over 2 MiB are skipped with a warning. A successful file import is retained even if tags, notes, or the subsequent metadata check fail.
 
@@ -380,7 +380,7 @@ selection. Clear selection exits automatic selection mode.
 
 The top local search stacks Enter-confirmed terms with AND, filters immediately,
 and switches to **Local**. Categories include filename, positive/negative prompt,
-and **Hydrus tag**. **Search library** opens the shared query editor. Hydrus tag
+and **Hydrus tag**. The **Hydrus** and **Both** tabs keep their query editor visible. Hydrus tag
 suggestions show actual file counts returned by your client, including zero;
 these are counts in the API's default combined-local-file domain, not global
 Danbooru counts. Enter adds a tag; Enter with no pending text runs the search.
@@ -411,7 +411,7 @@ snapshot is not exhaustive or automatically updated; see [provenance and license
 Hydrus **Download original(s)** now saves verified originals under the actual
 ComfyUI **output/downloads** directory, even while another gallery root is active.
 Names use the SHA-256 hash and detected extension; identical files are reused,
-other content is never overwritten. Local downloads still use the browser.
+other content is never overwritten. Local downloads use a browser ZIP containing originals and metadata companions.
 Image copies for img2img continue to use **input/hydrus**. Downloads, input copies,
 exports, and browsed Hydrus records preserve tag snapshots in Gallery's existing
 SQLite memory, keyed by Hydrus connection/profile and file hash. Local copies with
@@ -426,3 +426,72 @@ fetch the full file from Hydrus before responding. Large clips can therefore tak
 time to start or seek. Browser codec support still determines playback; download
 unsupported formats for an external player. Grid thumbnails use Hydrus's thumbnail
 API rather than downloading every full video.
+
+## Hybrid search and prompt-aware appending (hydrus.9)
+
+Hydrus and Both keep their search controls visible; Local has its own instant
+search bar. Both does not stack that bar above its query. Searches compute local
+matches and Hydrus results separately, then choose Both, Local or Hydrus according
+to which sources actually have matches. An empty result stays Both. Automatic
+fallback retains the hybrid query editor so it can be refined; manually choosing
+a source tab changes the search scope. The source view and random order no longer
+reset each other.
+
+**Gallery order → Random** shuffles the complete loaded grid; **Reshuffle** needs
+no API call. Under **Hydrus result sampling (advanced)**, Random chooses a new
+limited batch from Hydrus on Search and shuffles it together with local matches.
+This samples the remote result set; it does not download an unlimited database.
+Import/file date uses cached Hydrus import timestamps for hash-matching copies,
+otherwise local file time. Missing dates sort last. Other Hydrus-specific sampling
+options do not remove local matches.
+
+**Metadata group** is available in Hydrus and Both, including positive prompt,
+negative prompt, Hydrus tags, names/hashes and all fields. Choose **Tag query AND
+metadata group** or **Tag query OR metadata group**; terms within the metadata
+group are ANDed. Local Hydrus-tag searches use cached tags and hash-verified
+sidecars. Hydrus prompt searches inspect saved Gallery generation notes on up to
+200 candidates (the tag-query batch for AND, or a separate notes batch for OR).
+The UI reports the scan count. This is deliberately bounded and can miss older
+matches outside that batch; it is not a full database text index. Notes cannot
+reconstruct prompts absent from both original files and saved metadata.
+
+**Append to Image Source / Append for img2img** now opens **Append images and
+prompts**. Choose the source node and review each image's positive and negative
+terms independently. Both sides start disabled, so a pose reference contributes
+only its pixels unless enabled. Remove unwanted terms, or type a saved prefix
+name (explicit `@name` also works) to expand it into editable terms. Select prompt
+widgets explicitly and choose replace, before or after. Missing targets are
+reported; empty contributions leave existing widgets intact. The source editor
+opens after a successful append so the operation is visible. **Save copy to input
+only** is explicitly separate and does not claim to modify a workflow.
+
+Gallery Image Source retains per-image metadata and selected prompt contributions
+in the workflow. Its existing IMAGE/MASK/width/height outputs retain their indices;
+new positive, negative and source_metadata STRING outputs follow them. Connect
+IMAGE to your VAE Encode or ControlNet image input; the gallery does not guess
+which arbitrary graph connection should be replaced. The editor can change each
+image's prompt output later. Direct prompt-target writes happen on append only.
+
+Image Hydrus-tag controls start with all known tags. **Load selected Hydrus tags into the positive prompt** independently enables tag-to-prompt loading. Remove individual tags, add
+vocabulary terms, or expand prefixes. The optional sync checkbox **adds** selected
+tags to the corresponding hash using the configured Hydrus tag service; omitted
+tags are not deleted. A sync failure is reported separately after the workflow
+append and cannot silently duplicate the append on retry. Metadata is retained
+whether prompt loading or tag syncing is enabled or not.
+
+**Prompts & prefixes** now edits the same version-2 definitions as Prompt Library.
+Dictionary suggestions are shared with tag fields instead of copying 140,782 rows
+into the prefix database. Saving a prefix adds only selected definitions; existing
+unrelated entries remain intact. Use **Edit prefix** on a library row to load it.
+User data is used when available, with the node's same browser-storage fallback.
+Existing open Prompt Library editors may need reopening to see external edits.
+
+Uploads always attempt the generation note. Input copies and Hydrus output
+downloads write `<filename>.gallery.json` companions with SHA-256-bound metadata;
+the original bytes do not change. Local downloads are ZIPs containing originals
+and companions (128 MiB combined limit). Keep companion files with their originals
+when moving outside the gallery. Metadata warnings indicate partial completion,
+not loss of the already preserved original. Companions are ignored after file
+bytes change; unrelated companion content is not overwritten. Gallery routing
+rules still move originals only, so use hash-cache refresh or move their companions
+alongside files when relying on portable metadata after organization.

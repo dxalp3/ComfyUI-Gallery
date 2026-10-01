@@ -11,11 +11,13 @@ from aiohttp import web
 from PIL import Image
 
 try:
+    from .transfer_metadata import read_metadata, write_metadata
     from .thumbnails import register_thumbnail_routes
     from .hydrus import HydrusError, resolve_image
     from .image_source import (ImageSourceError, MAX_SOURCE_BYTES, file_fingerprint,
                                inspect_image, preview_composition)
 except ImportError:  # Standalone unit tests.
+    from transfer_metadata import read_metadata, write_metadata
     from thumbnails import register_thumbnail_routes
     from hydrus import HydrusError, resolve_image
     from image_source import (ImageSourceError, MAX_SOURCE_BYTES, file_fingerprint,
@@ -71,7 +73,9 @@ def import_local_image(gallery_root, input_root, url):
                     actual.update(chunk)
             if actual.hexdigest() != digest.hexdigest():
                 raise ImageSourceError("A different file occupies the saved gallery source path; it was not overwritten.")
-        return {"input_name": "gallery_sources/" + destination.name,
+        metadata = read_metadata(source)
+        write_metadata(destination, digest.hexdigest(), metadata)
+        return {"metadata": metadata, "input_name": "gallery_sources/" + destination.name,
                 "url": "/view?" + urlencode({"filename": destination.name, "subfolder": "gallery_sources", "type": "input"}),
                 "width": width, "height": height, "title": source.name, "hash": digest.hexdigest()}
     finally:
@@ -98,6 +102,9 @@ def register_source_routes(routes, get_gallery_root, get_input_root):
             async with workers:
                 if action == "local":
                     result = await asyncio.to_thread(import_local_image, get_gallery_root(), get_input_root(), data.get("url"))
+                    if isinstance(data.get('metadata'), dict):
+                        result['metadata'] = {**data['metadata'], **result.get('metadata', {})}
+                        await asyncio.to_thread(write_metadata, Path(get_input_root()) / result['input_name'], result['hash'], result['metadata'])
                     return web.json_response(result)
                 image, width, height = await asyncio.to_thread(preview_composition, data.get("manifest"), get_input_root())
                 return web.Response(body=image, content_type="image/png", headers={

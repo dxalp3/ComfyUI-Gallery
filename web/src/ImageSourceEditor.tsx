@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { PointerEvent } from 'react';
-import { Alert, Button, Empty, InputNumber, Modal, Select, Space, Spin, Tag, Typography } from 'antd';
+import { Alert, Button, Empty, Input, InputNumber, Modal, Select, Space, Spin, Tag, Typography } from 'antd';
 import { BASE_Z_INDEX } from './ComfyAppApi';
 import { clampCrop, cropFromPoints, emptyImageSourceManifest, sourceImageUrl } from './ImageSourceGeometry';
 import type { ImageSourceCrop, ImageSourceManifest } from './ImageSourceGeometry';
@@ -172,6 +172,8 @@ export function ImageSourceEditor({ open, manifest, onApply, onClose, onBrowse }
                 </div>
                 <div className="gallery-source-main">
                     {active && <>
+                        <Typography.Text strong>Prompt contribution for this image (empty means image only)</Typography.Text>
+                        {(['positive', 'negative'] as const).map(side => <Input.TextArea key={side} aria-label={'Source ' + side + ' prompt'} value={active.prompt?.[side] || ''} onChange={event => setDraft(old => ({ ...old, images: old.images.map((image, index) => index === selected ? { ...image, prompt: { positive: '', negative: '', tags: [], ...image.prompt, [side]: event.target.value } } : image) }))} placeholder={side + ' prompt output'} />)}
                         <Space wrap style={{ justifyContent: 'space-between', width: '100%' }}><Typography.Title level={5} style={{ margin: 0 }}>Crop image {selected + 1}</Typography.Title>{size && <Typography.Text type="secondary">Original: {size.width} × {size.height}</Typography.Text>}</Space>
                         <Typography.Text type="secondary">Drag a rectangle on the image or enter an exact crop below. Cropping removes pixels from the output.</Typography.Text>
                         <div className="gallery-source-stage">

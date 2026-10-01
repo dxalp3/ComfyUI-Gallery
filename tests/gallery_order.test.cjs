@@ -12,3 +12,11 @@ test('mixed dates interleave sources without mutating input', () => { assert.dee
 test('missing hash always sorts last', () => { for (const asc of [true, false]) assert.equal(orderGallery(entries, 'hash', asc, 1).at(-1).id, 'local:a'); });
 test('random is stable through selection updates and changes on reshuffle', () => { const many=Array.from({length:100},(_,i)=>({id:'file:'+i})); assert.deepEqual(orderGallery(many,'random',false,5),orderGallery(many,'random',false,5)); assert.notDeepEqual(orderGallery(many,'random',false,5),orderGallery(many,'random',false,6)); });
 test('search order preserves Hydrus server order', () => assert.deepEqual(orderGallery(entries, 'result', false, 1), entries));
+
+test('matching copies share Hydrus import time, unlinked files fall back to file time', () => {
+ const { galleryDate } = compiled.exports;
+ assert.equal(galleryDate({file_services:{current:{local:{time_imported:100}}}},200),100);
+ assert.equal(galleryDate({time_imported:80,file_services:{current:{local:{time_imported:100}}}}),100);
+ assert.equal(galleryDate({},200),200);
+ assert.equal(galleryDate({time_imported:NaN}),undefined);
+});

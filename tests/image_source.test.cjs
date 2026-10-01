@@ -40,7 +40,7 @@ function bridgeFixture() {
         comfyClass: 'GalleryImageSource', widgets: [{ name: 'sources', value: JSON.stringify(geometry.emptyImageSourceManifest()) }],
         addWidget(type, name, value, callback, options) { this.widgets.push({ type, name, value, callback, options }); },
     }; } } };
-    const bridge = compile('ImageSourceBridge', { window }, { './ComfyAppApi': { getComfyApp: () => app, STANDALONE: false }, './ImageSourceGeometry': geometry });
+    const bridge = compile('ImageSourceBridge', { window, CustomEvent: class { constructor(type, detail) { this.type=type;this.detail=detail; } } }, { './ComfyAppApi': { getComfyApp: () => app, STANDALONE: false }, './ImageSourceGeometry': geometry });
     return { bridge, graph, app };
 }
 test('append creates one dedicated node and keeps serialized crop/layout across later appends', async () => {
@@ -70,4 +70,18 @@ test('explicit targets, deleted nodes and source count limits are checked', asyn
     assert.equal(bridge.readSourceManifest(first).images.length, 32);
     graph._nodes.splice(0, 1);
     assert.throws(() => bridge.saveSourceManifest(first, geometry.emptyImageSourceManifest()), /no longer/);
+});
+
+test('explicit prompt targets preserve per-image metadata and obey prepend/append/replace', async () => {
+ const {bridge,graph}=bridgeFixture();
+ graph.add({title:'Positive',widgets:[{name:'text',value:'original'}]});
+ const key=JSON.stringify(['1',0]);
+ await bridge.appendToImageSource([{input_name:'pose.png',metadata:{positive:'original metadata'},prompt:{positive:'standing',negative:'',tags:[]}}],{positive:key,mode:'before'});
+ assert.equal(graph._nodes[0].widgets[0].value,'standing, original');
+ assert.equal(bridge.readSourceManifest(graph._nodes[1]).images[0].metadata.positive,'original metadata');
+ await bridge.appendToImageSource([{input_name:'pose2.png',prompt:{positive:'blue eyes',negative:'',tags:[]}}],{positive:key,mode:'replace'});
+ assert.equal(graph._nodes[0].widgets[0].value,'blue eyes');
+ const length=bridge.readSourceManifest(graph._nodes[1]).images.length;
+ await assert.rejects(bridge.appendToImageSource([{input_name:'bad.png'}],{positive:JSON.stringify(['999',0]),mode:'after'}),/no longer/);
+ assert.equal(bridge.readSourceManifest(graph._nodes[1]).images.length,length);
 });

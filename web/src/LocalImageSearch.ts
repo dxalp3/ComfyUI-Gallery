@@ -2,7 +2,7 @@ import type { FileDetails } from './types';
 
 export type LocalSearchField = 'all' | 'name' | 'hydrus' | 'positive' | 'negative';
 export interface LocalPrompts { positive: string; negative: string }
-export type LibrarySearch = { tags: string[]; match: 'all' | 'any'; orGroups: string[][]; share: boolean; localTerms: string[]; localField: LocalSearchField };
+export type LibrarySearch = { tags: string[]; match: 'all' | 'any'; orGroups: string[][]; share: boolean; localTerms: string[]; localField: LocalSearchField; fieldJoin?: 'all' | 'any' };
 
 /** Source branches are ORed. Terms inside each branch retain their AND/OR choice. */
 export function matchesLibrarySearch(file: FileDetails, search: LibrarySearch, tags: string[], prompts: LocalPrompts): boolean {
@@ -10,7 +10,7 @@ export function matchesLibrarySearch(file: FileDetails, search: LibrarySearch, t
     if (!hasRemote && !search.localTerms.length) return true;
     const normalize = (value: string) => value.toLocaleLowerCase().replace(/_/g, ' ').trim();
     const phrases = prompts.positive.split(/[,\n]+/).map(value => normalize(value.trim().replace(/^\((.*):[\d.]+\)$/, '$1')));
-    const cached = tags.map(normalize);
+    const cached = [...tags, ...extractHydrusTags(file.metadata)].map(normalize);
     const term = (value: string): boolean => {
         const negative = value.startsWith('-');
         const wanted = normalize(negative ? value.slice(1) : value);
@@ -23,7 +23,7 @@ export function matchesLibrarySearch(file: FileDetails, search: LibrarySearch, t
     const shared = search.share && hasRemote && filters.every(term) &&
         (!positive.length || (search.match === 'any' ? positive.some(term) : positive.every(term))) && search.orGroups.every(group => group.some(term));
     const local = search.localTerms.length > 0 && search.localTerms.every(value => matchesLocalImage(file, value, search.localField, tags, prompts));
-    return shared || local;
+    return search.fieldJoin === 'all' && hasRemote && search.localTerms.length ? shared && local : shared || local;
 }
 type Polarity = keyof LocalPrompts;
 type Node = { type: string; title: string; inputs: Record<string, unknown>; widgets?: unknown[] };
@@ -135,7 +135,10 @@ function collectGraph(graph: Map<string, Node>): LocalPrompts {
 
 /** API prompts are authoritative; saved-workflow links and explicit fields fill missing sides. */
 export function extractLocalPrompts(metadata: unknown): LocalPrompts {
-    const source = object(metadata);
+    const raw = object(metadata);
+    const hydrus = object(raw.hydrus || raw);
+    const notes = Object.entries(object(hydrus.notes)).filter(([name]) => name.startsWith('ComfyUI Gallery generation metadata')).map(([, value]) => object(value));
+    const source = Object.assign({}, ...notes, raw);
     const directPrompt = object(source.prompt);
     const api = collectGraph(promptGraph(source.prompt));
     const workflow = (!api.positive || !api.negative) ? collectGraph(workflowGraph(source.workflow)) : { positive: '', negative: '' };
@@ -157,7 +160,7 @@ export function extractLocalPrompts(metadata: unknown): LocalPrompts {
 /** Active cached tags across services, including Hydrus' sibling-resolved display tags. */
 export function extractHydrusTags(metadata: unknown): string[] {
     const result = new Set<string>();
-    for (const service of Object.values(object(object(metadata).tags))) {
+    for (const service of Object.values(object(object(metadata).tags || object(object(metadata).hydrus).tags))) {
         const entry = object(service);
         for (const tags of [entry.display_tags, entry.storage_tags]) {
             const statuses = object(tags);
@@ -178,7 +181,7 @@ export function matchesLocalImage(file: Pick<FileDetails, 'name' | 'metadata'>, 
     const parsed = prompts || (field === 'all' || field === 'positive' || field === 'negative' ? extractLocalPrompts(file.metadata) : { positive: '', negative: '' });
     const contains = (value: string) => value.toLocaleLowerCase().includes(needle);
     return ((field === 'all' || field === 'name') && contains(file.name || '')) ||
-        ((field === 'all' || field === 'hydrus') && hydrusTags.some(contains)) ||
+        ((field === 'all' || field === 'hydrus') && [...hydrusTags, ...extractHydrusTags(file.metadata)].some(contains)) ||
         ((field === 'all' || field === 'positive') && contains(parsed.positive)) ||
         ((field === 'all' || field === 'negative') && contains(parsed.negative));
 }

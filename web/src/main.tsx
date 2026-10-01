@@ -1,6 +1,6 @@
 import { installWorkspaceTab, openWorkspace, closeWorkspace } from './GalleryWorkspace';
 import { getComfyApp } from './ComfyAppApi';
-import { installSourceWidgets } from './ImageSourceBridge';
+import { installSourceWidgets, registerSourceConstructor } from './ImageSourceBridge';
 import { createRoot } from 'react-dom/client'
 import Gallery from './Gallery.tsx'
 import App from 'antd/es/app/App';
@@ -37,6 +37,7 @@ if (STANDALONE) {
         document.body.appendChild(box);
         createRoot(box).render(<Main />);
     },
+    beforeRegisterNodeDef(nodeType: any, nodeData: any) { if (nodeData.name === 'GalleryImageSource') registerSourceConstructor(nodeType); },
     afterConfigureGraph() { closeWorkspace(); },
     async nodeCreated(node: any) {
         installSourceWidgets(node);

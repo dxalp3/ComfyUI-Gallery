@@ -14,10 +14,14 @@ type Page = { page_key: string; name: string; is_media_page: boolean; selected?:
 type Results = { items: RemoteImage[]; total: number; offset?: number; page_name?: string; page_state?: number };
 type InputCopy = { name: string; subfolder: string; type: string; input_name: string; url: string; hash: string };
 
-export function HydrusBrowser({ open, source = 'hydrus', searchOpen, onSearchComplete, onSourceChange }: { onSourceChange: (source: string) => void; source?: string; open: boolean; searchOpen: boolean; onSearchComplete: () => void }) {
+export function HydrusBrowser({ open, source = 'hydrus', searchMode, viewRevision, onSourceChange }: { onSourceChange: (source: string) => void; source?: string; open: boolean; searchMode: string; viewRevision: number }) {
     const gallery = useGalleryContext();
+    const hybrid = searchMode === 'both';
     const [shareTags, setShareTags] = useState(true);
+    const autoView = useRef<number | null>(null);
+    const [sortRequest, setSortRequest] = useState<{ type: number; ascending: boolean; revision: number }>();
     const [localBranch, setLocalBranch] = useState<string[]>([]);
+    const [fieldJoin, setFieldJoin] = useState<'all' | 'any'>('any');
     const [localField, setLocalField] = useState<LocalSearchField>('positive');
     const [localQuery, setLocalQuery] = useState('');
     const [localEditor, setLocalEditor] = useState(false);
@@ -42,6 +46,7 @@ export function HydrusBrowser({ open, source = 'hydrus', searchOpen, onSearchCom
     const [error, setError] = useState('');
     const [progress, setProgress] = useState('');
     const requestVersion = useRef(0);
+    const lastSampling = useRef('2:false');
     const cancelCopies = useRef(false);
     const cancelDownloads = useRef(false);
     const actionBusy = useRef(false);
@@ -53,14 +58,22 @@ export function HydrusBrowser({ open, source = 'hydrus', searchOpen, onSearchCom
     }, [scope]);
     useEffect(() => { if (!open) { requestVersion.current++; cancelCopies.current = true; cancelDownloads.current = true; setBusy(false); } }, [open]);
 
+    useEffect(() => { requestVersion.current++; setBusy(false); }, [viewRevision]);
+    const localCount = gallery.imagesDetailsList.filter(file => !['divider', 'empty-space'].includes(file.type)).length;
+    useEffect(() => {
+        if (autoView.current !== viewRevision || busy || !result || !hybrid) return;
+        onSourceChange(localCount && result.items.length ? 'both' : localCount ? 'local' : result.items.length ? 'hydrus' : 'both');
+    }, [localCount, result, busy, hybrid, viewRevision, onSourceChange]);
+
     const read = async (kind: 'search' | 'pages' | 'page', key = pageKey, offset = 0) => {
         const version = ++requestVersion.current;
         setBusy(true); setError(''); setNotice('');
         if (kind !== 'pages') { setResult(undefined); setSelected([]); }
         if (kind === 'search') {
-            gallery.setLibrarySearch({ tags, match, orGroups, share: shareTags, localTerms: localBranch, localField });
+            autoView.current = hybrid ? viewRevision : null;
+            gallery.setLibrarySearch(hybrid ? { tags, match, orGroups, share: shareTags, localTerms: localBranch, localField, fieldJoin } : null);
             gallery.setSearchFileName(''); gallery.setLocalTerms([]);
-            onSourceChange(source === 'both' || localBranch.length || (shareTags && (tags.length || orGroups.length)) ? 'both' : 'hydrus');
+            onSourceChange(hybrid ? 'both' : 'hydrus');
         }
         try {
             if (kind === 'pages') {
@@ -68,10 +81,15 @@ export function HydrusBrowser({ open, source = 'hydrus', searchOpen, onSearchCom
                 if (version !== requestVersion.current) return;
                 setPages(data.pages?.pages || (data.pages?.is_media_page ? [data.pages] : []));
             } else {
-                const data = (!settings?.has_access_key || localBranch.length > 0 && !tags.length && !orGroups.length) && kind === 'search' ? { items: [], total: 0 } : await hydrusRequest<Results>(kind, kind === 'search' ? { tags, match, limit, or_groups: orGroups, file_sort_type: sortType, file_sort_asc: ascending } : { page_key: key, offset, limit });
+                const data = !settings?.has_access_key && kind === 'search' ? { items: [], total: 0 } : await hydrusRequest<Results>(kind, kind === 'search' ? { tags, match, limit, metadata_terms: localBranch, metadata_field: localField, field_join: fieldJoin, or_groups: orGroups, file_sort_type: sortType, file_sort_asc: ascending } : { page_key: key, offset, limit });
                 if (version !== requestVersion.current) return;
                 setResult(data); reloadMemory();
-                onSearchComplete();
+                if (kind === 'search') {
+                    const sampling = `${sortType}:${ascending}`;
+                    if (sampling !== lastSampling.current || sortType === 4) setSortRequest({ type: sortType, ascending, revision: version });
+                    lastSampling.current = sampling;
+                }
+                else { autoView.current = null; onSourceChange('hydrus'); }
             }
         } catch (reason) { if (version === requestVersion.current) setError(reason instanceof Error ? reason.message : String(reason)); }
         finally { if (version === requestVersion.current) setBusy(false); }
@@ -131,27 +149,28 @@ export function HydrusBrowser({ open, source = 'hydrus', searchOpen, onSearchCom
         children: page.pages ? treeData(page.pages) : undefined }));
     const items = result?.items || [];
     return <section className="cg-browser" aria-label="Gallery results">
-        <div className="cg-hydrus-search" style={{ display: !searchOpen ? 'none' : undefined }}>
+        <div className="cg-hydrus-search" style={{ display: searchMode === 'local' ? 'none' : undefined }}>
             {!settings?.has_access_key && <Alert type="warning" message="Configure your Hydrus connection first." action={<Button onClick={() => setSettingsOpen(true)}>Open settings</Button>} />}
-            <Tabs activeKey={tab} onChange={changeTab} items={[{ key: 'search', label: 'Library search', disabled: working }, { key: 'pages', label: 'Open client pages', disabled: working }]} />
-            {tab === 'search' ? <><Space wrap style={{ marginBottom: 8 }}><Checkbox checked={shareTags} onChange={event => setShareTags(event.target.checked)}>Match these Hydrus tags against local prompts and cached tags too</Checkbox><Button onClick={() => setLocalEditor(true)}>OR local group{localBranch.length ? ' (' + localBranch.length + ')' : ''}</Button>{!!localBranch.length && <Tag closable onClose={() => setLocalBranch([])} title={localBranch.join(' AND ')}>{localField}: {localBranch.join(' AND ').slice(0, 90)}</Tag>}</Space><HydrusSearchPanel tags={tags} setTags={setTags} match={match} setMatch={setMatch} limit={limit} setLimit={setLimit}
+            <Tabs activeKey={tab} onChange={changeTab} items={[{ key: 'search', label: hybrid ? 'Search both libraries' : 'Search Hydrus', disabled: working }, { key: 'pages', label: 'Open client pages', disabled: working }]} />
+            {tab === 'search' ? <>{<Space wrap style={{ marginBottom: 8 }}>{hybrid && <Checkbox checked={shareTags} onChange={event => setShareTags(event.target.checked)}>Match these Hydrus tags against local prompts and cached tags too</Checkbox>}<Button onClick={() => setLocalEditor(true)}>Metadata group{localBranch.length ? ' (' + localBranch.length + ')' : ''}</Button>{!!localBranch.length && <Tag closable onClose={() => setLocalBranch([])} title={localBranch.join(' AND ')}>{localField}: {localBranch.join(' AND ').slice(0, 90)}</Tag>}</Space>}<HydrusSearchPanel localSuggestions={hybrid ? localSuggestions : []} tags={tags} setTags={setTags} match={match} setMatch={setMatch} limit={limit} setLimit={setLimit}
                 orGroups={orGroups} setOrGroups={setOrGroups} sortType={sortType} setSortType={setSortType} ascending={ascending} setAscending={setAscending}
-                busy={busy} disabled={working} configured={!!settings?.has_access_key || !!localBranch.length} scope={scope} onSearch={() => read('search')} inputRef={searchRef} /></> : <>
+                busy={busy} disabled={working} configured={hybrid || !!settings?.has_access_key} scope={scope} onSearch={() => read('search')} inputRef={searchRef} /></> : <>
                 <Space wrap><Button loading={busy} disabled={working} onClick={() => read('pages')}>Reload open pages</Button><Button disabled={!pageKey || busy || working} onClick={() => read('page')}>Reload page images</Button><span>Requires Manage Pages permission.</span></Space>
                 <Tree style={{ maxHeight: 180, overflow: 'auto' }} key={JSON.stringify(pages)} defaultExpandAll treeData={treeData(pages)} selectedKeys={[pageKey]} disabled={working}
                     onSelect={keys => { if (keys.length) { const key = String(keys[0]); setPageKey(key); void read('page', key); } }} />
                 {result && <Space style={{ marginBottom: 12 }}><Button disabled={!result.offset || busy || working} onClick={() => read('page', pageKey, Math.max(0, (result.offset || 0) - limit))}>Previous page</Button><span>Files {(result.offset || 0) + (result.total ? 1 : 0)}–{Math.min((result.offset || 0) + limit, result.total)} of {result.total}</span><Button disabled={(result.offset || 0) + limit >= result.total || busy || working} onClick={() => read('page', pageKey, (result.offset || 0) + limit)}>Next page</Button></Space>}
             </>}
         </div>
-        <Modal title="OR local search group" open={localEditor} onCancel={() => setLocalEditor(false)} onOk={() => setLocalEditor(false)} okText="Use local group" zIndex={3030}>
-            <p>Hydrus tag query OR these local terms. Local terms are ANDed together across all loaded folders.</p>
-            <Select aria-label="Local group category" value={localField} onChange={setLocalField} options={['all', 'positive', 'negative', 'hydrus', 'name'].map(value => ({ value, label: value === 'hydrus' ? 'Hydrus tag (cached)' : value }))} style={{ width: '100%', marginBottom: 8 }} />
+        <Modal title="Metadata search group" open={localEditor} onCancel={() => setLocalEditor(false)} onOk={() => setLocalEditor(false)} okText="Use metadata group" zIndex={3030}>
+            <p>Search available prompts, cached Hydrus tags or identifiers. Terms in this group are ANDed. Combine this group with the tag query using AND or OR.</p>
+            <Select aria-label="Combine search groups" value={fieldJoin} onChange={setFieldJoin} options={[{value:"any",label:"Tag query OR metadata group"},{value:"all",label:"Tag query AND metadata group"}]} style={{width:"100%",marginBottom:8}} /><Select aria-label="Local group category" value={localField} onChange={setLocalField} options={['all', 'positive', 'negative', 'hydrus', 'name'].map(value => ({ value, label: value === 'hydrus' ? 'Hydrus tag (cached)' : value }))} style={{ width: '100%', marginBottom: 8 }} />
             <Select mode="tags" aria-label="Local group terms" value={localBranch} onChange={setLocalBranch} onSearch={setLocalQuery} options={localSuggestions.filter(value => value.toLocaleLowerCase().includes(localQuery.toLocaleLowerCase())).slice(0, 100).map(value => ({ value, label: value }))} style={{ width: '100%' }} placeholder="Enter adds a prompt or identifier" />
         </Modal>
-        {gallery.librarySearch && <Space wrap style={{ marginBottom: 8 }}><small>Library query · local {shareTags ? 'shared tags' : 'group'} OR Hydrus results · all loaded folders</small><Button size="small" onClick={() => gallery.setLibrarySearch(null)}>Clear local query</Button></Space>}
+        {hybrid && gallery.librarySearch && <Space wrap style={{ marginBottom: 8 }}><small>{localCount} local · {items.length} Hydrus · all loaded folders</small><Button size="small" onClick={() => gallery.setLibrarySearch(null)}>Clear local query</Button></Space>}
+        {result && (result as any).metadata_scanned !== undefined && <Alert type="info" message={`Metadata search checked ${(result as any).metadata_scanned} Hydrus candidates. Prompt matches require saved generation notes; this is a bounded scan, not a complete database index.`} />}
         {error && <Alert type="error" showIcon message={error} style={{ marginBottom: 12, whiteSpace: 'pre-wrap' }} />}
         {notice && <Alert type="success" showIcon message={notice} style={{ marginBottom: 12 }} />}
         {(busy || working) && <Space><Spin size="small" /><span aria-live="polite">{progress || 'Searching Hydrus…'}</span>{working && <Button onClick={() => { cancelCopies.current = true; cancelDownloads.current = true; }}>Cancel remaining</Button>}</Space>}
-        <UnifiedGallery onTrashed={hashes => setResult(old => old ? { ...old, items: old.items.filter(item => !hashes.includes(item.hash)), total: Math.max(0, old.total - hashes.length) } : old)} source={source} remote={items} selectedRemote={selected} setSelectedRemote={setSelected} copy={copy} download={download} working={working} scope={scope} active={open} />
+        <UnifiedGallery sortRequest={sortRequest} onTrashed={hashes => setResult(old => old ? { ...old, items: old.items.filter(item => !hashes.includes(item.hash)), total: Math.max(0, old.total - hashes.length) } : old)} source={source} remote={items} selectedRemote={selected} setSelectedRemote={setSelected} copy={copy} download={download} working={working} scope={scope} active={open} />
     </section>;
 }

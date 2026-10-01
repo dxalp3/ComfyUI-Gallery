@@ -97,7 +97,7 @@ class CompositionTests(unittest.TestCase):
         saved.write_bytes(b'unrelated existing data')
         with self.assertRaises(ImageSourceError): import_local_image(self.root, input_root, '/static_gallery/red.png')
         self.assertEqual(saved.read_bytes(), b'unrelated existing data')
-        self.assertEqual(len(list((input_root / 'gallery_sources').iterdir())), 1)
+        self.assertEqual(len(list((input_root / 'gallery_sources').iterdir())), 2)
 
 
 class SourceRoutesTests(unittest.IsolatedAsyncioTestCase):

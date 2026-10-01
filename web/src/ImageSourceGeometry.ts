@@ -1,5 +1,5 @@
 export type ImageSourceCrop = { x: number; y: number; width: number; height: number };
-export type ImageSourceImage = { input_name: string; title?: string; crop?: ImageSourceCrop };
+export type ImageSourceImage = { input_name: string; title?: string; crop?: ImageSourceCrop; metadata?: Record<string, any>; prompt?: { positive: string; negative: string; tags: string[] } };
 export type ImageSourceManifest = {
     version: 1;
     images: ImageSourceImage[];
@@ -41,4 +41,10 @@ export function sourceImageUrl(inputName: string): string {
     const slash = normalized.lastIndexOf('/');
     const query = new URLSearchParams({ filename: normalized.slice(slash + 1), subfolder: slash < 0 ? '' : normalized.slice(0, slash), type: 'input' });
     return `/view?${query}`;
+}
+
+export type PromptApply = { positive?: string; negative?: string; mode: 'replace' | 'before' | 'after' };
+export function mergePrompt(old: string, added: string, mode: PromptApply['mode']) {
+    if (!added.trim()) return old;
+    return mode === 'replace' ? added : (mode === 'before' ? [added, old] : [old, added]).filter(Boolean).join(', ');
 }

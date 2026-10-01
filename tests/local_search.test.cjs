@@ -156,3 +156,13 @@ test('source branches preserve AND, OR, exclusions and exact normalized prompt t
  assert.equal(match({tags:['system:inbox']}),false);
  assert.equal(match({tags:[],share:false,localTerms:[]}),true);
 });
+
+test('downloaded Hydrus notes expose polarity without guessing from tags',()=>{
+ const metadata={hydrus:{notes:{'ComfyUI Gallery generation metadata':JSON.stringify({positive:'standing',negative:'blurry'})},tags:{service:{display_tags:{0:['blue hair']}}}}};
+ assert.deepEqual(extractLocalPrompts(metadata),{positive:'standing',negative:'blurry'});
+ assert.deepEqual(extractHydrusTags(metadata),['blue hair']);
+ assert.equal(matchesLocalImage({name:'download.png',metadata},'blue hair','hydrus',[]),true);
+ const search={tags:['blue hair'],match:'all',orGroups:[],share:true,localTerms:['missing'],localField:'positive',fieldJoin:'all'};
+ assert.equal(compiled.exports.matchesLibrarySearch({name:'x'},search,['blue hair'],{positive:'standing',negative:''}),false);
+ assert.equal(compiled.exports.matchesLibrarySearch({name:'x'},{...search,fieldJoin:'any'},['blue hair'],{positive:'standing',negative:''}),true);
+});

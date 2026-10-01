@@ -231,7 +231,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         tag_call = next(call[1] for call in self.fake.calls if call[0] == "/add_tags/add_tags")
         self.assertEqual(tag_call["service_keys_to_tags"], {"abcd": ["default:tag", "positive_prompt:blue sky", "negative_prompt:blurry"]})
         self.assertEqual(self.bridge.settings.load()["tag_service_key"], "1234")
-        self.assertFalse(any(call[0] == "/add_notes/set_notes" for call in self.fake.calls))
+        self.assertTrue(any(call[0] == "/add_notes/set_notes" for call in self.fake.calls))
         self.fake.calls.clear()
         await self.export()
         tag_call = next(call[1] for call in self.fake.calls if call[0] == "/add_tags/add_tags")

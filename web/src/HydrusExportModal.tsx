@@ -102,7 +102,7 @@ export function HydrusExportModal() {
                 setActiveUrl(url);
                 let item: HydrusItem;
                 try {
-                    const response = await hydrusRequest<HydrusBatch>('export', { urls: [url], tags: [...tags, ...imageTags(url)], tag_service_key: serviceKey, send_metadata: sendMetadata });
+                    const response = await hydrusRequest<HydrusBatch>('export', { urls: [url], tags: [...tags, ...imageTags(url)], tag_service_key: serviceKey, send_metadata: true });
                     item = response.items.find(entry => entry.url === url) || { url, success: false, error: 'No result returned for this image.' };
                     mergeItems([item]);
                 } catch (error) {
@@ -165,7 +165,7 @@ export function HydrusExportModal() {
             <HydrusTagSelect label={`Prompt tags for ${imageFiles[url]?.name || url}`} value={imageTags(url)} onChange={values => setEditedPromptTags(previous => ({ ...previous, [url]: values }))} disabled={running} active={exportUrls.length > 0} serviceKey={serviceKey} style={{ width: '100%' }} placeholder="Type to find or add tags" />
         </div>) }]} />}
         {invalidTags && <Alert type="warning" message="Shorten the tag preview: at most 500 tags per image and 1,024 characters per tag are supported." style={{ marginBottom: 12 }} />}
-        <Checkbox checked={sendMetadata} disabled={running} onChange={event => setSendMetadata(event.target.checked)}>Send generation metadata as a Hydrus note</Checkbox>
+        <Typography.Text strong>Generation metadata is always preserved and sent as a Hydrus note when available.</Typography.Text>
         <Typography.Paragraph type="secondary" style={{ margin: '6px 0 16px' }}>Includes available prompt, workflow and parameters; requires notes permission. Existing embedded metadata stays in the original image either way.</Typography.Paragraph>
         {(running || completed > 0) && <div aria-live="polite">
             <Progress percent={Math.round(completed / exportUrls.length * 100)} status={running ? 'active' : failed.length ? 'exception' : undefined} />

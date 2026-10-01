@@ -20,3 +20,10 @@ export function orderGallery(entries: GalleryEntry[], order: GalleryOrder, ascen
         return (ascending ? compare : -compare) || a.id.localeCompare(b.id);
     });
 }
+
+/** Shared copies use their cached Hydrus import time; unlinked locals use file time. */
+export function galleryDate(metadata: any, fallback?: number): number | undefined {
+    const times = [metadata?.time_imported, ...Object.values(metadata?.file_services?.current || {}).map((service: any) => service.time_imported)]
+        .filter((value): value is number => typeof value === 'number' && Number.isFinite(value) && value > 0);
+    return times.length ? Math.max(...times) : fallback;
+}

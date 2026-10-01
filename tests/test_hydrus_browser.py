@@ -27,6 +27,7 @@ class BrowserTests(unittest.IsolatedAsyncioTestCase):
         self.digest = hashlib.sha256(self.original).hexdigest()
         self.calls = []
         self.trash_payload = None
+        self.synced_tags = None
         self.page_mode = 'nested'
         self.suggestion_payload = {'tags': [{'value': 'landscape', 'count': 12},
                                             {'value': 'landscape:mountain', 'count': 5}]}
@@ -42,6 +43,9 @@ class BrowserTests(unittest.IsolatedAsyncioTestCase):
             if request.path == '/add_files/delete_files':
                 self.trash_payload = await request.json()
                 return web.Response(status=200)
+            if request.path == '/add_tags/add_tags':
+                self.synced_tags = await request.json()
+                return web.json_response({})
             self.assertEqual(request.headers.get('Hydrus-Client-API-Access-Key'), 'ab' * 32)
             self.calls.append((request.path, dict(request.query)))
             if request.path == '/verify_access_key':
@@ -367,6 +371,31 @@ class BrowserTests(unittest.IsolatedAsyncioTestCase):
         result = await self.post('danbooru_tags', {'texts': ['masterpiece, best quality, blue hair, (red_eyes:1.2), blue_hair']})
         self.assertEqual(result['tags'], [['blue_hair', 'red_eyes']])
         self.assertEqual(self.calls, [])
+
+    async def test_tag_sync_is_additive_and_scoped(self):
+        settings = self.bridge.settings.load()
+        self.bridge.settings.save({'tag_service_key': 'ab' * 32})
+        data = {'hash': self.digest, 'target': settings['url'] + '|' + settings['profile'], 'tags': ['standing']}
+        response = await self.client.post('/Gallery/hydrus/tag_sync', json={**data, 'target': 'stale'})
+        self.assertEqual(response.status, 400)
+        self.assertIsNone(self.synced_tags)
+        await self.post('tag_sync', data)
+        self.assertEqual(self.synced_tags['service_keys_to_tags']['ab' * 32], ['standing'])
+        self.assertFalse(self.synced_tags['override_previously_deleted_mappings'])
+        self.assertNotIn('service_keys_to_actions_to_tags', self.synced_tags)
+
+    async def test_metadata_prompt_search_and_or_and_dictionary(self):
+        self.record['notes'] = {'ComfyUI Gallery generation metadata': json.dumps({'positive': 'blue hair, standing', 'negative': 'blurry'})}
+        for field, term, expected in [('positive', 'standing', 2), ('negative', 'blurry', 2), ('positive', 'blurry', 0)]:
+            result = await self.post('search', {'metadata_terms': [term], 'metadata_field': field})
+            self.assertEqual(len(result['items']), expected)
+            self.assertEqual(result['metadata_scanned'], 2)
+        result = await self.post('search', {'tags': ['a'], 'metadata_terms': ['missing'], 'field_join': 'all'})
+        self.assertEqual(result['items'], [])
+        result = await self.post('search', {'tags': ['a'], 'metadata_terms': ['missing'], 'field_join': 'any'})
+        self.assertEqual(len(result['items']), 2)
+        result = await self.post('dictionary', {'query': 'blue hair'})
+        self.assertIn('blue_hair', result['tags'])
 
     async def test_input_does_not_overwrite_other_content(self):
         (self.input / 'hydrus').mkdir()

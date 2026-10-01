@@ -110,6 +110,11 @@ def buildMetadata(image_path):
                 pass
 
 
+    try:
+        from .transfer_metadata import read_metadata
+        metadata.update(read_metadata(image_path))
+    except (ValueError, OSError):
+        pass
     return img, prompt, metadata
 
 

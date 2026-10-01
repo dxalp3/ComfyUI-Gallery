@@ -1,0 +1,57 @@
+const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
+const assert=require('node:assert/strict');
+(async()=>{
+ const browser=await chromium.launch({executablePath:process.env.CHROME_PATH,headless:true});
+ const page=await browser.newPage({viewport:{width:1500,height:1000}});
+ const errors=[];page.on('pageerror',e=>errors.push(e.message));
+ const choose=async(label,title)=>{const input=page.getByRole('combobox',{name:label,exact:true});await input.press('ArrowDown');const id=await input.getAttribute('aria-controls');await page.locator('[id="'+id+'"]').locator('xpath=ancestor::div[contains(@class,"ant-select-dropdown")][1]').getByTitle(title,{exact:true}).click();};
+ const count=async(n)=>page.waitForFunction(n=>document.querySelectorAll('[data-gallery-entry]').length===n,n);
+ try {
+  await page.addInitScript(()=>localStorage.setItem('comfy.prompt-library.v2',JSON.stringify({version:2,tags:[{id:'pose',name:'Pose',text:'standing, hands_up'}],prefixes:[{id:'p',name:'pose',tags:['pose']}]})));
+  await page.goto('http://127.0.0.1:8191');await page.getByRole('tab',{name:'Gallery workspace',exact:true}).click();await count(4);
+  let requests=0;
+  await page.route('**/Gallery/hydrus/search',async route=>{requests++;const data=route.request().postDataJSON();const response=await route.fetch();const result=await response.json();if(data.tags.includes('local-only'))result.items=[];else if(data.tags.length)result.items=result.items.slice(0,1);result.total=result.items.length;await route.fulfill({json:result});});
+  await page.getByText('Both',{exact:true}).click();
+  assert.equal(await page.getByRole('combobox',{name:'Filter local files',exact:true}).count(),0);
+  await page.getByRole('button',{name:'Search',exact:true}).click();await count(8);
+  assert.equal(await page.getByRole('button',{name:'Search',exact:true}).isVisible(),true);
+  const previousRequests=requests;
+  await choose('Gallery order','Random');
+  const ids=()=>page.locator('[data-gallery-entry]').evaluateAll(els=>els.map(e=>e.dataset.galleryEntry));
+  const first=await ids();assert.equal(first.filter(id=>id.startsWith('local:')).length,4);
+  await page.getByRole('button',{name:'Reshuffle',exact:true}).click();assert.notDeepEqual(await ids(),first);assert.equal(requests,previousRequests);
+  await page.getByRole('button',{name:'Search',exact:true}).click();await count(8);assert.equal(await page.getByRole('button',{name:'Reshuffle',exact:true}).isVisible(),true);
+  await page.getByText('Hydrus result sampling (advanced)',{exact:true}).click();await choose('Hydrus search order','Random');await page.getByRole('button',{name:'Search',exact:true}).click();await count(8);
+  const tags=page.getByRole('combobox',{name:'Hydrus search tags',exact:true});
+  await tags.fill('winter snow');await tags.press('Enter');await tags.press('Enter');await count(2);
+  assert.equal(await page.locator('.ant-segmented-item-selected').innerText(),'Both');
+  await page.locator('.cg-tag-input .ant-select-selection-item-remove').first().click();
+  await tags.fill('remote-only');await tags.press('Enter');await tags.press('Enter');await count(1);
+  await page.waitForFunction(()=>document.querySelector('.ant-segmented-item-selected')?.textContent==='Hydrus');
+  assert.equal(await page.getByRole('tab',{name:'Search both libraries',exact:true}).isVisible(),true);
+  // Explicit source selection takes control back from automatic result switching.
+  await page.getByText('Local',{exact:true}).first().click();
+  const quick=page.getByRole('combobox',{name:'Filter local files',exact:true});await quick.fill('azure');await quick.press('Enter');await quick.press('Escape');await count(1);await quick.fill('');await quick.press('Escape');for(const remove of await page.locator('.cg-search .ant-select-selection-item-remove').all()) await remove.click();await count(4);
+  await page.evaluate(()=>{for(const title of ['Positive','Negative']) window.comfyAPI.app.app.graph.add({title,type:'CLIPTextEncode',widgets:[{name:'text',value:'old '+title.toLowerCase()}],setDirtyCanvas(){}});});
+  await page.getByAltText('study-1.png',{exact:true}).click({button:'right'});await page.getByRole('menuitem',{name:'Append to Image Source (1)',exact:true}).click();
+  const modal=page.getByRole('dialog',{name:'Append images and prompts',exact:true});await modal.waitFor();
+  await modal.getByRole('checkbox',{name:'Load positive prompt',exact:true}).check();await modal.getByRole('checkbox',{name:'Load negative prompt',exact:true}).check();
+  const positive=modal.getByRole('combobox',{name:'Positive terms 0',exact:true});await positive.fill('@pose');await positive.press('Enter');await positive.press('Escape');
+  await modal.locator('.ant-select-selection-item').filter({hasText:'azure sky'}).locator('.ant-select-selection-item-remove').click();
+  await modal.getByRole('checkbox',{name:'Load selected Hydrus tags into the positive prompt',exact:true}).check();
+  await choose('Prompt write mode','Replace target prompt');await choose('Positive prompt target','Positive #1 · text');await choose('Negative prompt target','Negative #2 · text');
+  await modal.getByRole('button',{name:'Append to workflow',exact:true}).click();
+  const editor=page.getByRole('dialog',{name:'Gallery Image Source',exact:true});await editor.waitFor();
+  const state=await page.evaluate(()=>({positive:window.qaNodes[0].widgets[0].value,negative:window.qaNodes[1].widgets[0].value,manifest:JSON.parse(window.qaNodes[2].widgets[0].value)}));
+  assert.equal(state.positive,'mountain, standing, hands_up, source:qa');assert.equal(state.negative,'blurry, watermark');assert.ok(state.manifest.images[0].metadata.prompt);assert.ok(state.manifest.images[0].metadata.hydrus);
+  assert.equal(await editor.getByRole('textbox',{name:'Source positive prompt',exact:true}).inputValue(),state.positive);
+  await editor.getByRole('button',{name:'Cancel',exact:true}).click();
+  await page.getByRole('button',{name:'Prompts & prefixes',exact:true}).click();
+  const manager=page.getByRole('dialog',{name:'Prompts & prefixes',exact:true});await manager.getByRole('textbox',{name:'Prefix name',exact:true}).fill('eyes');
+  const terms=manager.getByRole('combobox',{name:'Prefix tags',exact:true});await terms.fill('blue_eyes');await terms.press('Enter');await terms.press('Escape');await manager.getByRole('button',{name:'Save prefix',exact:true}).click();
+  await page.waitForFunction(()=>JSON.parse(localStorage.getItem('comfy.prompt-library.v2')).prefixes.some(prefix=>prefix.name==='eyes'));
+  assert.deepEqual(errors,[]);
+  if(process.env.GALLERY_QA_SCREENSHOT)await page.screenshot({path:process.env.GALLERY_QA_SCREENSHOT});
+  console.log('PASS hybrid sampling/randomization, source fallback, persistent search, per-image prefix filtering, explicit prompt replacement, source metadata and shared prefix save.');
+ } catch(error) { console.log(await page.locator('body').innerText()); throw error; } finally {await browser.close();}
+})().catch(error=>{console.error(error);process.exit(1)});

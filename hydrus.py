@@ -42,6 +42,12 @@ DEFAULTS = {
 }
 
 
+try:
+    from .transfer_metadata import read_metadata, write_metadata
+except ImportError:
+    from transfer_metadata import read_metadata, write_metadata
+
+
 class HydrusError(Exception):
     """An error whose message is safe to return to the browser."""
 
@@ -265,7 +271,8 @@ def image_snapshot(path):
             raise HydrusError("Image changed while reading; retry when generation is complete.")
         snapshot.seek(0)
         with Image.open(snapshot) as image:
-            notes = {key: image.info[key] for key in ("prompt", "workflow", "parameters") if key in image.info}
+            notes = {key: value for key, value in read_metadata(path).items() if key != 'hydrus'}
+            if before != fingerprint(path.stat()): raise HydrusError('Image changed while reading metadata; retry when generation is complete.')
             note = json.dumps(notes, ensure_ascii=False, indent=2, default=str) if notes else None
             image.verify()
         snapshot.seek(0)
@@ -469,7 +476,7 @@ class HydrusBridge:
         if action == "export" and "tag_service_key" in data:
             settings = self.settings.validate({**settings, "tag_service_key": data["tag_service_key"]})
         tags = clean_tags(settings["default_tags"] + clean_tags(data.get("tags", [])))
-        send_metadata = data.get("send_metadata", settings["send_metadata"])
+        send_metadata = True
         if type(send_metadata) is not bool:
             raise HydrusError("send_metadata must be true or false.")
         target = target_identity(settings)
@@ -688,9 +695,43 @@ class HydrusBridge:
                 result = await client.request("GET", "/manage_pages/get_pages")
                 return {"pages": result.get("pages", {})}
             if action == "search":
-                identifiers = await self.search_identifiers(client, data, limit)
-                return {"items": await self.cache_records(await self.remote_metadata(client, identifiers[:limit]), settings),
-                        "total": len(identifiers), "limit": limit}
+                terms = clean_tags(data.get('metadata_terms', []))
+                if not terms:
+                    identifiers = await self.search_identifiers(client, data, limit)
+                    return {"items": await self.cache_records(await self.remote_metadata(client, identifiers[:limit]), settings), "total": len(identifiers), "limit": limit}
+                field = data.get('metadata_field', 'positive')
+                join = data.get('field_join', 'any')
+                if field not in ('positive', 'negative', 'hydrus', 'name', 'all') or join not in ('all', 'any'): raise HydrusError('Invalid metadata search mode.')
+                try:
+                    from .local_library import prompts
+                except ImportError:
+                    from local_library import prompts
+                has_tags = bool(data.get('tags') or data.get('or_groups'))
+                tag_ids = await self.search_identifiers(client, data, limit) if has_tags else []
+                candidate_query = dict(data, tags=(terms if field == 'hydrus' else ['system:has notes'] if field in ('positive', 'negative') else []), or_groups=[], match='all')
+                candidate_ids = tag_ids if has_tags and join == 'all' else await self.search_identifiers(client, candidate_query, 200)
+                candidates = await self.remote_metadata(client, candidate_ids[:200])
+                def matches(record):
+                    metadata = {}
+                    for name, note in record.get('notes', {}).items():
+                        if name.startswith('ComfyUI Gallery generation metadata'):
+                            try:
+                                parsed = json.loads(note)
+                                if isinstance(parsed, dict): metadata.update(parsed)
+                            except (ValueError, TypeError): pass
+                    generated = prompts(metadata)
+                    tags = []
+                    for service in record.get('tags', {}).values():
+                        for key in ('display_tags', 'storage_tags'):
+                            for status in ('0', '2'): tags.extend(service.get(key, {}).get(status, []))
+                    values = {'positive': generated['positive'], 'negative': generated['negative'], 'hydrus': ', '.join(tags), 'name': str(metadata.get('fileinfo', {}).get('filename', '')) + ' ' + record['hash']}
+                    haystack = (' '.join(values.values()) if field == 'all' else values[field]).lower().replace('_', ' ')
+                    return all(term.lower().replace('_', ' ') in haystack for term in terms)
+                matched = [record for record in candidates if matches(record)]
+                if has_tags and join == 'any':
+                    matched = await self.remote_metadata(client, tag_ids[:limit]) + matched
+                unique = list({record['hash']: record for record in matched}.values())[:limit]
+                return {'items': await self.cache_records(unique, settings), 'total': len(unique), 'limit': limit, 'metadata_scanned': len(candidates)}
             page_key = data.get("page_key")
             if not isinstance(page_key, str) or not re.fullmatch(r"[0-9a-fA-F]{64}", page_key):
                 raise HydrusError("Choose a valid open Hydrus page.")
@@ -769,6 +810,7 @@ class HydrusBridge:
     async def remember_remote(self, digest, settings):
         item = await asyncio.to_thread(self.memory.get, target_identity(settings), digest, '')
         async with self.client_factory(settings) as client: await self.refresh_item(client, target_identity(settings), item)
+        return item.get('metadata') or {}
 
     async def save_output(self, data, get_output_root):
         digest = self.validate_hash(data.get('hash'))
@@ -796,8 +838,12 @@ class HydrusBridge:
                     raise
             await asyncio.to_thread(save)
             warning = None
-            try: await self.remember_remote(digest, settings)
-            except (HydrusError, OSError, sqlite3.Error) as error: warning = 'File saved; tag snapshot failed: ' + str(error)
+            try:
+                remote = await self.remember_remote(digest, settings)
+                metadata = await asyncio.to_thread(read_metadata, destination)
+                metadata['hydrus'] = remote
+                await asyncio.to_thread(write_metadata, destination, digest, metadata)
+            except (HydrusError, OSError, ValueError, sqlite3.Error) as error: warning = 'File saved; tag snapshot failed: ' + str(error)
             return {'hash': digest, 'name': destination.name, 'folder': 'downloads', 'warning': warning}
         finally: stream.close()
 
@@ -810,8 +856,14 @@ class HydrusBridge:
             stream = await client.download(digest)
         try:
             result = await asyncio.to_thread(save_input_image, stream, digest, get_input_root())
-            try: await self.remember_remote(digest, settings)
-            except (HydrusError, OSError, sqlite3.Error) as error: result['warning'] = 'File saved; tag snapshot failed: ' + str(error)
+            try:
+                remote = await self.remember_remote(digest, settings)
+                destination = Path(get_input_root()) / result['input_name']
+                metadata = await asyncio.to_thread(read_metadata, destination)
+                metadata['hydrus'] = remote
+                await asyncio.to_thread(write_metadata, destination, digest, metadata)
+                result['metadata'] = metadata
+            except (HydrusError, OSError, ValueError, sqlite3.Error) as error: result['warning'] = 'File saved; tag snapshot failed: ' + str(error)
             return result
         finally:
             stream.close()
@@ -969,6 +1021,23 @@ def register_hydrus_routes(routes, get_root, storage_dir=None, get_input_root=No
                     result = await bridge.services(data)
                 elif action == "status":
                     result = await bridge.status(data)
+                elif action == "dictionary":
+                    try:
+                        from .tag_dictionary import dictionary, normalize
+                    except ImportError:
+                        from tag_dictionary import dictionary, normalize
+                    query = normalize(str(data.get('query', ''))[:256])
+                    values = await asyncio.to_thread(dictionary)
+                    result = {'tags': list(dict.fromkeys(value for key, value in values.items() if query and query in key))[:80]}
+                elif action == "tag_sync":
+                    digest = bridge.validate_hash(data.get('hash'))
+                    settings = bridge.settings.load()
+                    if data.get('target') != settings['url'] + '|' + settings['profile']: raise HydrusError('Hydrus connection changed; reload first.')
+                    if not settings['tag_service_key']: raise HydrusError('Choose a Hydrus tag service first.')
+                    tags = clean_tags(data.get('tags', []))
+                    async with bridge.client_factory(settings) as client:
+                        await client.request('POST', '/add_tags/add_tags', json={'hash': digest, 'service_keys_to_tags': {settings['tag_service_key']: tags}, 'override_previously_deleted_mappings': False})
+                    result = {'metadata': await bridge.remember_remote(digest, settings)}
                 elif action == "danbooru_tags":
                     try:
                         from .tag_dictionary import prompt_tags
@@ -998,7 +1067,7 @@ def register_hydrus_routes(routes, get_root, storage_dir=None, get_input_root=No
 
     for method, path, action in (("get", "settings", "get_settings"), ("post", "settings", "save_settings"),
                                  ("post", "test", "test"), ("post", "status", "status"),
-                                 ("post", "services", "services"), ("post", "danbooru_tags", "danbooru_tags"), ("post", "save_output", "save_output"), ("post", "trash", "trash"),
+                                 ("post", "services", "services"), ("post", "dictionary", "dictionary"), ("post", "tag_sync", "tag_sync"), ("post", "danbooru_tags", "danbooru_tags"), ("post", "save_output", "save_output"), ("post", "trash", "trash"),
                                  ("post", "export", "export"), ("post", "refresh", "refresh"),
                                  ("post", "search", "search"), ("post", "pages", "pages"),
                                  ("post", "suggest", "suggest"), ("get", "download", "download"), ("get", "original", "original"),

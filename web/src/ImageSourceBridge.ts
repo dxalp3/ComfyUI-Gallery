@@ -1,10 +1,12 @@
 import { getComfyApp, STANDALONE } from './ComfyAppApi';
-import { emptyImageSourceManifest } from './ImageSourceGeometry';
-import type { ImageSourceImage, ImageSourceManifest } from './ImageSourceGeometry';
+import { emptyImageSourceManifest, mergePrompt } from './ImageSourceGeometry';
+import type { ImageSourceImage, ImageSourceManifest, PromptApply } from './ImageSourceGeometry';
 
 export const SOURCE_EDITOR_EVENT = 'gallery-source-editor';
 export const SOURCE_BROWSE_EVENT = 'gallery-source-browse';
 let target: any;
+let sourceConstructor: any;
+export const registerSourceConstructor = (value: any) => { sourceConstructor = value; };
 const children = new Set<Window>();
 const graphNow = () => getComfyApp()?.canvas?.graph || getComfyApp()?.graph;
 const isSource = (node: any) => node?.comfyClass === 'GalleryImageSource' || node?.type === 'GalleryImageSource';
@@ -18,14 +20,14 @@ export function readSourceManifest(node: any): ImageSourceManifest {
     return value;
 }
 
-export function saveSourceManifest(node: any, manifest: ImageSourceManifest) {
+export function saveSourceManifest(node: any, manifest: ImageSourceManifest, recordChange = true) {
     const graph = graphNow();
     if (!graph || !nodes().includes(node)) throw new Error('The target node is no longer in the active workflow.');
     const widget = node.widgets?.find((item: any) => item.name === 'sources');
     if (!widget) throw new Error('Restart ComfyUI to register Gallery Image Source.');
-    graph.beforeChange?.();
+    if (recordChange) graph.beforeChange?.();
     try { widget.value = JSON.stringify(manifest); widget.callback?.(widget.value); node.setDirtyCanvas?.(true, true); }
-    finally { graph.afterChange?.(); }
+    finally { if (recordChange) graph.afterChange?.(); }
 }
 
 function currentTarget(create = false, forceNew = false): any {
@@ -39,8 +41,8 @@ function currentTarget(create = false, forceNew = false): any {
     if (!forceNew && available.length) throw new Error('Choose an Image Source target in the gallery toolbar first.');
     const graph = graphNow();
     const liteGraph = (window as any).LiteGraph || (window as any).comfyAPI?.litegraph?.LiteGraph;
-    if (!graph || !liteGraph?.createNode) throw new Error('Open Gallery from a ComfyUI workflow to append images.');
-    const node = liteGraph.createNode('GalleryImageSource');
+    if (!graph || (!liteGraph?.createNode && !sourceConstructor)) throw new Error('Open Gallery from a ComfyUI workflow to append images.');
+    const node = liteGraph?.createNode ? liteGraph.createNode('GalleryImageSource') : new sourceConstructor();
     if (!node) throw new Error('Gallery Image Source is unavailable. Restart ComfyUI and refresh the browser.');
     const canvas = getComfyApp()?.canvas;
     const scale = canvas?.ds?.scale || 1, offset = canvas?.ds?.offset || [0, 0];
@@ -76,17 +78,37 @@ function targetInfo(): TargetInfo {
 }
 
 function localCommand(command: string, payload: any): any {
+    if (command === 'prompt_targets') return (graphNow()?._nodes || []).filter((node: any) => !isSource(node)).flatMap((node: any) => (node.widgets || []).flatMap((widget: any, index: number) => typeof widget.value === 'string' && /text|prompt|prefix|positive|negative/i.test(widget.name) ? [{ value: JSON.stringify([String(node.id), index]), label: `${node.title || node.type} #${node.id} · ${widget.name}` }] : []));
     if (command === 'targets') return targetInfo();
     if (command === 'target' && payload === 'new') { currentTarget(true, true); return targetInfo(); }
     if (command === 'target') { target = nodes().find((node: any) => String(node.id) === payload); if (!target) throw new Error('That target is no longer available.'); return targetInfo(); }
     if (command === 'edit') { const node = currentTarget(true); window.dispatchEvent(new CustomEvent(SOURCE_EDITOR_EVENT, { detail: node })); window.focus(); return true; }
     if (command !== 'append') throw new Error('Unknown image source action.');
+    const apply: PromptApply | undefined = Array.isArray(payload) ? undefined : payload?.apply;
+    payload = Array.isArray(payload) ? payload : payload?.images;
     if (!Array.isArray(payload) || !payload.length || payload.length > 32 || payload.some(image => typeof image?.input_name !== 'string' || !image.input_name || image.input_name.length > 2048)) throw new Error('Append between 1 and 32 input images.');
+    if (JSON.stringify(payload).length > 1800000) throw new Error('Image metadata is too large for this workflow; use fewer images.');
+    const updates = (['positive', 'negative'] as const).flatMap(side => {
+        if (!apply?.[side]) return [];
+        const [id, index] = JSON.parse(apply[side]!);
+        const node = (graphNow()?._nodes || []).find((node: any) => String(node.id) === id);
+        const widget = node?.widgets?.[index];
+        if (!widget || typeof widget.value !== 'string') throw new Error('The selected prompt target is no longer available.');
+        if (!['replace', 'before', 'after'].includes(apply.mode)) throw new Error('Invalid prompt operation');
+        return [{ node, widget, value: mergePrompt(widget.value, payload.map((image: ImageSourceImage) => image.prompt?.[side] || '').filter(Boolean).join(', '), apply.mode) }];
+    });
+    if (updates.length === 2 && updates[0].widget === updates[1].widget) throw new Error('Choose different positive and negative prompt targets.');
     const node = currentTarget(true);
     const manifest = readSourceManifest(node);
     if (manifest.images.length + payload.length > 32) throw new Error('This node can contain at most 32 images. Remove sources or choose another node.');
-    saveSourceManifest(node, { ...manifest, images: [...manifest.images, ...payload.map(image => ({ input_name: image.input_name, title: String(image.title || image.input_name).slice(0, 512) }))] });
+    const graph = graphNow();
+    graph.beforeChange?.();
+    try {
+    saveSourceManifest(node, { ...manifest, images: [...manifest.images, ...payload.map(image => ({ input_name: image.input_name, title: String(image.title || image.input_name).slice(0, 512), metadata: image.metadata || {}, prompt: image.prompt }))] }, false);
+    for (const update of updates) { update.widget.value = update.value; update.widget.callback?.(update.value); update.node.setDirtyCanvas?.(true, true); }
+    } finally { graph.afterChange?.(); }
     target = node;
+    window.dispatchEvent(new CustomEvent(SOURCE_EDITOR_EVENT, { detail: node }));
     return `Appended ${payload.length} image(s) to ${node.title || 'Gallery Image Source'} #${node.id}.`;
 }
 
@@ -116,7 +138,8 @@ function command<T>(name: string, payload?: any): Promise<T> {
 export const getSourceTargets = () => command<TargetInfo>('targets');
 export const setSourceTarget = (id: string) => command<TargetInfo>('target', id);
 export const editSourceTarget = () => command<boolean>('edit');
-export const appendToImageSource = (images: ImageSourceImage[]) => command<string>('append', images);
+export const getPromptTargets = () => command<{ value: string; label: string }[]>('prompt_targets');
+export const appendToImageSource = (images: ImageSourceImage[], apply?: PromptApply) => command<string>('append', apply ? { images, apply } : images);
 
 export async function appendLocalImages(urls: string[]) {
     if (!urls.length || urls.length > 32) throw new Error('Select between 1 and 32 images per append.');
@@ -125,7 +148,7 @@ export async function appendLocalImages(urls: string[]) {
         const response = await fetch('/Gallery/source/local', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }) });
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || 'Could not copy the local image.');
-        entries.push({ input_name: data.input_name, title: data.title });
+        entries.push({ input_name: data.input_name, title: data.title, metadata: data.metadata || {} });
     }
     return appendToImageSource(entries);
 }
