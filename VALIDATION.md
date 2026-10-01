@@ -95,3 +95,29 @@ compilation. Python tests required execution outside the Windows sandbox because
 the sandbox blocked access to their temporary fixtures. Browser scenarios and the
 production bundle were not rebuilt or rerun for this documentation and repository
 migration; their results above refer to the original validation.
+
+## Sidebar and unified gallery — 2026-10-01 (hydrus.5)
+
+- Python: **66 passed, 2 skipped** (68 tests). Existing Windows symlink skips.
+  Added grouped OR forwarding, sort validation, and verified inline-original tests.
+- JavaScript helpers: **21 passed**, including mixed-source ordering, missing-hash
+  placement, deterministic shuffle, existing prompt filters and Image Source helpers.
+- TypeScript compilation and Vite production build passed. The bundled frontend
+  is included. Existing dependency-directive and large-bundle warnings remain.
+- `tests/browser_unified_gallery.cjs` passed in headless Chrome against the real
+  local bridge with simulated Hydrus/ComfyUI: local and remote viewer selection,
+  right-click bulk actions, export dialog above viewer, original rendering, OR
+  request payload, one mixed grid, mixed-source append, docking/expanding without
+  lost selection, client pages, and local prompt-filter synchronization.
+- Updated `tests/browser_image_source.cjs` for the consolidated controls. It passed:
+  range selection, exact crop/stitch output dimensions, saved editor state, Hydrus
+  search and page append, quality filtering, context actions, and standalone-tab
+  append back to the same node. Both browser runs reported no page errors.
+
+Browser QA uses the documented custom-sidebar render/destroy callbacks through
+its simulated ComfyUI host. A real installed ComfyUI frontend and real Hydrus
+library were not available for this run. Advanced Hydrus ordering is verified by
+forwarded API parameters, not by real database ordering; supported options vary
+by client version. Loaded-gallery sorting is independently tested. Local media
+viewers retain the existing model/audio/video renderers; this run's image fixture
+does not validate every media codec or 3D format.

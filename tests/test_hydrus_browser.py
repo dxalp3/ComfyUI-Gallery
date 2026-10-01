@@ -94,6 +94,38 @@ class BrowserTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status, 200, await response.text())
         return await response.json()
 
+    async def test_grouped_or_and_sort_are_forwarded(self):
+        await self.post('search', {'tags': ['portrait', '-bad'],
+            'or_groups': [['blue eyes', 'green eyes'], ['system:width > 1000', 'system:height > 1000']],
+            'file_sort_type': 21, 'file_sort_asc': True, 'limit': 30})
+        query = next(query for path, query in self.calls if path.endswith('search_files'))
+        predicates = json.loads(query['tags'])
+        self.assertIn(['blue eyes', 'green eyes'], predicates)
+        self.assertIn(['system:width > 1000', 'system:height > 1000'], predicates)
+        self.assertIn('-bad', predicates)
+        self.assertIn('system:limit=30', predicates)
+        self.assertEqual(query['file_sort_type'], '21')
+        self.assertEqual(query['file_sort_asc'], 'true')
+
+    async def test_invalid_advanced_search_rejected_before_upstream(self):
+        for data in ({'or_groups': [[]]}, {'or_groups': [['system:limit = 9000']]},
+                     {'or_groups': [[["nested"]]]}, {'or_groups': 'bad'},
+                     {'file_sort_type': 17}, {'file_sort_type': True}, {'file_sort_type': 100},
+                     {'file_sort_asc': 'true'}):
+            self.calls.clear()
+            response = await self.client.post('/Gallery/hydrus/search', json=data)
+            self.assertEqual(response.status, 400, data)
+            self.assertFalse(any(path.endswith('search_files') for path, _ in self.calls))
+
+    async def test_inline_original_is_verified_image(self):
+        response = await self.client.get('/Gallery/hydrus/original?hash=' + self.digest)
+        self.assertEqual(response.status, 200)
+        self.assertEqual(response.headers['Content-Disposition'], 'inline')
+        self.assertEqual(response.headers['Content-Type'], 'image/png')
+        self.assertEqual(await response.read(), self.original)
+        response = await self.client.get('/Gallery/hydrus/original?hash=' + 'f' * 64)
+        self.assertEqual(response.status, 400)
+
     async def test_search_filters_images_and_bounds_query(self):
         result = await self.post('search', {'tags': ['landscape', '-portrait'], 'limit': 10})
         self.assertEqual([item['hash'] for item in result['items']], [self.digest])

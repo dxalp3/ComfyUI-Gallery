@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
-import { Alert, Button, InputNumber, Select, Space, Typography } from 'antd';
+import { Alert, Button, Collapse, InputNumber, Select, Space, Typography } from 'antd';
 import { hydrusRequest } from './HydrusApi';
 
 type Suggestion = { value: string; count?: number };
-export function HydrusSearchPanel({ tags, setTags, match, setMatch, limit, setLimit, busy, disabled, configured, scope, onSearch, inputRef }: {
+export function HydrusSearchPanel({ tags, setTags, match, setMatch, limit, setLimit, busy, disabled, configured, scope, onSearch, inputRef, orGroups, setOrGroups, sortType, setSortType, ascending, setAscending }: {
     tags: string[]; setTags: (tags: string[]) => void; match: 'all' | 'any'; setMatch: (match: 'all' | 'any') => void;
     limit: number; setLimit: (limit: number) => void; busy: boolean; disabled: boolean; configured: boolean; scope: string;
+    orGroups: string[][]; setOrGroups: (groups: string[][]) => void; sortType: number; setSortType: (value: number) => void; ascending: boolean; setAscending: (value: boolean) => void;
     onSearch: () => void; inputRef: React.RefObject<any>;
 }) {
     const [query, setQuery] = useState('');
@@ -39,7 +40,7 @@ export function HydrusSearchPanel({ tags, setTags, match, setMatch, limit, setLi
         setMatch('any'); setQuery(''); setDropdownOpen(false); inputRef.current?.focus();
     };
     return <>
-        <Space.Compact style={{ width: '100%', marginBottom: 8 }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, width: '100%', marginBottom: 8 }}>
             <Select ref={inputRef} aria-label="Hydrus search tags" mode="tags" value={tags} searchValue={query}
                 onSearch={setQuery} onChange={values => { setTags(values); setQuery(''); }}
                 open={dropdownOpen} onOpenChange={setDropdownOpen} disabled={busy || disabled} loading={loading}
@@ -56,13 +57,29 @@ export function HydrusSearchPanel({ tags, setTags, match, setMatch, limit, setLi
                 onInputKeyDown={event => {
                     if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) { event.preventDefault(); event.stopPropagation(); onSearch(); }
                 }}
-                placeholder="Type a tag for recommendations · press Enter to add" style={{ flex: 1 }} />
+                placeholder="Type a tag for recommendations · press Enter to add" style={{ flex: '1 1 220px', minWidth: 160 }} />
             <Select aria-label="Tag match mode" value={match} onChange={setMatch} disabled={busy || disabled} style={{ width: 165 }}
                 options={[{ value: 'all', label: 'All tags (AND)' }, { value: 'any', label: 'Any tag (OR)' }]} />
             <InputNumber aria-label="Search result limit" min={1} max={200} value={limit} onChange={value => setLimit(value || 100)} disabled={busy || disabled} />
             <Button type="primary" disabled={!configured || disabled} loading={busy} onClick={onSearch}>Search</Button>
-        </Space.Compact>
+        </div>
         <Typography.Paragraph type="secondary">{match === 'all' ? 'All selected tags must match.' : 'Any positive tag can match.'} Excluded tags (-portrait) and system filters always apply. Empty search shows recent images. Ctrl/Cmd+Enter searches added tags.</Typography.Paragraph>
+        <Space wrap style={{ marginBottom: 8 }}>
+            <span>Hydrus search order</span><Select aria-label="Hydrus search order" value={sortType} onChange={setSortType} disabled={busy || disabled} style={{ width: 210 }} options={[
+                [2, 'Import date'], [14, 'Modified date'], [19, 'Archive date'], [18, 'Last viewed'], [4, 'Random'], [3, 'Filetype'], [20, 'SHA-256 hash'], [21, 'Pixel hash'], [22, 'Blurhash'], [0, 'File size'], [5, 'Width'], [6, 'Height'], [7, 'Aspect ratio'], [8, 'Pixel count'], [9, 'Tag count'], [1, 'Duration'], [10, 'Media views'], [11, 'Media viewtime'], [12, 'Bitrate'], [13, 'Has audio'], [15, 'Framerate'], [16, 'Frame count'], [23, 'Colour: lightness'], [24, 'Colour: saturation'], [25, 'Colour: green/red'], [26, 'Colour: blue/yellow'], [27, 'Colour: hue']
+            ].map(([value, label]) => ({ value: Number(value), label }))} />
+            <Select aria-label="Hydrus sort direction" value={ascending ? 'asc' : 'desc'} onChange={value => setAscending(value === 'asc')} disabled={busy || disabled || sortType === 4 || sortType === 3} options={[{ value: 'desc', label: 'Descending' }, { value: 'asc', label: 'Ascending' }]} />
+            <Typography.Text type="secondary">Applied when you Search; result limit applies in Hydrus.</Typography.Text>
+        </Space>
+        <Collapse size="small" style={{ marginBottom: 12 }} items={[{ key: 'groups', label: 'Advanced OR groups (' + orGroups.length + ')', children: <>
+            <Typography.Paragraph>Each row is an OR group; every row must match (AND). Enter tags, exclusions, or system predicates and press Enter. Example: portrait AND (blue eyes OR green eyes). Dates, filetypes and hashes can also be entered as system predicates.</Typography.Paragraph>
+            {orGroups.map((group, index) => <Space.Compact key={index} style={{ display: 'flex', marginBottom: 8 }}>
+                <Select mode="tags" aria-label={'OR group ' + (index + 1)} value={group} disabled={busy || disabled} style={{ flex: 1 }} placeholder="Any of these predicates" onChange={values => setOrGroups(orGroups.map((old, i) => i === index ? values : old))} />
+                <Button disabled={busy || disabled} onClick={() => setOrGroups(orGroups.filter((_, i) => i !== index))}>Remove group {index + 1}</Button>
+            </Space.Compact>)}
+            <Button disabled={busy || disabled || orGroups.length >= 20} onClick={() => setOrGroups([...orGroups, []])}>Add OR group</Button>
+            <Typography.Paragraph type="secondary" style={{ marginTop: 8 }}>Examples: system:filetype = image/png · system:modified date &gt; 2025-01-01 · system:hash = SHA256. Older Hydrus clients may not support the newest sorts.</Typography.Paragraph>
+        </> }]} />
         {error && <Alert type="warning" showIcon message="Tag suggestions unavailable" description={`${error} You can still enter tags manually.`} style={{ marginBottom: 12 }} />}
     </>;
 }

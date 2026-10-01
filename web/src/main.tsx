@@ -1,9 +1,11 @@
+import { setGallerySidebarHost } from './GallerySidebarHost';
+import { getComfyApp } from './ComfyAppApi';
 import { installSourceWidgets } from './ImageSourceBridge';
 import { createRoot } from 'react-dom/client'
 import Gallery from './Gallery.tsx'
 import App from 'antd/es/app/App';
 import { DEFAULT_SETTINGS, STORAGE_KEY, type SettingsState } from './GalleryContext.tsx';
-import { ComfyAppApi, OPEN_BUTTON_ID, STANDALONE } from './ComfyAppApi.ts';
+import { ComfyAppApi, OPEN_BUTTON_ID, STANDALONE, BASE_Z_INDEX } from './ComfyAppApi.ts';
 import { ConfigProvider, theme } from 'antd';
 import { useLocalStorageState } from 'ahooks';
 import { ModelThumbnailProvider } from './GlobalModelRenderer';
@@ -101,6 +103,13 @@ if (STANDALONE) {
     createRoot(root).render(<Main />);
 } else ComfyAppApi.registerExtension({
     name: "Gallery",
+    async setup() {
+        getComfyApp()?.extensionManager?.registerSidebarTab?.({
+            id: 'comfy-gallery', icon: 'pi pi-images', title: 'Gallery', tooltip: 'Local and Hydrus gallery', type: 'custom',
+            render: (element: HTMLElement) => { element.style.overflow = 'auto'; element.style.height = '100%'; setGallerySidebarHost(element); },
+            destroy: () => setGallerySidebarHost(null),
+        });
+    },
     async init() {
         (async () => {
 
@@ -171,6 +180,7 @@ function Main() {
     return (<>
         <ConfigProvider
             theme={{
+                token: { zIndexPopupBase: BASE_Z_INDEX + 100 },
                 algorithm: settingsState.darkMode ? theme.darkAlgorithm : undefined,
             }}
         >

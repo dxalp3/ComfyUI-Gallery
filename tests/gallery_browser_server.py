@@ -130,7 +130,7 @@ async def homepage(request):
 <script>window.qaNodes=[];window.qaListeners={};window.qaExtension=null;
 window.LiteGraph={createNode:type=>{const n={type,comfyClass:type,title:'Gallery Image Source',widgets:[{name:'sources',value:JSON.stringify({version:1,images:[],layout:'single',columns:2,gap:0,background:'#000000'})}],addWidget(type,name,value,callback,options){const w={type,name,value,callback,options};this.widgets.push(w);return w;},setSize(){},setDirtyCanvas(){}};window.qaExtension?.nodeCreated(n);return n;}};
 const graph={_nodes:window.qaNodes,add(node){node.id=window.qaNodes.length+1;window.qaNodes.push(node);},beforeChange(){},afterChange(){}};
-window.comfyAPI={app:{app:{graph,canvas:{graph,selected_nodes:{},selectNode(node){this.selected_nodes={[node.id]:node};}},api:{fetchApi:(url,options)=>fetch(url,options),addEventListener:(name,cb)=>window.qaListeners[name]=cb},registerExtension:ext=>{window.qaExtension=ext;ext.init();}}}};</script>
+window.comfyAPI={app:{app:{graph,canvas:{graph,selected_nodes:{},selectNode(node){this.selected_nodes={[node.id]:node};}},api:{fetchApi:(url,options)=>fetch(url,options),addEventListener:(name,cb)=>window.qaListeners[name]=cb},extensionManager:{registerSidebarTab(tab){window.qaSidebar=tab;}},registerExtension:ext=>{window.qaExtension=ext;ext.init();ext.setup?.();}}}};</script>
 <script type="module" src="/assets/comfy-ui-gallery.js"></script></body></html>'''.replace('/assets/comfy-ui-gallery.js', '/assets-before/comfy-ui-gallery.js' if request.query.get('baseline') else '/assets/comfy-ui-gallery.js'), content_type='text/html')
 
 async def images(request):

@@ -1,0 +1,14 @@
+const { test } = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const vm = require('node:vm');
+const ts = require('../web/node_modules/typescript');
+const source = ts.transpileModule(fs.readFileSync(require('node:path').join(__dirname, '../web/src/GalleryOrder.ts'), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText;
+const compiled = { exports: {} };
+vm.runInThisContext(`(function(exports,module){${source}\n})`)(compiled.exports, compiled);
+const { orderGallery } = compiled.exports;
+const entries = [{ id: 'local:a', date: 3, hash: undefined, mime: 'png' }, { id: 'hydrus:b', date: 2, hash: 'bbb', mime: 'jpg' }, { id: 'local:c', date: 1, hash: 'aaa', mime: 'webp' }];
+test('mixed dates interleave sources without mutating input', () => { assert.deepEqual(orderGallery(entries, 'date', true, 1).map(x => x.id), ['local:c', 'hydrus:b', 'local:a']); assert.equal(entries[0].id, 'local:a'); });
+test('missing hash always sorts last', () => { for (const asc of [true, false]) assert.equal(orderGallery(entries, 'hash', asc, 1).at(-1).id, 'local:a'); });
+test('random is stable through selection updates and changes on reshuffle', () => { const many=Array.from({length:100},(_,i)=>({id:'file:'+i})); assert.deepEqual(orderGallery(many,'random',false,5),orderGallery(many,'random',false,5)); assert.notDeepEqual(orderGallery(many,'random',false,5),orderGallery(many,'random',false,6)); });
+test('search order preserves Hydrus server order', () => assert.deepEqual(orderGallery(entries, 'result', false, 1), entries));

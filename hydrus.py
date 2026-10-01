@@ -638,10 +638,26 @@ class HydrusBridge:
             # exclusions must keep applying to every alternative.
             if alternatives:
                 tags.append(alternatives if len(alternatives) > 1 else alternatives[0])
+        groups = data.get("or_groups", [])
+        if not isinstance(groups, list) or len(groups) > 20:
+            raise HydrusError("Use at most 20 OR groups.")
+        for group in groups:
+            if not isinstance(group, list) or not 1 <= len(group) <= 100 or any(not isinstance(tag, str) for tag in group):
+                raise HydrusError("Each OR group must contain 1–100 text predicates.")
+            predicates = clean_tags(group)
+            if not predicates or any(re.match(r"-?system\s*:\s*limit", tag, re.I) for tag in predicates):
+                raise HydrusError("OR groups cannot be empty or contain system:limit.")
+            tags.append(predicates)
+        sort_type = data.get("file_sort_type", 2)
+        ascending = data.get("file_sort_asc", False)
+        if type(sort_type) is not int or sort_type not in (set(range(28)) - {17}):
+            raise HydrusError("Unsupported Hydrus sort type.")
+        if type(ascending) is not bool:
+            raise HydrusError("Sort direction must be a boolean.")
         tags.extend([HYDRUS_IMAGE_PREDICATE, "system:limit=" + str(limit)])
         try:
             result = await client.request("GET", "/get_files/search_files", params={
-                "tags": json.dumps(tags), "file_sort_type": "2", "file_sort_asc": "false",
+                "tags": json.dumps(tags), "file_sort_type": str(sort_type), "file_sort_asc": json.dumps(ascending),
                 "return_file_ids": "true"})
         except HydrusError as error:
             raise HydrusError("Hydrus image search (/get_files/search_files): " + str(error)) from None
@@ -835,12 +851,16 @@ def register_hydrus_routes(routes, get_root, storage_dir=None, get_input_root=No
                     return web.Response(body=raw, content_type=mime, headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"})
                 finally:
                     stream.close()
-            elif action == "download":
+            elif action in ("download", "original"):
                 digest = bridge.validate_hash(request.query.get("hash"))
                 async with bridge.client_factory(bridge.settings.load()) as client:
                     stream = await client.download(digest)
                 try:
                     headers = await asyncio.to_thread(inspect_original_download, stream, digest)
+                    if action == "original":
+                        if not headers["Content-Type"].startswith("image/"):
+                            raise HydrusError("This original cannot be displayed; download it instead.")
+                        headers["Content-Disposition"] = "inline"
                     response = web.StreamResponse(headers=headers)
                     await response.prepare(request)
                     while chunk := await asyncio.to_thread(stream.read, 1024 * 1024):
@@ -883,7 +903,7 @@ def register_hydrus_routes(routes, get_root, storage_dir=None, get_input_root=No
                                  ("post", "services", "services"),
                                  ("post", "export", "export"), ("post", "refresh", "refresh"),
                                  ("post", "search", "search"), ("post", "pages", "pages"),
-                                 ("post", "suggest", "suggest"), ("get", "download", "download"),
+                                 ("post", "suggest", "suggest"), ("get", "download", "download"), ("get", "original", "original"),
                                  ("post", "page", "page"), ("get", "thumbnail", "thumbnail"), ("post", "import", "import")):
         async def endpoint(request, action=action):
             return await handle(request, action)

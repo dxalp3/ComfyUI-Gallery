@@ -2,7 +2,7 @@
 
 This customized Gallery adds image export to your Hydrus client, persistent export history, and a cached view of the file's Hydrus metadata. Search local files by Hydrus tags or generation prompts, browse the main client's library and open pages, and bring source images into an img2img workflow. ComfyUI sends the original file directly to Hydrus, so the two applications can run on different computers.
 
-Version **2.7.1-hydrus.4** adds Gallery Image Source with cropping and stitching, a separate gallery browser tab, and Local / Hydrus / Both views in the main gallery.
+Version **2.7.1-hydrus.5** adds Gallery Image Source with cropping and stitching, a separate gallery browser tab, and Local / Hydrus / Both views in the main gallery.
 
 ## Install this customized version
 
@@ -246,3 +246,62 @@ The integration exports images. Other Gallery media types, including 3D models, 
 The React source is in `web/src`. Use the pinned pnpm version from `web/package.json`. Rebuild from `web` with `pnpm install --frozen-lockfile` followed by `pnpm build`, then restart ComfyUI and reload its browser page. The custom node loads `web/dist/assets` through `WEB_DIRECTORY`.
 
 Run backend and thumbnail tests with `python -m unittest discover -s tests -p "test_*.py"` using an environment with the node's Python dependencies installed. Tests use temporary files and a simulated Hydrus server. Run local-search and prompt-tag helper tests with `node tests/local_search.test.cjs` after installing the frontend dependencies. The customized source starts from upstream commit `74639e68846f64c9f561f3a7745529de76376a97`.
+
+## Sidebar, mixed gallery, and viewer (hydrus.5)
+
+After updating, restart ComfyUI and refresh the browser. Open **Gallery** in the
+ComfyUI sidebar (image icon alongside Assets and the other tools). It uses the
+supported `registerSidebarTab` extension API; no ComfyUI core modifications are
+needed. **Expand gallery** and **Dock in sidebar** move the same workspace and
+retain its search, results, selection, and scroll. The existing node/toolbar
+launcher and **Open in new tab** remain available on older frontends. This is a
+custom sidebar tab, not a replacement for the built-in Assets tab or a workflow.
+
+**Both** combines the current local folder/filter and loaded Hydrus results in
+one grid. Source badges identify each file. Local and Hydrus copies of identical
+content stay separately actionable. Select across sources with checkboxes,
+Ctrl/Cmd+click, or Shift+click. Bulk actions use the selected files in the current
+view; the toolbar reports selections outside the view. Local tools and filters
+are expandable for legacy actions, prompt filters, and image-quality filters.
+
+There are two explicit ordering controls:
+
+- **Hydrus search order** runs in Hydrus when you press **Search**, determining
+  which files enter the bounded result set (maximum 200). It offers import,
+  modified, archive and last-viewed dates; random; filetype; SHA-256, pixel hash
+  and blurhash; size, dimensions, tags, viewing statistics, and colour sorts.
+  Availability depends on your Hydrus version. Simple sorts can determine the
+  limit subset; complex sorts can sort a random limited sample, per Hydrus.
+- **Gallery order** sorts loaded files across sources by date, filename,
+  filetype, SHA-256 or stable random order. **Reshuffle** changes the random order;
+  selecting/viewing files does not. Missing hashes sort last (local hashes come
+  from cached Hydrus status). Date means local file time versus Hydrus import
+  time. **Search / folder order** preserves the server order and is the default
+  in Hydrus-only mode. In Both it retains each source's order, local first.
+
+Use **Advanced OR groups → Add OR group** for expressions such as
+`portrait AND (blue eyes OR green eyes) AND (landscape OR city)`:
+put `portrait` in the normal tag input and create the two OR rows. Press Enter
+after each term. Rows are ANDed together; terms within a row are ORed. Negated
+tags and supported `system:` predicates can be included in a row. Remove empty
+rows before searching. The normal Any-tag mode still keeps exclusions and system
+filters outside its OR group. Examples of system predicates:
+
+- `system:filetype = image/png`
+- `system:modified date > 2025-01-01`
+- `system:hash = <SHA-256>` (replace the placeholder with an actual hash)
+
+The bridge always applies its image/animation filter and result limit. OR groups
+cannot override that limit. Advanced predicates apply to Hydrus; local filtering
+continues to use local filenames, prompt metadata, cached tags and quality fields.
+See the authoritative [Hydrus search API](https://hydrusnetwork.github.io/hydrus/developer_api.html#get_filessearch_files)
+and [sorting semantics](https://hydrusnetwork.github.io/hydrus/getting_started_searching.html).
+
+Click a thumbnail to enter the gallery viewer. Use arrows or Previous/Next,
+the filmstrip, zoom controls, Space or the Selected checkbox. Right-click has
+the same source-aware actions as the main grid, including bulk targets. Selection
+persists when closing the viewer; the grid scrolls to the last viewed item.
+Hydrus originals are hash-verified before inline display. Unsupported originals
+fall back to a clearly labelled thumbnail and remain downloadable. Metadata,
+export and Image Source dialogs remain available from the viewer. Existing local
+video, audio and 3D files can also be opened in the viewer.

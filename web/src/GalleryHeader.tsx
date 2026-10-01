@@ -22,6 +22,7 @@ const GalleryHeader = () => {
     } = useGalleryContext();
 
     const [search, setSearch] = useState(searchFileName);
+    useEffect(() => { setSearch(searchFileName); }, [searchFileName]);
     const [showClose, setShowClose] = useState(false);
     const [targetDate, setTargetDate] = useState<number>();
     const [countdown] = useCountDown({
