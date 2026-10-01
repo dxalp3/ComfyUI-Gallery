@@ -12,7 +12,7 @@ type Page = { page_key: string; name: string; is_media_page: boolean; selected?:
 type Results = { items: RemoteImage[]; total: number; offset?: number; page_name?: string; page_state?: number };
 type InputCopy = { name: string; subfolder: string; type: string; input_name: string; url: string; hash: string };
 
-export function HydrusBrowser({ open, onClose, embedded = false, source = 'hydrus' }: { source?: string; open: boolean; onClose: () => void; embedded?: boolean }) {
+export function HydrusBrowser({ open, source = 'hydrus', searchOpen, onSearchComplete }: { source?: string; open: boolean; searchOpen: boolean; onSearchComplete: () => void }) {
     const { settings, setSettingsOpen } = useHydrus();
     const [tab, setTab] = useState('search');
     const [tags, setTags] = useState<string[]>([]);
@@ -57,6 +57,7 @@ export function HydrusBrowser({ open, onClose, embedded = false, source = 'hydru
                 const data = await hydrusRequest<Results>(kind, kind === 'search' ? { tags, match, limit, or_groups: orGroups, file_sort_type: sortType, file_sort_asc: ascending } : { page_key: key, offset, limit });
                 if (version !== requestVersion.current) return;
                 setResult(data);
+                onSearchComplete();
             }
         } catch (reason) { if (version === requestVersion.current) setError(reason instanceof Error ? reason.message : String(reason)); }
         finally { if (version === requestVersion.current) setBusy(false); }
@@ -107,8 +108,8 @@ export function HydrusBrowser({ open, onClose, embedded = false, source = 'hydru
         title: `${page.name}${page.selected ? ' · active' : ''}`, selectable: page.is_media_page,
         children: page.pages ? treeData(page.pages) : undefined }));
     const items = result?.items || [];
-    return <section aria-label="Gallery workspace">
-        <div style={{ display: source === 'local' ? 'none' : undefined }}>
+    return <section className="cg-browser" aria-label="Gallery results">
+        <div className="cg-hydrus-search" style={{ display: source === 'local' || !searchOpen ? 'none' : undefined }}>
             {!settings?.has_access_key && <Alert type="warning" message="Configure your Hydrus connection first." action={<Button onClick={() => setSettingsOpen(true)}>Open settings</Button>} />}
             <Tabs activeKey={tab} onChange={changeTab} items={[{ key: 'search', label: 'Search Hydrus', disabled: working }, { key: 'pages', label: 'Open client pages', disabled: working }]} />
             {tab === 'search' ? <HydrusSearchPanel tags={tags} setTags={setTags} match={match} setMatch={setMatch} limit={limit} setLimit={setLimit}

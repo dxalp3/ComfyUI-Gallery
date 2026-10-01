@@ -121,3 +121,26 @@ forwarded API parameters, not by real database ordering; supported options vary
 by client version. Loaded-gallery sorting is independently tested. Local media
 viewers retain the existing model/audio/video renderers; this run's image fixture
 does not validate every media codec or 3D format.
+
+## Full-page gallery workspace — 2026-10-01 (hydrus.6)
+
+- TypeScript compilation, Vite production build, and all 21 JavaScript helper
+  tests passed. The rebuilt frontend bundle is included; the existing bundle-size
+  warning remains.
+- `browser_workspace.cjs` passed with 10,000 synthetic local entries: fewer than
+  100 cards mounted, grid height above 760px at a 1500×1000 viewport, retained
+  scroll and selection across workflow switches, tab-bar replacement, workflow
+  load callbacks, responsive sizing, hostile host CSS, light mode, and access
+  without a workflow tab bar. No browser page errors were reported.
+- Updated unified-gallery and Image Source browser regressions passed against
+  the local bridge and simulated ComfyUI/Hydrus host, covering mixed results,
+  viewer selection/context actions, OR search, crop/stitch, filters, and append
+  from a separate browser tab.
+- Backend code is unchanged; the Python results above apply to that code.
+
+The Gallery button is extension-owned and attached beside workflow tabs. It
+does not register a saved workflow or modify ComfyUI core files. Actual installed
+ComfyUI and Hydrus were not connected for these checks. The tab integration
+depends on the frontend tab-bar markup; sidebar and floating launchers provide
+access when that container is unavailable. Synthetic-library checks validate
+rendering and state retention, not real storage scanning or Hydrus throughput.

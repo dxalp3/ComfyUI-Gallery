@@ -1,6 +1,6 @@
 # ComfyUI Gallery
 
-## Hydrus edition — 2.7.1-hydrus.5
+## Hydrus edition — 2.7.1-hydrus.6
 
 This customized edition adds image export to the Hydrus Client API, persistent
 SHA-256 export history, cached Hydrus metadata, bulk actions, checkboxes, range
@@ -18,12 +18,13 @@ open Gallery in a separate browser tab. Bulk-append sources to **Gallery Image
 Source**, crop with pixel controls or a drag rectangle, and stitch horizontally,
 vertically, or in a grid for img2img. The compiled frontend is included.
 
-**New in hydrus.5:** open the **Gallery sidebar tab** next to ComfyUI's built-in
-sidebar tools, then expand or dock the same workspace without losing selection.
-**Both** now uses one virtualized mixed grid. Click any image for a gallery viewer
-with original-size media, previous/next, filmstrip, zoom, shared selection, and
-the same right-click actions as the grid. Hydrus searches support multiple OR
-groups combined with AND and the documented API sort modes.
+**New in hydrus.6:** a **Gallery workspace tab** beside ComfyUI's workflow tabs
+opens a full-width, non-modal grid. Click a workflow tab or **Workflow** to return
+to the canvas; gallery selection, filters and scroll position are retained.
+Compact controls, an adjustable thumbnail size, and selection-only bulk actions
+leave most of the screen for images. The sidebar is now a small launcher.
+**Both** still uses one virtualized mixed grid, with grouped OR search, Hydrus
+sorting, and a full viewer with shared selection and right-click actions.
 
 The gallery uses cached 512px thumbnails while retaining originals for previews
 and exports. Image cards stay mounted during metadata and file updates, sorting

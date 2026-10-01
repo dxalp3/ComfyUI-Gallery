@@ -2,7 +2,7 @@
 
 This customized Gallery adds image export to your Hydrus client, persistent export history, and a cached view of the file's Hydrus metadata. Search local files by Hydrus tags or generation prompts, browse the main client's library and open pages, and bring source images into an img2img workflow. ComfyUI sends the original file directly to Hydrus, so the two applications can run on different computers.
 
-Version **2.7.1-hydrus.5** adds Gallery Image Source with cropping and stitching, a separate gallery browser tab, and Local / Hydrus / Both views in the main gallery.
+Version **2.7.1-hydrus.6** adds Gallery Image Source with cropping and stitching, a separate gallery browser tab, and Local / Hydrus / Both views in the main gallery.
 
 ## Install this customized version
 
@@ -247,22 +247,39 @@ The React source is in `web/src`. Use the pinned pnpm version from `web/package.
 
 Run backend and thumbnail tests with `python -m unittest discover -s tests -p "test_*.py"` using an environment with the node's Python dependencies installed. Tests use temporary files and a simulated Hydrus server. Run local-search and prompt-tag helper tests with `node tests/local_search.test.cjs` after installing the frontend dependencies. The customized source starts from upstream commit `74639e68846f64c9f561f3a7745529de76376a97`.
 
-## Sidebar, mixed gallery, and viewer (hydrus.5)
+## Full-width workspace, mixed gallery, and viewer (hydrus.6)
 
-After updating, restart ComfyUI and refresh the browser. Open **Gallery** in the
-ComfyUI sidebar (image icon alongside Assets and the other tools). It uses the
-supported `registerSidebarTab` extension API; no ComfyUI core modifications are
-needed. **Expand gallery** and **Dock in sidebar** move the same workspace and
-retain its search, results, selection, and scroll. The existing node/toolbar
-launcher and **Open in new tab** remain available on older frontends. This is a
-custom sidebar tab, not a replacement for the built-in Assets tab or a workflow.
+After updating, restart ComfyUI and hard-refresh the browser. Click **Gallery**
+beside the workflow tabs. It opens a full-width workspace below the tab bar,
+covering the canvas without changing, saving, or creating a workflow. Click any
+workflow tab or the **Workflow** button to return. Gallery filters, results,
+selection and scroll position stay in memory while switching.
+
+The sidebar now contains only a launcher. On frontends without the recognised
+workflow tab bar, the existing node button, Ctrl+G and fallback Open Gallery
+button open the same full-page workspace. **Settings → Open in new browser tab**
+remains available. The gallery supplies its own background and scoped controls
+for consistent contrast in light and dark modes.
+
+The extension adds its own button to the existing workflow-tab container; there
+is currently no public ComfyUI API for arbitrary non-workflow tabs. It does not
+patch ComfyUI files or workflow state. It reattaches if the host replaces its tab
+bar. Compatibility still depends on the frontend's tab-bar markup; the launcher
+fallback remains available if that markup changes.
+
+Use **Filters & tools** for local prompt/tag fields, quality filters and folder
+actions, **Search Hydrus** to open the remote search controls, and **Image Source**
+for the target selector/editor. A successful Hydrus search collapses its controls
+to reveal the grid. The thumbnail-size slider adjusts grid density. Bulk actions
+appear when there is a selection, and the virtualized grid fills the remaining
+height rather than using a fixed-height sidebar or popup.
 
 **Both** combines the current local folder/filter and loaded Hydrus results in
 one grid. Source badges identify each file. Local and Hydrus copies of identical
 content stay separately actionable. Select across sources with checkboxes,
 Ctrl/Cmd+click, or Shift+click. Bulk actions use the selected files in the current
-view; the toolbar reports selections outside the view. Local tools and filters
-are expandable for legacy actions, prompt filters, and image-quality filters.
+view; the toolbar reports selections outside the view. **Filters & tools** opens
+the legacy actions, prompt filters, and image-quality filters.
 
 There are two explicit ordering controls:
 

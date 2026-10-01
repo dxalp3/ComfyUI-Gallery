@@ -126,7 +126,7 @@ app.add_routes(routes)
 
 async def homepage(request):
     return web.Response(text='''<!doctype html><html><head><title>Gallery Hydrus QA</title><meta charset="utf-8"></head>
-<body style="margin:0;background:#20252b"><div class="flex gap-2 mx-2"></div>
+<body style="margin:0;background:#20252b"><div class="workflow-tabs-container" style="height:44px;display:flex;background:#20252b"><div class="workflow-tabs" role="tablist"><button role="tab" aria-selected="true">Test workflow</button><button role="tab">Second workflow</button></div></div><div id="graph-canvas-container" style="height:calc(100vh - 44px)"></div><div class="flex gap-2 mx-2"></div>
 <script>window.qaNodes=[];window.qaListeners={};window.qaExtension=null;
 window.LiteGraph={createNode:type=>{const n={type,comfyClass:type,title:'Gallery Image Source',widgets:[{name:'sources',value:JSON.stringify({version:1,images:[],layout:'single',columns:2,gap:0,background:'#000000'})}],addWidget(type,name,value,callback,options){const w={type,name,value,callback,options};this.widgets.push(w);return w;},setSize(){},setDirtyCanvas(){}};window.qaExtension?.nodeCreated(n);return n;}};
 const graph={_nodes:window.qaNodes,add(node){node.id=window.qaNodes.length+1;window.qaNodes.push(node);},beforeChange(){},afterChange(){}};

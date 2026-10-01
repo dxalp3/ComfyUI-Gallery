@@ -8,7 +8,7 @@ const assert = require('node:assert/strict');
  const choose=async(label,option)=>{await page.getByRole('combobox',{name:label,exact:true}).press('ArrowDown');await page.getByTitle(option,{exact:true}).click();};
  try {
   await page.goto(base);
-  await page.getByRole('button',{name:'Open Gallery',exact:true}).click();
+  await page.getByRole('tab',{name:'Gallery workspace',exact:true}).click();
   await page.locator('[data-gallery-entry]').first().waitFor();
   assert.equal(await page.locator('[data-gallery-entry]').count(),4);
   await page.getByRole('checkbox',{name:'Select study-4.png',exact:true}).click();
@@ -53,15 +53,14 @@ const assert = require('node:assert/strict');
   // Append a mixed selection into the actual source bridge and simulated graph.
   await page.getByRole('button',{name:'Append to Image Source (7)',exact:true}).click();
   await page.waitForFunction(()=>window.qaNodes.length===1&&JSON.parse(window.qaNodes[0].widgets.find(w=>w.name==='sources').value).images.length===7);
-  // Mount and unmount through the documented sidebar extension callbacks.
-  await page.evaluate(()=>{const host=document.createElement('div');host.id='qa-sidebar';host.style.cssText='width:600px;height:100vh;overflow:auto';document.body.appendChild(host);window.qaSidebar.render(host);});
-  await page.locator('#qa-sidebar').getByText('Both',{exact:true}).waitFor();
-  assert.equal(await page.locator('#qa-sidebar [data-gallery-entry] input:checked').count(),7);
-  await page.getByRole('button',{name:'Expand gallery',exact:true}).click();
-  await page.getByRole('button',{name:'Dock in sidebar',exact:true}).click();
-  assert.equal(await page.locator('#qa-sidebar [data-gallery-entry] input:checked').count(),7);
-  await page.evaluate(()=>window.qaSidebar.destroy());
-  await page.getByRole('button',{name:'Open Gallery',exact:true}).click();
+  // Switching back to workflows keeps the same gallery state and graph.
+  await page.getByRole('tab',{name:'Test workflow',exact:true}).click();
+  assert.equal(await page.locator('#comfy-gallery-workspace').isVisible(),false);
+  await page.getByRole('tab',{name:'Gallery workspace',exact:true}).click();
+  assert.equal(await page.locator('[data-gallery-entry] input:checked').count(),7);
+  await page.getByRole('button',{name:'Workflow',exact:true}).click();
+  await page.evaluate(()=>{const host=document.createElement('div');host.id='qa-sidebar';document.body.appendChild(host);window.qaSidebar.render(host);});
+  await page.getByRole('button',{name:'Open Gallery workspace',exact:true}).click();
   await page.getByRole('button',{name:'Select all shown (8)',exact:true}).waitFor();
   await page.getByText('Hydrus',{exact:true}).first().click();
   await page.getByRole('tab',{name:'Open client pages',exact:true}).click();
@@ -71,11 +70,12 @@ const assert = require('node:assert/strict');
   await page.locator('.ant-segmented-item').filter({hasText:'Local'}).click();
   await page.getByRole('textbox',{name:'Filter local files',exact:true}).fill('winter');
   await page.waitForFunction(()=>document.querySelectorAll('[data-gallery-entry]').length===1);
-  await page.getByText('Local tools and filters',{exact:true}).click();
+  await page.getByRole('button',{name:'Filters & tools',exact:true}).click();
   assert.equal(await page.getByRole('combobox',{name:'Search local images',exact:true}).inputValue(),'winter');
+  await page.getByRole('dialog',{name:'Local filters and tools',exact:true}).getByRole('button',{name:'Close',exact:true}).click();
   if(process.env.GALLERY_QA_SCREENSHOT) await page.screenshot({path:process.env.GALLERY_QA_SCREENSHOT,fullPage:true});
   assert.deepEqual(errors,[]);
-  console.log('Unified gallery browser checks passed: mixed grid, grouped search, original viewer, selection/context menus, mixed img2img append, sidebar docking, client pages; no page errors.');
+  console.log('Unified gallery browser checks passed: mixed grid, grouped search, original viewer, selection/context menus, mixed img2img append, workspace switching, client pages; no page errors.');
  } catch(error) { if(process.env.GALLERY_QA_SCREENSHOT) await page.screenshot({path:process.env.GALLERY_QA_SCREENSHOT,fullPage:true});throw error; }
  finally {await browser.close();}
 })().catch(error=>{console.error(error);process.exit(1);});

@@ -43,10 +43,10 @@ const GallerySettingsModal = () => {
             onCancel={handleCancel}
             footer={(
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
-                    <Button 
-                        type="link" 
-                        href="https://github.com/PanicTitan/ComfyUI-Gallery" 
-                        target="_blank" 
+                    <Button
+                        type="link"
+                        href="https://github.com/PanicTitan/ComfyUI-Gallery"
+                        target="_blank"
                         icon={<GithubOutlined />}
                         style={{ paddingLeft: 0 }}
                     >
@@ -59,41 +59,31 @@ const GallerySettingsModal = () => {
                 </div>
             )}
         >
-            <Flex 
-                vertical 
+            <Flex
+                vertical
                 gap={16}
             >
                 <div>
-                    <Typography.Title 
+                    <Typography.Title
                         level={5}
                     >
                         Relative Path:
                     </Typography.Title>
-                    <Input 
-                        value={staged.relativePath} 
-                        onChange={e => setStaged({ relativePath: e.target.value })} 
+                    <Input
+                        value={staged.relativePath}
+                        onChange={e => setStaged({ relativePath: e.target.value })}
                     />
                 </div>
+
                 <div>
-                    <Typography.Title 
+                    <Typography.Title
                         level={5}
                     >
-                        Button Box Query:
+                        Fallback button label:
                     </Typography.Title>
-                    <Input 
-                        value={staged.buttonBoxQuery} 
-                        onChange={e => setStaged({ buttonBoxQuery: e.target.value })} 
-                    />
-                </div>
-                <div>
-                    <Typography.Title 
-                        level={5}
-                    >
-                        Button Label:
-                    </Typography.Title>
-                    <Input 
-                        value={staged.buttonLabel} 
-                        onChange={e => setStaged({ buttonLabel: e.target.value })} 
+                    <Input
+                        value={staged.buttonLabel}
+                        onChange={e => setStaged({ buttonLabel: e.target.value })}
                     />
                 </div>
                 <Switch
@@ -103,20 +93,14 @@ const GallerySettingsModal = () => {
                     onChange={checked => setStaged({ showDateDivider: checked })}
                 />
                 <Switch
-                    checkedChildren={"Floating Button"}
-                    unCheckedChildren={"Normal Button"}
-                    checked={staged.floatingButton}
-                    onChange={checked => setStaged({ floatingButton: checked })}
-                />
-                <Switch
                     checkedChildren={"Auto Play Videos"}
                     unCheckedChildren={"Don't Auto Play Videos"}
                     checked={staged.autoPlayVideos}
                     onChange={checked => setStaged({ autoPlayVideos: checked })}
                 />
                 <Switch
-                    checkedChildren={"Hide Open Button"}
-                    unCheckedChildren={"Show Open Button"}
+                    checkedChildren={"Hide fallback button"}
+                    unCheckedChildren={"Show fallback button"}
                     checked={staged.hideOpenButton}
                     onChange={checked => setStaged({ hideOpenButton: checked })}
                 />

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Button, Checkbox, Collapse, Dropdown, Empty, Input, Modal, Select, Space, Tag, Typography, message } from 'antd';
+import { Button, Checkbox, Collapse, Dropdown, Empty, Input, Modal, Select, Space, Slider, Tooltip, Tag, Typography, message } from 'antd';
 import { AutoSizer } from 'react-virtualized';
 import { FixedSizeGrid } from 'react-window';
 import type { GridChildComponentProps } from 'react-window';
@@ -27,6 +27,7 @@ export function UnifiedGallery({ source, remote, selectedRemote, setSelectedRemo
 }) {
     const gallery = useGalleryContext();
     const hydrus = useHydrus();
+    const [tileSize, setTileSize] = useState(210);
     const [order, setOrder] = useState<GalleryOrder>('date');
     const [ascending, setAscending] = useState(false);
     const [seed, setSeed] = useState(1);
@@ -133,10 +134,10 @@ export function UnifiedGallery({ source, remote, selectedRemote, setSelectedRemo
                                         grid.current?.scrollToItem({ rowIndex: Math.floor(nextIndex / count), columnIndex: nextIndex % count });
                                         requestAnimationFrame(() => document.querySelector<HTMLElement>('[data-gallery-entry="' + CSS.escape(next.id) + '"]')?.focus());
                                     } if (event.key === 'Enter') { event.preventDefault(); setViewer(entry.id); } if (event.key === ' ') { event.preventDefault(); toggle(entry, event.shiftKey); } }}>
-                                <div draggable={!!entry.local} onDragStart={event => { if (entry.local) { event.dataTransfer.setData('text/uri-list', original(entry)); event.dataTransfer.setData('custom', JSON.stringify({ name: entry.name, folder: gallery.currentFolder, type: entry.local.type, url: entry.local.url })); } }} style={{ height: 150, background: '#17191d', cursor: 'pointer' }} onClick={event => event.shiftKey || event.ctrlKey || event.metaKey ? toggle(entry, event.shiftKey) : setViewer(entry.id)}>
+                                <div draggable={!!entry.local} onDragStart={event => { if (entry.local) { event.dataTransfer.setData('text/uri-list', original(entry)); event.dataTransfer.setData('custom', JSON.stringify({ name: entry.name, folder: gallery.currentFolder, type: entry.local.type, url: entry.local.url })); } }} style={{ height: 'calc(100% - 54px)', background: '#17191d', cursor: 'pointer' }} onClick={event => event.shiftKey || event.ctrlKey || event.metaKey ? toggle(entry, event.shiftKey) : setViewer(entry.id)}>
                                     {entry.local?.type === '3d' ? <ModelThumbnail file={entry.local} /> : entry.local?.type === 'media' ? <video muted loop={gallery.settings.autoPlayVideos} autoPlay={gallery.settings.autoPlayVideos} preload="metadata" src={original(entry)} style={{ width: '100%', height: '100%', objectFit: 'contain' }} /> : entry.local?.type === 'audio' ? <div style={{ padding: 40, color: 'white' }}>AUDIO · Open viewer</div> : <img src={thumbnail(entry)} alt={entry.name} loading="lazy" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />}
                                 </div>
-                                <div style={{ padding: 6 }}><Checkbox aria-label={'Select ' + entry.name} checked={selected.has(entry.id)} disabled={disabled} onClick={event => toggle(entry, event.shiftKey)} /> <Tag>{entry.source === 'local' ? 'Local' : 'Hydrus'}</Tag>{entry.local?.type === 'image' && <Tag color={hydrusStatus(hydrus.items[entry.local.url]).color} style={{ cursor: 'pointer' }} onClick={() => hydrus.setDetailsUrl(entry.local!.url)}>{hydrusStatus(hydrus.items[entry.local.url]).label}</Tag>}<Typography.Text ellipsis title={entry.name} style={{ maxWidth: '90%' }}>{entry.name}</Typography.Text></div>
+                                <div style={{ padding: 6 }}><Checkbox aria-label={'Select ' + entry.name} checked={selected.has(entry.id)} disabled={disabled} onClick={event => toggle(entry, event.shiftKey)} /> <Tag color={entry.remote ? 'blue' : undefined}>{entry.source === 'local' ? 'Local' : 'Hydrus'}</Tag><Typography.Text ellipsis title={entry.name} style={{ maxWidth: '90%' }}>{entry.name}</Typography.Text></div>
                             </div>
                         </Dropdown></div>;
                     };
@@ -148,25 +149,29 @@ export function UnifiedGallery({ source, remote, selectedRemote, setSelectedRemo
         const focused = current || entries.find(item => item.id === (event.target as HTMLElement).closest<HTMLElement>('[data-gallery-entry]')?.dataset.galleryEntry);
         if (focused && (key === 'd' || key === 'i')) { event.preventDefault(); event.stopPropagation(); void act(key === 'd' ? 'download' : 'source', focused); }
     };
-    return <div onKeyDown={shortcuts}>
-        <Space wrap style={{ marginBottom: 12 }}>
-            <Select aria-label="Gallery order" value={order} onChange={setOrder} style={{ width: 180 }} options={[
-                { value: 'date', label: 'Date' }, { value: 'name', label: 'Name' }, { value: 'mime', label: 'Filetype' }, { value: 'hash', label: 'SHA-256 hash' }, { value: 'random', label: 'Random' }, { value: 'result', label: 'Search / folder order' }
+    return <div className="cg-grid-layout" onKeyDown={shortcuts}>
+        <div className="cg-grid-toolbar">
+            <span className="cg-grid-summary">{entries.length.toLocaleString()} files{selected.size ? ' · ' + selected.size + ' selected' : ''}</span>
+            <Select aria-label="Gallery order" value={order} onChange={setOrder} style={{ width: 155 }} options={[
+                { value: 'date', label: 'Date' }, { value: 'name', label: 'Name' }, { value: 'mime', label: 'Filetype' }, { value: 'hash', label: 'SHA-256 hash' }, { value: 'random', label: 'Random' }, { value: 'result', label: 'Search order' }
             ]} />
-            <Select aria-label="Gallery sort direction" value={ascending ? 'asc' : 'desc'} onChange={value => setAscending(value === 'asc')} disabled={order === 'random' || order === 'result'} options={[{ value: 'desc', label: 'Descending' }, { value: 'asc', label: 'Ascending' }]} />
+            <Select aria-label="Gallery sort direction" value={ascending ? 'asc' : 'desc'} onChange={value => setAscending(value === 'asc')} style={{ width: 120 }} disabled={order === 'random' || order === 'result'} options={[{ value: 'desc', label: 'Descending' }, { value: 'asc', label: 'Ascending' }]} />
             {order === 'random' && <Button onClick={() => setSeed(value => value + 1)}>Reshuffle</Button>}
+            <Tooltip title="Thumbnail size"><Slider aria-label="Thumbnail size" min={140} max={340} step={20} value={tileSize} onChange={setTileSize} style={{ width: 90, margin: '0 12px' }} /></Tooltip>
             <Button disabled={disabled || !entries.length} onClick={() => setSelection(new Set([...selected, ...entries.map(item => item.id)]))}>Select all shown ({entries.length})</Button>
-            <Button disabled={disabled || !selected.size} onClick={() => setSelection(new Set())}>Clear selection</Button>
+            <Tooltip title="Ctrl/Cmd+click toggles selection; Shift+click selects a range. Right-click for actions. Gallery order sorts loaded files; missing hashes sort last. Dates use local file time or Hydrus import time."><Button aria-label="Gallery help">?</Button></Tooltip>
+        </div>
+        {selected.size > 0 && <div className="cg-selection">
+            <strong>{selected.size} selected</strong><span>{selected.size - shownSelected.length ? (selected.size - shownSelected.length) + ' outside this view' : ''}</span>
             <Button disabled={disabled || !shownSelected.length} onClick={() => void act('source')}>Append to Image Source ({shownSelected.length})</Button>
             <Button disabled={disabled || !shownSelected.length} onClick={() => void act('download')}>Download selected</Button>
             <Button disabled={disabled || !shownSelected.some(item => item.local?.type === 'image')} onClick={() => void act('export')}>Export local selection to Hydrus</Button>
-            <Typography.Text type="secondary">{selected.size} selected · {selected.size - shownSelected.length} outside this view</Typography.Text>
-        </Space>
-        <Typography.Paragraph type="secondary">{entries.length} files · Ctrl/Cmd+click toggles · Shift+click selects a range. Gallery order sorts loaded results; Date uses local file time / Hydrus import time. Missing hashes sort last.</Typography.Paragraph>
-        <div style={{ height: '60vh', minHeight: 260 }} aria-label="Unified gallery">
+            <div className="cg-spacer" /><Button disabled={disabled} onClick={() => setSelection(new Set())}>Clear selection</Button>
+        </div>}
+        <div style={{ flex: 1, minHeight: 120, position: 'relative' }} aria-label="Unified gallery">
             {!entries.length ? <Empty description="No files loaded. Choose a local folder or search Hydrus." /> : <AutoSizer>{({ width, height }) => {
-                const count = Math.max(1, Math.floor(width / 220)); columns.current = count;
-                return <FixedSizeGrid ref={grid} width={width} height={height} columnCount={count} columnWidth={width / count} rowCount={Math.ceil(entries.length / count)} rowHeight={225}
+                const count = Math.max(1, Math.floor(width / tileSize)); columns.current = count;
+                return <FixedSizeGrid ref={grid} width={width} height={height} columnCount={count} columnWidth={width / count} rowCount={Math.ceil(entries.length / count)} rowHeight={Math.round(width / count * .7) + 58}
                     itemData={{ render: ({ rowIndex, columnIndex, style }: GridChildComponentProps) => {
                         return renderCard(rowIndex, columnIndex, count, style);
                     } }}
