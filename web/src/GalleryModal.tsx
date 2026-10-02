@@ -1,3 +1,4 @@
+import { HydrusSyncPanel } from './HydrusSyncPanel';
 import { LocalPromptSearch } from './LocalPromptLibrary';
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -65,6 +66,7 @@ const GalleryModal = () => {
                 <div className="cg-brand"><AppstoreOutlined /><strong>Gallery</strong></div>
                 <Segmented aria-label="Gallery sources" value={source} onChange={changeSource} options={[{ value: 'local', label: 'Local' }, { value: 'hydrus', label: 'Hydrus' }, { value: 'both', label: 'Both' }]} />
                 <div className="cg-spacer" />
+                <HydrusSyncPanel visible={visible} />
                 <Button icon={<ReloadOutlined />} title="Reload local images" aria-label="Reload local images" loading={gallery.loading} onClick={() => { void runAsync().catch(error => message.error(String(error))); }} />
                 <Dropdown trigger={['click']} menu={{ items: [{ key: 'gallery', label: 'Gallery settings' }, { key: 'hydrus', label: 'Connection settings' }, { key: 'browser', label: 'Open in new browser tab' }], onClick: ({ key }) => { if (key === 'gallery') setShowSettings(true); if (key === 'hydrus') setSettingsOpen(true); if (key === 'browser') { try { openGalleryTab(); } catch (error) { message.error(String(error)); } } } }}><Button aria-label="Settings" icon={<SettingOutlined />}>Settings</Button></Dropdown>
                 {!STANDALONE && <Button aria-label="Workflow" icon={<ArrowLeftOutlined />} onClick={() => setOpen(false)}>Workflow</Button>}

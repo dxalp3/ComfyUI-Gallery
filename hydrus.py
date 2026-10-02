@@ -51,6 +51,10 @@ except ImportError:
 class HydrusError(Exception):
     """An error whose message is safe to return to the browser."""
 
+    def __init__(self, message, transient=False):
+        super().__init__(message)
+        self.transient = transient
+
 
 def now():
     return datetime.now(timezone.utc).isoformat()
@@ -349,7 +353,7 @@ class HydrusClient:
                                 503: "Hydrus is busy or unavailable; retry later."}
                     if 300 <= response.status < 400:
                         raise HydrusError("Hydrus redirected the request. Set the final API URL; redirects are disabled to protect the key.")
-                    raise HydrusError(messages.get(response.status, "Hydrus API returned HTTP " + str(response.status) + "."))
+                    raise HydrusError(messages.get(response.status, "Hydrus API returned HTTP " + str(response.status) + "."), transient=response.status == 503)
                 raw = bytearray()
                 async for chunk in response.content.iter_chunked(65536):
                     raw.extend(chunk)
@@ -365,10 +369,10 @@ class HydrusClient:
                     raise HydrusError("Hydrus returned an unexpected response.")
                 return payload
         except asyncio.TimeoutError:
-            raise HydrusError("Hydrus request timed out. An upload may have completed; refresh status or retry safely.") from None
+            raise HydrusError("Hydrus request timed out. An upload may have completed; refresh status or retry safely.", transient=True) from None
         except aiohttp.ClientError:
             # Never reflect upstream bodies or connector exceptions; they may contain keys.
-            raise HydrusError("Cannot connect to Hydrus. Check its API URL, TLS certificate, and that the client is running.") from None
+            raise HydrusError("Cannot connect to Hydrus. Check its API URL, TLS certificate, and that the client is running.", transient=True) from None
 
     async def metadata(self, digest):
         result = await self.request("GET", "/get_files/file_metadata", params={
@@ -416,6 +420,11 @@ class HydrusBridge:
         self.memory = HydrusMemory(directory)
         self.client_factory = client_factory
         self.operation_lock = asyncio.Lock()
+        try:
+            from .hydrus_sync import HydrusSync
+        except ImportError:
+            from hydrus_sync import HydrusSync
+        self.sync = HydrusSync(self)
 
     @staticmethod
     def urls(data):
@@ -468,6 +477,8 @@ class HydrusBridge:
             if local and not deleted:
                 item["exported"] = True
         await self.save_item(target, item)
+        if item.get('current_present') and metadata:
+            await asyncio.to_thread(self.sync.put_records, client.settings if hasattr(client, 'settings') else self.settings.load(), [metadata])
 
     async def batch(self, action, data):
         urls = self.urls(data)
@@ -537,22 +548,14 @@ class HydrusBridge:
             if not settings["tag_service_key"]:
                 item["warnings"].append("Image imported, but tags were not sent: choose a tag service in Hydrus settings.")
             else:
-                try:
-                    await client.request("POST", "/add_tags/add_tags", json={"hash": digest,
-                        "service_keys_to_tags": {settings["tag_service_key"]: tags},
-                        "override_previously_deleted_mappings": False})
-                except HydrusError as error:
-                    item["warnings"].append("Image imported; tags failed: " + str(error))
+                self.sync.enqueue(settings, digest, 'tags', {'service': settings['tag_service_key'], 'tags': tags})
+                item['warnings'].append('Tags saved to the background sync queue.')
         if send_metadata:
             if note_warning:
-                item["warnings"].append(note_warning)
+                item['warnings'].append(note_warning)
             if note:
-                try:
-                    await client.request("POST", "/add_notes/set_notes", json={"hash": digest,
-                        "notes": {"ComfyUI Gallery generation metadata": note},
-                        "merge_cleverly": True, "extend_existing_note_if_possible": False, "conflict_resolution": 3})
-                except HydrusError as error:
-                    item["warnings"].append("Image imported; generation note failed: " + str(error))
+                self.sync.enqueue(settings, digest, 'note', {'name': 'ComfyUI Gallery generation metadata', 'text': note, 'base': None})
+                item['warnings'].append('Generation metadata saved to the background sync queue.')
         try:
             import_status = item["status"]
             await self.refresh_item(client, target, item)
@@ -662,7 +665,9 @@ class HydrusBridge:
             raise HydrusError("Unsupported Hydrus sort type.")
         if type(ascending) is not bool:
             raise HydrusError("Sort direction must be a boolean.")
-        tags.extend([HYDRUS_IMAGE_PREDICATE, "system:limit=" + str(limit)])
+        tags.append(HYDRUS_IMAGE_PREDICATE)
+        if limit is not None:
+            tags.append("system:limit=" + str(limit))
         try:
             result = await client.request("GET", "/get_files/search_files", params={
                 "tags": json.dumps(tags), "file_sort_type": str(sort_type), "file_sort_asc": json.dumps(ascending),
@@ -682,6 +687,7 @@ class HydrusBridge:
                 item.update(metadata=record, metadata_checked_at=now(), last_checked_at=now(), current_present=True, status='present', error=None)
                 self.memory.put(target, item)
         await asyncio.to_thread(store)
+        await asyncio.to_thread(self.sync.put_records, settings, records)
         return records
 
     async def browse(self, action, data):
@@ -703,35 +709,32 @@ class HydrusBridge:
                 join = data.get('field_join', 'any')
                 if field not in ('positive', 'negative', 'hydrus', 'name', 'all') or join not in ('all', 'any'): raise HydrusError('Invalid metadata search mode.')
                 try:
-                    from .local_library import prompts
+                    from .hydrus_sync import sort_records
                 except ImportError:
-                    from local_library import prompts
+                    from hydrus_sync import sort_records
                 has_tags = bool(data.get('tags') or data.get('or_groups'))
-                tag_ids = await self.search_identifiers(client, data, limit) if has_tags else []
-                candidate_query = dict(data, tags=(terms if field == 'hydrus' else ['system:has notes'] if field in ('positive', 'negative') else []), or_groups=[], match='all')
-                candidate_ids = tag_ids if has_tags and join == 'all' else await self.search_identifiers(client, candidate_query, 200)
-                candidates = await self.remote_metadata(client, candidate_ids[:200])
-                def matches(record):
-                    metadata = {}
-                    for name, note in record.get('notes', {}).items():
-                        if name.startswith('ComfyUI Gallery generation metadata'):
-                            try:
-                                parsed = json.loads(note)
-                                if isinstance(parsed, dict): metadata.update(parsed)
-                            except (ValueError, TypeError): pass
-                    generated = prompts(metadata)
-                    tags = []
-                    for service in record.get('tags', {}).values():
-                        for key in ('display_tags', 'storage_tags'):
-                            for status in ('0', '2'): tags.extend(service.get(key, {}).get(status, []))
-                    values = {'positive': generated['positive'], 'negative': generated['negative'], 'hydrus': ', '.join(tags), 'name': str(metadata.get('fileinfo', {}).get('filename', '')) + ' ' + record['hash']}
-                    haystack = (' '.join(values.values()) if field == 'all' else values[field]).lower().replace('_', ' ')
-                    return all(term.lower().replace('_', ' ') in haystack for term in terms)
-                matched = [record for record in candidates if matches(record)]
+                tag_ids = await self.search_identifiers(client, data, None) if has_tags else []
+                self.sync.wake.set()
+                matched = await asyncio.to_thread(self.sync.search, settings, field, terms)
+                index_status = self.sync.status(settings)
+                if has_tags and join == 'all':
+                    allowed = set(tag_ids)
+                    matched = [record for record in matched if record.get('file_id') in allowed]
                 if has_tags and join == 'any':
                     matched = await self.remote_metadata(client, tag_ids[:limit]) + matched
-                unique = list({record['hash']: record for record in matched}.values())[:limit]
-                return {'items': await self.cache_records(unique, settings), 'total': len(unique), 'limit': limit, 'metadata_scanned': len(candidates)}
+                order = {value: index for index, value in enumerate(tag_ids)}
+                if has_tags:
+                    matched.sort(key=lambda record: order.get(record.get('file_id'), len(order)))
+                unique = list({record['hash']: record for record in matched}.values())
+                sort_type, ascending = data.get('file_sort_type', 2), data.get('file_sort_asc', False)
+                if type(sort_type) is not int or sort_type not in (set(range(28)) - {17}) or type(ascending) is not bool:
+                    raise HydrusError('Invalid metadata search sort.')
+                native_order = has_tags and join == 'all'
+                if not native_order:
+                    sort_records(unique, sort_type, ascending)
+                return {'items': unique[:limit], 'total': len(unique), 'limit': limit,
+                        'sampling_fallback': not native_order and sort_type not in (0, 1, 2, 3, 4, 5, 6, 14, 20),
+                        'metadata_scanned': index_status['indexed'], 'index_status': {k: v for k, v in index_status.items() if k != 'jobs'}}
             page_key = data.get("page_key")
             if not isinstance(page_key, str) or not re.fullmatch(r"[0-9a-fA-F]{64}", page_key):
                 raise HydrusError("Choose a valid open Hydrus page.")
@@ -1015,6 +1018,7 @@ def register_hydrus_routes(routes, get_root, storage_dir=None, get_input_root=No
                     raise HydrusError("Request body must be a JSON object.")
                 if action == "save_settings":
                     result = await asyncio.to_thread(bridge.settings.save, data)
+                    bridge.sync.wake.set()
                 elif action == "test":
                     result = await bridge.test(data)
                 elif action == "services":
@@ -1035,9 +1039,22 @@ def register_hydrus_routes(routes, get_root, storage_dir=None, get_input_root=No
                     if data.get('target') != settings['url'] + '|' + settings['profile']: raise HydrusError('Hydrus connection changed; reload first.')
                     if not settings['tag_service_key']: raise HydrusError('Choose a Hydrus tag service first.')
                     tags = clean_tags(data.get('tags', []))
-                    async with bridge.client_factory(settings) as client:
-                        await client.request('POST', '/add_tags/add_tags', json={'hash': digest, 'service_keys_to_tags': {settings['tag_service_key']: tags}, 'override_previously_deleted_mappings': False})
-                    result = {'metadata': await bridge.remember_remote(digest, settings)}
+                    job = bridge.sync.enqueue(settings, digest, 'tags', {'service': settings['tag_service_key'], 'tags': tags})
+                    result = {'queued': True, 'job_id': job}
+                elif action == 'sync_status':
+                    result = bridge.sync.status(bridge.settings.load())
+                elif action == 'sync_retry':
+                    bridge.sync.rescan = True
+                    bridge.sync.wake.set()
+                    result = {'queued': True}
+                elif action == 'sync_resolve':
+                    settings = bridge.settings.load()
+                    if data.get('target') != bridge.sync.scope(settings): raise HydrusError('Hydrus connection changed; reload first.')
+                    try:
+                        await bridge.sync.resolve(settings, data.get('id'), data.get('choice'))
+                    except ValueError as error:
+                        raise HydrusError(str(error)) from None
+                    result = bridge.sync.status(settings)
                 elif action == "danbooru_tags":
                     try:
                         from .tag_dictionary import prompt_tags
@@ -1065,7 +1082,7 @@ def register_hydrus_routes(routes, get_root, storage_dir=None, get_input_root=No
         except (OSError, sqlite3.Error):
             return web.json_response({"ok": False, "error": "Cannot read or write Hydrus memory; check folder permissions."}, status=500)
 
-    for method, path, action in (("get", "settings", "get_settings"), ("post", "settings", "save_settings"),
+    for method, path, action in (("post", "sync_status", "sync_status"), ("post", "sync_retry", "sync_retry"), ("post", "sync_resolve", "sync_resolve"), ("get", "settings", "get_settings"), ("post", "settings", "save_settings"),
                                  ("post", "test", "test"), ("post", "status", "status"),
                                  ("post", "services", "services"), ("post", "dictionary", "dictionary"), ("post", "tag_sync", "tag_sync"), ("post", "danbooru_tags", "danbooru_tags"), ("post", "save_output", "save_output"), ("post", "trash", "trash"),
                                  ("post", "export", "export"), ("post", "refresh", "refresh"),

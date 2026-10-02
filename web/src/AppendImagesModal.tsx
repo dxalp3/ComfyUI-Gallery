@@ -1,6 +1,6 @@
 import { ImageSourceTarget } from './ImageSourceHost';
 import { useEffect, useState } from 'react';
-import { Alert, Button, Checkbox, Collapse, Modal, Select, Space, Typography } from 'antd';
+import { Alert, Button, Checkbox, Collapse, Modal, Select, Space, Typography, message } from 'antd';
 import { appendToImageSource, getPromptTargets } from './ImageSourceBridge';
 import { extractHydrusTags, extractLocalPrompts } from './LocalImageSearch';
 import { HydrusTagSelect } from './HydrusTagSelect';
@@ -53,6 +53,7 @@ export function AppendImagesModal({ entries, onClose }: { entries: GalleryEntry[
                 try { await hydrusRequest('tag_sync', { hash, tags: row.tags, target: `${hydrus.settings?.url}|${hydrus.settings?.profile}` }); }
                 catch (reason) { failures.push(row.entry.name + ': ' + String(reason)); }
             }
+            if (rows.some(row => row.sync) && !failures.length) message.info("Hydrus tag changes saved to the background sync queue.");
             hydrus.reloadMemory();
             if (failures.length) { setNotice(result); setError('Images were appended. Tag sync failed: ' + failures.join('; ')); }
             else onClose();

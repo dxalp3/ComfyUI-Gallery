@@ -379,13 +379,17 @@ class BrowserTests(unittest.IsolatedAsyncioTestCase):
         response = await self.client.post('/Gallery/hydrus/tag_sync', json={**data, 'target': 'stale'})
         self.assertEqual(response.status, 400)
         self.assertIsNone(self.synced_tags)
-        await self.post('tag_sync', data)
+        result = await self.post('tag_sync', data)
+        self.assertTrue(result['queued'])
+        self.assertIsNone(self.synced_tags)
+        await self.bridge.sync.tick()
         self.assertEqual(self.synced_tags['service_keys_to_tags']['ab' * 32], ['standing'])
         self.assertFalse(self.synced_tags['override_previously_deleted_mappings'])
         self.assertNotIn('service_keys_to_actions_to_tags', self.synced_tags)
 
     async def test_metadata_prompt_search_and_or_and_dictionary(self):
         self.record['notes'] = {'ComfyUI Gallery generation metadata': json.dumps({'positive': 'blue hair, standing', 'negative': 'blurry'})}
+        await self.bridge.sync.tick()
         for field, term, expected in [('positive', 'standing', 2), ('negative', 'blurry', 2), ('positive', 'blurry', 0)]:
             result = await self.post('search', {'metadata_terms': [term], 'metadata_field': field})
             self.assertEqual(len(result['items']), expected)

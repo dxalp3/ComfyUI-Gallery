@@ -1,3 +1,35 @@
+# Background sync and prompt index — hydrus.10 (2026-10-02)
+
+- Backend: **90 passed, 2 skipped** (92 tests). The two existing skips require
+  Windows symlink privileges.
+- JavaScript: **26 passed**. TypeScript compilation and the production build pass;
+  existing Vite bundle-size and third-party directive warnings remain.
+- Six Chrome integration suites passed: sync conflict resolution, hybrid prompts,
+  export controls, unified gallery, image source, and the 10,000-image workspace.
+  The conflict panel was also visually inspected at 1500×1000.
+- New tests verify offline queue persistence across bridge restarts, idempotent
+  delivery, original service targeting, profile isolation, last-synced note
+  baselines, remote edits during conflict resolution, keep-both preservation,
+  deleted-file refusal, worker startup/shutdown, and a resumable 251-file index
+  with an offline prompt match beyond the previous 200-file cutoff.
+- Browser conflict coverage uses real bridge/worker routes against a simulated
+  Hydrus server, verifies both note previews and the resulting two remote notes.
+  The older export test now uses the current workspace launcher and mandatory
+  metadata behavior.
+
+These checks use synthetic files, a simulated Hydrus API and a simulated ComfyUI
+workflow. No installed ComfyUI files or real Hydrus library were modified. Actual
+Hydrus permissions, remote library size and startup in the user's ComfyUI runtime
+remain deployment checks. Full synchronization scope and limits are documented
+in [HYDRUS.md](HYDRUS.md#background-synchronization-hydrus10).
+
+Run `python -m unittest discover -s tests -p 'test_*.py'` for backend checks.
+For the conflict browser check, start `python tests/gallery_browser_server.py`,
+then run `node tests/browser_hydrus_sync.cjs` with Playwright/Chrome configured as
+below. `SYNC_SCREENSHOT` optionally specifies a screenshot output path.
+
+---
+
 # Validation — Hydrus edition 2.7.1-hydrus.4
 
 ## Image Source and unified gallery — 2026-09-24

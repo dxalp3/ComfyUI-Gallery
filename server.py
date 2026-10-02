@@ -71,8 +71,10 @@ from .gallery_app import register_gallery_app_routes
 from .image_source_api import register_source_routes
 
 register_gallery_app_routes(PromptServer.instance.routes)
-register_hydrus_routes(PromptServer.instance.routes, get_gallery_static_root,
+hydrus_bridge = register_hydrus_routes(PromptServer.instance.routes, get_gallery_static_root,
                       get_input_root=folder_paths.get_input_directory, get_output_root=folder_paths.get_output_directory)
+PromptServer.instance.app.on_startup.append(hydrus_bridge.sync.startup)
+PromptServer.instance.app.on_cleanup.append(hydrus_bridge.sync.cleanup)
 register_thumbnail_routes(PromptServer.instance.routes, get_gallery_static_root)
 register_source_routes(PromptServer.instance.routes, get_gallery_static_root,
                        folder_paths.get_input_directory)

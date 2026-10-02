@@ -212,12 +212,12 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         upload = self.fake.calls[0]
         self.assertEqual(upload[1], self.image.read_bytes())
         self.assertEqual(upload[2]["Content-Type"], "application/octet-stream")
+        await self.bridge.sync.drain(self.bridge.settings.load(), self.fake)
         tags = next(call[1] for call in self.fake.calls if call[0] == "/add_tags/add_tags")
         self.assertEqual(tags["service_keys_to_tags"]["1234"], ["default:tag", "batch:tag"])
         self.assertFalse(tags["override_previously_deleted_mappings"])
         notes = next(call[1] for call in self.fake.calls if call[0] == "/add_notes/set_notes")
-        self.assertTrue(notes["merge_cleverly"])
-        self.assertEqual(notes["conflict_resolution"], 3)
+        self.assertFalse(notes["merge_cleverly"])
         restarted = HydrusBridge(lambda: self.root, self.root / "state", self.fake)
         self.fake.calls.clear()
         cached = (await restarted.status({"urls": [self.url]}))["items"][0]
@@ -228,12 +228,14 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
     async def test_export_service_override_preserves_default_and_prompt_tags_stay_separate(self):
         item = await self.export(tag_service_key="abcd", tags=["positive_prompt:blue sky", "negative_prompt:blurry"], send_metadata=False)
         self.assertTrue(item["success"])
+        await self.bridge.sync.drain(self.bridge.settings.load(), self.fake)
         tag_call = next(call[1] for call in self.fake.calls if call[0] == "/add_tags/add_tags")
         self.assertEqual(tag_call["service_keys_to_tags"], {"abcd": ["default:tag", "positive_prompt:blue sky", "negative_prompt:blurry"]})
         self.assertEqual(self.bridge.settings.load()["tag_service_key"], "1234")
         self.assertTrue(any(call[0] == "/add_notes/set_notes" for call in self.fake.calls))
         self.fake.calls.clear()
         await self.export()
+        await self.bridge.sync.drain(self.bridge.settings.load(), self.fake)
         tag_call = next(call[1] for call in self.fake.calls if call[0] == "/add_tags/add_tags")
         self.assertEqual(list(tag_call["service_keys_to_tags"]), ["1234"])
 
@@ -267,7 +269,9 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         self.fake.import_status = 2
         item = await self.export(send_metadata=True)
         self.assertEqual(item["status"], "already_present")
-        self.assertEqual(item["warnings"], [])
+        self.assertTrue(all("background sync queue" in warning for warning in item["warnings"]))
+        await self.bridge.sync.drain(self.bridge.settings.load(), self.fake)
+        self.assertEqual(self.bridge.sync.status(self.bridge.settings.load())["jobs"], [])
         self.assertEqual(len([call for call in self.fake.calls if call[0] == "/add_files/add_file"]), 2)
 
     async def test_import_failure_statuses_never_mark_exported_or_add_tags(self):

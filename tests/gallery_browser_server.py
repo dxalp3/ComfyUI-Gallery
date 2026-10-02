@@ -116,7 +116,9 @@ async def hydrus(request):
 upstream.router.add_route('*', '/{tail:.*}', hydrus)
 app = web.Application()
 routes = web.RouteTableDef()
-module.register_hydrus_routes(routes, lambda: str(MEDIA), storage_dir=MEMORY, get_input_root=lambda: str(INPUT))
+bridge = module.register_hydrus_routes(routes, lambda: str(MEDIA), storage_dir=MEMORY, get_input_root=lambda: str(INPUT))
+app.on_startup.append(bridge.sync.startup)
+app.on_cleanup.append(bridge.sync.cleanup)
 thumb_module.register_thumbnail_routes(routes, lambda: str(MEDIA))
 from gallery_qa.image_source_api import register_source_routes
 from gallery_qa.gallery_app import register_gallery_app_routes
@@ -158,6 +160,14 @@ app.router.add_get('/', homepage)
 app.router.add_get('/Gallery/images', images)
 app.router.add_route('*', '/Gallery/settings', settings)
 app.router.add_route('*', '/Gallery/monitor/{tail:.*}', noop)
+async def sync_conflict(request):
+    record = next(iter(files.values()))
+    record['notes']['ComfyUI Gallery generation metadata'] = json.dumps({'positive': 'remote edited prompt'})
+    bridge.sync.enqueue(bridge.settings.load(), record['hash'], 'note', {'name': 'ComfyUI Gallery generation metadata', 'base': None, 'text': json.dumps({'positive': 'local edited prompt'})})
+    await bridge.sync.tick()
+    return web.json_response(bridge.sync.status(bridge.settings.load()))
+
+app.router.add_post('/qa-sync-conflict', sync_conflict)
 app.router.add_get('/qa-state', state)
 app.router.add_get('/view', input_image)
 app.router.add_static('/assets', REPO / 'web' / 'dist' / 'assets')
@@ -174,6 +184,7 @@ async def main():
             assert response.status == 200, await response.text()
         async with session.post('http://127.0.0.1:8191/Gallery/hydrus/export', json={'urls': ['/static_gallery/study-%d.png' % i for i in range(1, 5)], 'tags': ['source:qa'], 'send_metadata': True}) as response:
             assert response.status == 200, await response.text()
+    await bridge.sync.tick()
     print('QA server listening on http://127.0.0.1:8191', flush=True)
     await asyncio.Event().wait()
 

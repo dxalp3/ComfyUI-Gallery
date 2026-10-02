@@ -98,9 +98,9 @@ Right-click an image for export, refresh, and metadata actions. If that image is
 
 ### Tags, prompt tags, and generation notes
 
-Generation metadata notes are always sent when available; there is no opt-out in the export dialog. This does **not** automatically create tags. Original bytes and embedded metadata remain unchanged. Missing note permission is reported as a partial-transfer warning.
+Generation metadata notes are always queued when available; there is no opt-out in the export dialog. This does **not** automatically create tags. Original bytes and embedded metadata remain unchanged. Missing note permission leaves a pending job and an error in Hydrus sync.
 
-The note is named **ComfyUI Gallery generation metadata**. It includes embedded `prompt`, `workflow`, and `parameters` entries available to Pillow, commonly in ComfyUI PNGs. It does not reconstruct missing metadata or automatically turn prompts into tags. Conflicting existing notes are preserved with a separate name. Notes over 2 MiB are skipped with a warning. A successful file import is retained even if tags, notes, or the subsequent metadata check fail.
+The note is named **ComfyUI Gallery generation metadata**. It includes embedded `prompt`, `workflow`, and `parameters` entries available to Pillow, commonly in ComfyUI PNGs. It does not reconstruct missing metadata or automatically turn prompts into tags. Conflicting existing notes are left untouched until resolved in Hydrus sync. Notes over 2 MiB are skipped with a warning. A successful file import is retained even if tags, notes, or the subsequent metadata check fail.
 
 Prompt tags are separate, optional export controls:
 
@@ -449,11 +449,9 @@ options do not remove local matches.
 negative prompt, Hydrus tags, names/hashes and all fields. Choose **Tag query AND
 metadata group** or **Tag query OR metadata group**; terms within the metadata
 group are ANDed. Local Hydrus-tag searches use cached tags and hash-verified
-sidecars. Hydrus prompt searches inspect saved Gallery generation notes on up to
-200 candidates (the tag-query batch for AND, or a separate notes batch for OR).
-The UI reports the scan count. This is deliberately bounded and can miss older
-matches outside that batch; it is not a full database text index. Notes cannot
-reconstruct prompts absent from both original files and saved metadata.
+sidecars. Hydrus prompt searches use the persistent metadata index described
+below. Initial indexing may be incomplete, and subsequent results reflect the
+last background refresh. Notes cannot reconstruct missing generation prompts.
 
 **Append to Image Source / Append for img2img** now opens **Append images and
 prompts**. Choose the source node and review each image's positive and negative
@@ -495,3 +493,59 @@ not loss of the already preserved original. Companions are ignored after file
 bytes change; unrelated companion content is not overwritten. Gallery routing
 rules still move originals only, so use hash-cache refresh or move their companions
 alongside files when relying on portable metadata after organization.
+
+
+## Background synchronization (hydrus.10)
+
+The ComfyUI backend starts a worker at boot and shuts it down with the server.
+It processes queued changes and 100-file index batches every 30 seconds, slowing
+to 60 seconds after errors. Newly queued changes wake it immediately. **Hydrus
+sync** in the gallery header shows pending work, conflicts, index progress and
+errors. **Sync now** retries delivery and requests another discovery pass.
+
+Export tag additions and generation notes are saved in `hydrus_memory.sqlite3`
+after file import; selected tag additions from workflow append are saved there
+immediately, even offline. Restarting preserves pending work. Jobs record the
+URL/profile, content hash and original tag service, never credentials. Switching
+profiles leaves the old profile's jobs waiting; changing the default tag service
+does not redirect an existing job. Use a new profile for a different library
+running at the same URL. Cancellation stops a pending change, not a delivered one.
+
+Tag changes are additive and do not restore previously deleted mappings. There
+is no automatic tag-deletion mirroring. Generation notes use a last-successfully-
+synchronized baseline. A first-time different note, or changes on both sides,
+produce a conflict. The panel previews both versions and offers **Keep Hydrus**,
+**Keep both as separate notes**, or **Replace this note with local**. Keeping both
+uses a stable content-derived note name; retries do not create repeated copies.
+A replacement rechecks the remote version before writing. Hydrus does not expose
+an atomic conditional-note update, so simultaneous edits during the final API
+request cannot be fully locked out. Unrelated notes and original image bytes
+are never rewritten. Resolved local proposals remain in the local sync database.
+
+Discovery queries `system:has note with name ComfyUI Gallery generation metadata`
+without a 200-file limit, persists its file-ID list/cursor, and fetches metadata
+in batches. It also refreshes already linked/indexed files; deleted or inaccessible
+files leave the searchable index after a successful refresh. Completed passes
+repeat after 15 minutes. Ordinary browsing and transfers also update the index.
+The extracted positive/negative prompts, tags and filenames are stored separately
+in SQLite, so searches do not repeatedly parse workflow graphs. Both retained
+conflict-note versions contribute to prompt searches.
+
+Metadata-only queries work from this cache while Hydrus is offline. Native tag,
+OR-group and system-predicate queries still require Hydrus; their complete ID
+results are combined with metadata matches before applying the display limit.
+Cached random, import/modified date, filetype, hash, size, width, height and duration
+sampling are supported; other metadata-only sampling choices fall back to import
+time. Normal Hydrus searches retain their native sorting. The mixed grid keeps
+its independent order and randomization.
+
+This is an index of discovered Gallery-note files and files already linked or
+browsed, not every arbitrary note in the Hydrus database. Initial indexing is
+progressive. Remote thumbnails, originals and file transfers still need Hydrus
+online. Very large discovery responses remain subject to the bridge's 16 MiB
+response limit and show an error rather than silently truncating. Arbitrary edits
+to sidecars, prefix definitions or workflow widgets are not automatically uploaded;
+only explicit export/tag-sync operations create outbound jobs. The prefix manager
+continues sharing its local definitions with the Prompt Library node. Local
+sidecars retain their transfer snapshot; current remote metadata is refreshed in
+the gallery's hash cache rather than rewriting every copy on disk.
