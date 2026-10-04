@@ -39,3 +39,20 @@ def prompt_tags(text):
         name = normalize(part)
         if name not in QUALITY and name in lookup and lookup[name] not in result: result.append(lookup[name])
     return result
+
+
+def format_terms(terms, prefer_spaces=True):
+    """Only recognized vocabulary is reformatted; custom text/LoRAs stay literal."""
+    lookup = dictionary()
+    result = []
+    for term in terms:
+        canonical = lookup.get(normalize(term))
+        if canonical is None:
+            result.append(term)
+            continue
+        text = canonical.replace('_', ' ') if prefer_spaces else canonical
+        weighted = re.fullmatch(r'\((.*):([-+]?\d+(?:\.\d+)?)\)', term.strip())
+        if weighted:
+            text = '(' + text + ':' + weighted[2] + ')'
+        result.append(text)
+    return result

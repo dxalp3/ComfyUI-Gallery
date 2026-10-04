@@ -176,10 +176,10 @@ export function extractHydrusTags(metadata: unknown): string[] {
 
 export function matchesLocalImage(file: Pick<FileDetails, 'name' | 'metadata'>, query: string, field: LocalSearchField,
     hydrusTags: string[] = [], prompts?: LocalPrompts): boolean {
-    const needle = query.trim().toLocaleLowerCase();
+    const needle = query.trim().toLocaleLowerCase().replace(/_/g, ' ');
     if (!needle) return true;
     const parsed = prompts || (field === 'all' || field === 'positive' || field === 'negative' ? extractLocalPrompts(file.metadata) : { positive: '', negative: '' });
-    const contains = (value: string) => value.toLocaleLowerCase().includes(needle);
+    const contains = (value: string) => value.toLocaleLowerCase().replace(/_/g, ' ').includes(needle);
     return ((field === 'all' || field === 'name') && contains(file.name || '')) ||
         ((field === 'all' || field === 'hydrus') && [...hydrusTags, ...extractHydrusTags(file.metadata)].some(contains)) ||
         ((field === 'all' || field === 'positive') && contains(parsed.positive)) ||

@@ -19,3 +19,7 @@ from .image_source import GalleryImageSource
 
 NODE_CLASS_MAPPINGS = {"GalleryNode": GalleryNode, "GalleryImageSource": GalleryImageSource}
 NODE_DISPLAY_NAME_MAPPINGS = {"GalleryNode": "Gallery Button", "GalleryImageSource": "Gallery Image Source"}
+
+from .prefix_library import GalleryPromptLibrary
+NODE_CLASS_MAPPINGS["GalleryPromptLibrary"] = GalleryPromptLibrary
+NODE_DISPLAY_NAME_MAPPINGS["GalleryPromptLibrary"] = "Gallery Prompt Library"

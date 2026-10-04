@@ -16,7 +16,7 @@ export function HydrusTagSelect({ localSuggestions = [], value = [], onChange, d
 }) {
     const [library, setLibrary] = useState<PrefixLibrary>({ version: 2, tags: [], prefixes: [] });
     const [dictionary, setDictionary] = useState<string[]>([]);
-    useEffect(() => { const load = () => { void loadPrefixes().then(setLibrary).catch(() => {}); }; load(); window.addEventListener('gallery-prefix-library-changed', load); return () => window.removeEventListener('gallery-prefix-library-changed', load); }, []);
+    useEffect(() => { const load = () => { void loadPrefixes().then(setLibrary).catch(() => {}); }; load(); window.addEventListener('gallery-prefix-library-changed', load); return () => window.removeEventListener('gallery-prefix-library-changed', load); }, [active]);
     const { settings } = useHydrus();
     const [query, setQuery] = useState('');
     const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
@@ -44,9 +44,10 @@ export function HydrusTagSelect({ localSuggestions = [], value = [], onChange, d
     }, [query, open, active, disabled, serviceKey, settings?.url, settings?.profile, settings?.has_access_key]);
     useEffect(() => { if (!active) { setQuery(''); setOpen(false); } }, [active]);
     useEffect(() => { let live = true; const timer = setTimeout(() => { if (query.trim()) void hydrusRequest<{ tags: string[] }>('dictionary', { query }).then(data => { if (live) setDictionary(data.tags); }).catch(() => {}); else setDictionary([]); }, 250); return () => { live = false; clearTimeout(timer); }; }, [query]);
+    useEffect(() => { if (open) void loadPrefixes().then(setLibrary).catch(() => {}); }, [open]);
     const change = (tags: string[]) => { onChange?.(Array.from(new Set(tags.flatMap(tag => value.includes(tag) ? [tag] : expandPrefix(library, tag))))); setQuery(''); };
     const prefix = query.trim().startsWith('-') ? '-' : '';
-    const choices: Suggestion[] = [...suggestions, ...Array.from(new Set([...library.prefixes.map(prefix => '@' + prefix.name), ...localSuggestions, ...dictionary])).filter(tag => query.trim() && tag.toLocaleLowerCase().includes(query.trim().replace(/^-/, '').toLocaleLowerCase()) && !suggestions.some(remote => remote.value === tag)).slice(0, 40).map(value => ({ value, local: true }))];
+    const choices: Suggestion[] = [...suggestions, ...Array.from(new Set([...library.prefixes.map(prefix => '@' + prefix.name), ...localSuggestions, ...dictionary])).filter(tag => query.trim() && tag.toLocaleLowerCase().replace(/_/g, ' ').includes(query.trim().replace(/^-/, '').toLocaleLowerCase().replace(/_/g, ' ')) && !suggestions.some(remote => remote.value === tag)).slice(0, 40).map(value => ({ value, local: true }))];
     return <div className="cg-tag-input" style={style} onKeyDownCapture={event => {
         if (event.key === 'Enter' && !event.nativeEvent.isComposing && (!query.trim() || value.includes(query.trim()) || event.ctrlKey || event.metaKey)) {
             event.preventDefault(); event.stopPropagation(); setQuery(''); setOpen(false); onSubmit?.();

@@ -1,3 +1,5 @@
+import { openPrefixManager } from './PrefixLibrary';
+import { extractLocalPrompts, extractHydrusTags } from './LocalImageSearch';
 import JSZip from 'jszip';
 import FileSaver from 'file-saver';
 import { AppendImagesModal } from './AppendImagesModal';
@@ -103,6 +105,14 @@ export function UnifiedGallery({ sortRequest, source, remote, selectedRemote, se
         const list = targets(entry);
         const local = list.flatMap(item => item.local?.type === 'image' ? [item.local.url] : []);
         const hashes = list.flatMap(item => item.remote && (key === 'download' || isImage(item)) ? [item.remote.hash] : []);
+        if (key === 'prefix') {
+            const sets = list.map(item => {
+                const metadata = item.local ? { ...item.local.metadata, hydrus: hydrus.items[item.local.url]?.metadata || (item.local.metadata as any)?.hydrus } : { hydrus: item.remote };
+                const prompts = extractLocalPrompts(metadata);
+                return { positive: prompts.positive.split(/[,\n]+/).map(value => value.trim()).filter(Boolean), negative: prompts.negative.split(/[,\n]+/).map(value => value.trim()).filter(Boolean), hydrus: extractHydrusTags(metadata) };
+            });
+            openPrefixManager({ positive: sets.flatMap(item => item.positive), negative: sets.flatMap(item => item.negative), hydrus: sets.flatMap(item => item.hydrus) }); return;
+        }
         if (key === 'source') { setAppending(list.filter(isImage)); return; }
         if (key === 'trash') { setTrashing(list.filter(item => item.remote)); return; }
         if (key === 'delete') { setDeleting(list.filter(item => item.local)); return; }
@@ -145,6 +155,7 @@ export function UnifiedGallery({ sortRequest, source, remote, selectedRemote, se
     const menu = (entry: GalleryEntry) => ({ items: [
         { key: 'select', label: selected.has(entry.id) ? 'Deselect image' : 'Select image' },
         { key: 'source', disabled: !targets(entry).some(isImage), label: `Append to Image Source (${targets(entry).filter(item => isImage(item)).length})` },
+        { key: 'prefix', label: 'Create prefix from selection' },
         { key: 'download', label: 'Download original(s)' },
         ...(entry.local ? [{ key: 'export', label: 'Export local selection to Hydrus' }, { key: 'refresh', label: 'Refresh Hydrus status' }, { key: 'metadata', label: 'Hydrus metadata' }] : [{ key: 'copy', disabled: !targets(entry).some(item => item.remote && isImage(item)), label: 'Save copy to input only (no workflow append)' }]),
         { key: 'info', label: 'View metadata' },
@@ -214,6 +225,7 @@ export function UnifiedGallery({ sortRequest, source, remote, selectedRemote, se
             <strong>{selected.size} selected</strong><span>{selected.size - shownSelected.length ? (selected.size - shownSelected.length) + ' outside this view' : ''}</span>
             <Button disabled={disabled || !shownSelected.some(isImage)} onClick={() => void act('source')}>Append to Image Source ({shownSelected.filter(isImage).length})</Button>
             <Button disabled={disabled || !shownSelected.length} onClick={() => void act('download')}>Download selected</Button>
+            <Button disabled={disabled || !shownSelected.length} onClick={() => void act('prefix')}>Create prefix from selection</Button>
             <Button disabled={disabled || !shownSelected.some(item => item.local?.type === 'image')} onClick={() => void act('export')}>Export local selection to Hydrus</Button>
             <Button disabled={disabled || !shownSelected.length} onClick={() => { const next = new Set(selected); entries.forEach(item => next.has(item.id) ? next.delete(item.id) : next.add(item.id)); setSelection(next); }}>Invert shown selection</Button>
             <Button danger disabled={disabled || !shownSelected.some(item => item.local)} onClick={() => void act('delete')}>Delete local selected</Button>

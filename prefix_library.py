@@ -1,0 +1,141 @@
+"""One user-scoped Prompt Library file, shared by the gallery and prefix nodes."""
+import hashlib
+import json
+import os
+from pathlib import Path
+import tempfile
+import threading
+import uuid
+from urllib.parse import urlsplit
+from aiohttp import web
+
+LOCK = threading.RLock()
+
+
+def validate(value):
+    if not isinstance(value, dict) or value.get('version') not in (1, 2):
+        raise ValueError('Unsupported Prompt Library format.')
+    result = {'version': 2, 'tags': value.get('tags'), 'prefixes': value.get('prefixes')}
+    for kind in ('tags', 'prefixes'):
+        rows = result[kind]
+        if not isinstance(rows, list) or len(rows) > 200000:
+            raise ValueError('Invalid library entries.')
+        ids = set()
+        for row in rows:
+            if not isinstance(row, dict) or not isinstance(row.get('id'), str) or not row['id'] or row['id'] in ids or not isinstance(row.get('name'), str) or not row['name'].strip():
+                raise ValueError('Invalid or duplicate library entry.')
+            ids.add(row['id'])
+            if kind == 'tags' and (not isinstance(row.get('text'), str) or not row['text'].strip()):
+                raise ValueError('Tag text cannot be empty.')
+    tags = {row['id'] for row in result['tags']}
+    for row in result['prefixes']:
+        if not isinstance(row.get('tags'), list) or any(not isinstance(tag, str) or tag not in tags for tag in row['tags']) or len(set(row['tags'])) != len(row['tags']):
+            raise ValueError('A prefix refers to invalid tags.')
+    return result
+
+
+def read(path):
+    try:
+        raw = path.read_bytes()
+        if len(raw) > 16 * 1024 * 1024:
+            raise ValueError('Prompt Library exceeds 16 MiB.')
+        value = validate(json.loads(raw))
+    except FileNotFoundError:
+        value = {'version': 2, 'tags': [], 'prefixes': []}
+        raw = b''
+    return value, hashlib.sha256(raw).hexdigest()
+
+
+def update(path, data):
+    with LOCK:
+        library, revision = read(path)
+        if data.get('revision') != revision:
+            raise FileExistsError('The shared library changed. Refresh it before saving; your draft has been kept.')
+        action = data.get('action')
+        if action == 'migrate':
+            if library['tags'] or library['prefixes']:
+                raise ValueError('Migration only applies to an empty shared library.')
+            library = validate(data.get('library'))
+        elif action == 'delete':
+            library['prefixes'] = [prefix for prefix in library['prefixes'] if prefix['id'] != data.get('id')]
+        elif action == 'save':
+            name, terms = data.get('name'), data.get('terms')
+            if not isinstance(name, str) or not name.strip() or len(name) > 200:
+                raise ValueError('Enter a prefix name of up to 200 characters.')
+            if not isinstance(terms, list) or not 1 <= len(terms) <= 500 or any(not isinstance(term, str) or not term.strip() or len(term) > 1024 for term in terms):
+                raise ValueError('Choose 1–500 nonempty terms, each at most 1,024 characters.')
+            name = name.strip()
+            existing = next((p for p in library['prefixes'] if p['name'].casefold() == name.casefold()), None)
+            ids = []
+            for term in dict.fromkeys(term.strip() for term in terms):
+                tag = next((t for t in library['tags'] if t['text'] == term), None)
+                if tag is None:
+                    tag = {'id': str(uuid.uuid4()), 'name': term, 'text': term}
+                    library['tags'].append(tag)
+                ids.append(tag['id'])
+            if existing:
+                existing['tags'] = ids
+            else:
+                library['prefixes'].append({'id': str(uuid.uuid4()), 'name': name, 'tags': ids})
+        else:
+            raise ValueError('Invalid library action.')
+        raw = json.dumps(library, ensure_ascii=False, indent=2).encode()
+        if len(raw) > 16 * 1024 * 1024:
+            raise ValueError('Prompt Library exceeds 16 MiB.')
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = None
+        try:
+            with tempfile.NamedTemporaryFile(dir=path.parent, delete=False) as stream:
+                temporary = Path(stream.name)
+                stream.write(raw)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temporary, path)
+        finally:
+            if temporary:
+                temporary.unlink(missing_ok=True)
+        return {'library': library, 'revision': hashlib.sha256(raw).hexdigest()}
+
+
+def register_prefix_routes(routes, get_path):
+    @routes.get('/Gallery/prefixes')
+    @routes.post('/Gallery/prefixes')
+    async def library(request):
+        try:
+            origin = request.headers.get('Origin')
+            if request.method == 'POST' and (request.headers.get('Sec-Fetch-Site') == 'cross-site' or origin and urlsplit(origin).netloc.lower() != request.host.lower()):
+                return web.json_response({'error': 'Cross-origin library writes are not allowed.'}, status=403)
+            resolved = get_path(request)
+            if not resolved:
+                raise ValueError('The current ComfyUI user is unavailable.')
+            path = Path(resolved)
+            if request.method == 'GET':
+                with LOCK:
+                    value, revision = read(path)
+                result = {'library': value, 'revision': revision}
+            else:
+                data = await request.json()
+                if not isinstance(data, dict):
+                    raise ValueError('Expected a library operation.')
+                result = update(path, data)
+            return web.json_response(result, headers={'Cache-Control': 'no-store'})
+        except FileExistsError as error:
+            return web.json_response({'error': str(error)}, status=409)
+        except (ValueError, KeyError) as error:
+            return web.json_response({'error': str(error)}, status=400)
+        except OSError:
+            return web.json_response({'error': 'Cannot access the shared Prompt Library file.'}, status=500)
+
+
+class GalleryPromptLibrary:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {'required': {'prefix': ('STRING', {'multiline': True, 'default': ''})}}
+
+    RETURN_TYPES = ('STRING',)
+    RETURN_NAMES = ('prefix',)
+    FUNCTION = 'output_prefix'
+    CATEGORY = 'prompt/library'
+
+    def output_prefix(self, prefix):
+        return (prefix,)

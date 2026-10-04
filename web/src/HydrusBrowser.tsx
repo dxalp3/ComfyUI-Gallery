@@ -1,3 +1,4 @@
+import { HydrusTagSelect } from './HydrusTagSelect';
 import { useGalleryContext } from './GalleryContext';
 import { indexPrompts } from './LocalPromptLibrary';
 import type { LocalSearchField } from './LocalImageSearch';
@@ -81,7 +82,7 @@ export function HydrusBrowser({ open, source = 'hydrus', searchMode, viewRevisio
                 if (version !== requestVersion.current) return;
                 setPages(data.pages?.pages || (data.pages?.is_media_page ? [data.pages] : []));
             } else {
-                const data = !settings?.has_access_key && kind === 'search' ? { items: [], total: 0 } : await hydrusRequest<Results>(kind, kind === 'search' ? { tags, match, limit, metadata_terms: localBranch, metadata_field: localField, field_join: fieldJoin, or_groups: orGroups, file_sort_type: sortType, file_sort_asc: ascending } : { page_key: key, offset, limit });
+                const data = !settings?.has_access_key && kind === 'search' ? { items: [], total: 0 } : await hydrusRequest<Results>(kind, kind === 'search' ? { tags, match, limit, metadata_terms: localBranch, metadata_field: localField, field_join: fieldJoin, or_groups: orGroups, file_sort_type: sortType, file_sort_asc: ascending, expand_danbooru_aliases: true } : { page_key: key, offset, limit });
                 if (version !== requestVersion.current) return;
                 setResult(data); reloadMemory();
                 if (kind === 'search') {
@@ -164,7 +165,7 @@ export function HydrusBrowser({ open, source = 'hydrus', searchMode, viewRevisio
         <Modal title="Metadata search group" open={localEditor} onCancel={() => setLocalEditor(false)} onOk={() => setLocalEditor(false)} okText="Use metadata group" zIndex={3030}>
             <p>Search available prompts, cached Hydrus tags or identifiers. Terms in this group are ANDed. Combine this group with the tag query using AND or OR.</p>
             <Select aria-label="Combine search groups" value={fieldJoin} onChange={setFieldJoin} options={[{value:"any",label:"Tag query OR metadata group"},{value:"all",label:"Tag query AND metadata group"}]} style={{width:"100%",marginBottom:8}} /><Select aria-label="Local group category" value={localField} onChange={setLocalField} options={['all', 'positive', 'negative', 'hydrus', 'name'].map(value => ({ value, label: value === 'hydrus' ? 'Hydrus tag (cached)' : value }))} style={{ width: '100%', marginBottom: 8 }} />
-            <Select mode="tags" aria-label="Local group terms" value={localBranch} onChange={setLocalBranch} onSearch={setLocalQuery} options={localSuggestions.filter(value => value.toLocaleLowerCase().includes(localQuery.toLocaleLowerCase())).slice(0, 100).map(value => ({ value, label: value }))} style={{ width: '100%' }} placeholder="Enter adds a prompt or identifier" />
+            <HydrusTagSelect label="Local group terms" value={localBranch} onChange={setLocalBranch} localSuggestions={localSuggestions} placeholder="Add a prompt, identifier, or @prefix" />
         </Modal>
         {hybrid && gallery.librarySearch && <Space wrap style={{ marginBottom: 8 }}><small>{localCount} local · {items.length} Hydrus · all loaded folders</small><Button size="small" onClick={() => gallery.setLibrarySearch(null)}>Clear local query</Button></Space>}
         {result && (result as any).metadata_scanned !== undefined && <Alert type="info" message={`Prompt search used ${(result as any).metadata_scanned} indexed Hydrus files. ${(result as any).sampling_fallback ? "This sampling option is unavailable in the cache; import date was used." : ""} ${(result as any).index_status?.last_complete ? "Background index available; results reflect the last refresh." : "Initial indexing is still incomplete; check Hydrus sync and search again as it progresses."}`} />}

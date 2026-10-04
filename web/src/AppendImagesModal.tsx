@@ -1,3 +1,5 @@
+import { usePromptSpelling, formatPromptTerms } from './PromptSpelling';
+import { openPrefixManager } from './PrefixLibrary';
 import { ImageSourceTarget } from './ImageSourceHost';
 import { useEffect, useState } from 'react';
 import { Alert, Button, Checkbox, Collapse, Modal, Select, Space, Typography, message } from 'antd';
@@ -12,6 +14,7 @@ import type { ImageSourceImage, PromptApply } from './ImageSourceGeometry';
 type Row = { entry: GalleryEntry; metadata: any; positive: string[]; negative: string[]; usePositive: boolean; useNegative: boolean; useTags: boolean; tags: string[]; sync: boolean };
 export function AppendImagesModal({ entries, onClose }: { entries: GalleryEntry[]; onClose: () => void }) {
     const hydrus = useHydrus();
+    const [spaces, setSpaces] = usePromptSpelling();
     const [rows, setRows] = useState<Row[]>([]);
     const [targets, setTargets] = useState<{ value: string; label: string }[]>([]);
     const [apply, setApply] = useState<PromptApply>({ mode: 'after' });
@@ -42,10 +45,11 @@ export function AppendImagesModal({ entries, onClose }: { entries: GalleryEntry[
                 } else copied = await hydrusRequest('import', { hash: row.entry.hash });
                 if (copied.warning) throw new Error(copied.warning + ' Retry after checking Hydrus permissions; workflow was not changed.');
                 const metadata = { ...row.metadata, ...copied.metadata, hydrus: copied.metadata?.hydrus || row.metadata.hydrus };
-                images.push({ input_name: copied.input_name, title: row.entry.name, metadata, prompt: { positive: Array.from(new Set([...(row.usePositive ? row.positive : []), ...(row.useTags ? row.tags : [])])).join(', '), negative: row.useNegative ? row.negative.join(', ') : '', tags: row.tags } });
+                images.push({ input_name: copied.input_name, title: row.entry.name, metadata, prompt: { positive: (await formatPromptTerms(Array.from(new Set([...(row.usePositive ? row.positive : []), ...(row.useTags ? row.tags : [])])), spaces)).join(', '), negative: row.useNegative ? (await formatPromptTerms(row.negative, spaces)).join(', ') : '', tags: row.tags } });
             }
             // Append first so a missing workflow target cannot silently become a copy-only action.
             const result = await appendToImageSource(images, apply);
+            message.success(result);
             const failures: string[] = [];
             for (const row of rows.filter(row => row.sync)) {
                 const hash = row.entry.hash || hydrus.items[row.entry.local?.url || '']?.hash;
@@ -62,6 +66,7 @@ export function AppendImagesModal({ entries, onClose }: { entries: GalleryEntry[
     };
     return <Modal title="Append images and prompts" open={entries.length > 0} onCancel={() => { if (!busy) onClose(); }} width={900} zIndex={3045} footer={<Space><Button disabled={busy} onClick={onClose}>Cancel</Button><Button type="primary" loading={busy} disabled={!!notice || !rows.length || rows.length > 32} onClick={() => void append()}>Append to workflow</Button></Space>}>
         <Typography.Paragraph>Each image retains its metadata. Enable only the prompt terms you want this reference to contribute. Saved prefixes expand into editable tags; removing a term here does not remove it from the original image.</Typography.Paragraph>
+        <Checkbox checked={spaces} onChange={event => { setSpaces(event.target.checked); }}>Prefer spaces for recognized Danbooru prompt tags (off preserves canonical underscores)</Checkbox>
         <ImageSourceTarget /><Space wrap>
             <Select aria-label="Prompt write mode" value={apply.mode} onChange={mode => setApply(old => ({ ...old, mode }))} options={[{ value: 'replace', label: 'Replace target prompt' }, { value: 'before', label: 'Add before target prompt' }, { value: 'after', label: 'Add after target prompt' }]} style={{ width: 225 }} />
             <Select aria-label="Positive prompt target" allowClear placeholder="Positive target (optional)" value={apply.positive} options={targets} onChange={positive => setApply(old => ({ ...old, positive }))} style={{ width: 270 }} />
@@ -69,6 +74,7 @@ export function AppendImagesModal({ entries, onClose }: { entries: GalleryEntry[
         </Space>
         <Typography.Paragraph type="secondary">Without targets, enabled prompts remain on the source node's positive/negative STRING outputs. Connect its IMAGE output to your VAE Encode or ControlNet image input.</Typography.Paragraph>
         <Collapse defaultActiveKey={['0']} items={rows.map((row, index) => ({ key: String(index), label: row.entry.name, children: <Space direction="vertical" style={{ width: '100%' }}>
+            <Button onClick={() => openPrefixManager({ positive: row.positive, negative: row.negative, hydrus: row.tags })}>Create prefix from this image</Button>
             <Checkbox checked={row.usePositive} onChange={event => update(index, { usePositive: event.target.checked })}>Load positive prompt</Checkbox>
             <HydrusTagSelect label={'Positive terms ' + index} value={row.positive} onChange={positive => update(index, { positive })} />
             <Checkbox checked={row.useNegative} onChange={event => update(index, { useNegative: event.target.checked })}>Load negative prompt</Checkbox>

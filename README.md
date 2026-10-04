@@ -1,6 +1,6 @@
 # ComfyUI Gallery
 
-## Hydrus edition — 2.7.1-hydrus.10
+## Hydrus edition — 2.7.1-hydrus.11
 
 This customized edition adds image export to the Hydrus Client API, persistent
 SHA-256 export history, cached Hydrus metadata, bulk actions, checkboxes, range
@@ -17,6 +17,13 @@ and use keyboard controls. View Local, Hydrus, or Both in the main gallery, or
 open Gallery in a separate browser tab. Bulk-append sources to **Gallery Image
 Source**, crop with pixel controls or a drag rectangle, and stitch horizontally,
 vertically, or in a grid for img2img. The compiled frontend is included.
+
+**New in hydrus.11:** Image Source nodes show thumbnails and source counts before
+execution. Gallery and Prompt Library nodes open one shared prefix manager; build
+prefixes directly from selected image prompts/Hydrus tags, reuse them in searches,
+and load them into a prefix node. Prompt spelling can prefer spaces for recognized
+Danbooru tags while keeping canonical Hydrus export names. See
+[shared prefixes and source previews](HYDRUS.md#shared-prefixes-and-source-previews-hydrus11).
 
 **New in hydrus.10:** durable background delivery of export notes and selected
 Hydrus tag additions, with restart recovery and a conflict-resolution panel.

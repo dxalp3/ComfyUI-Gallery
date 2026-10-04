@@ -90,7 +90,7 @@ const assert = require('node:assert/strict');
         const storage = await page.evaluate(() => JSON.stringify(localStorage));
         assert.ok(!storage.includes('a'.repeat(64)));
         // Workflow serialization retains the hidden source widget, editor buttons are not serialized.
-        assert.equal(await page.evaluate(() => window.qaNodes[0].widgets[0].type), 'hidden');
+        assert.equal(await page.evaluate(() => window.qaNodes[0].widgets[0].type), 'customtext');
         assert.deepEqual(errors, []);
         console.log('PASS: local bulk/range/context append, dedicated node, exact crop + stitch preview, save/reopen, Both source view, Hydrus search/pages/bulk context, quality filter, standalone tab append, no browser errors or stored key.');
     } catch (error) {

@@ -8,6 +8,8 @@ const assert=require('node:assert/strict');
  const count=async(n)=>page.waitForFunction(n=>document.querySelectorAll('[data-gallery-entry]').length===n,n);
  try {
   await page.addInitScript(()=>localStorage.setItem('comfy.prompt-library.v2',JSON.stringify({version:2,tags:[{id:'pose',name:'Pose',text:'standing, hands_up'}],prefixes:[{id:'p',name:'pose',tags:['pose']}]})));
+  const prefixState = await (await page.request.get('http://127.0.0.1:8191/Gallery/prefixes')).json();
+  await page.request.post('http://127.0.0.1:8191/Gallery/prefixes', {data:{action:'save', revision:prefixState.revision,name:'pose',terms:['standing','hands_up']}});
   await page.goto('http://127.0.0.1:8191');await page.getByRole('tab',{name:'Gallery workspace',exact:true}).click();await count(4);
   let requests=0;
   await page.route('**/Gallery/hydrus/search',async route=>{requests++;const data=route.request().postDataJSON();const response=await route.fetch();const result=await response.json();if(data.tags.includes('local-only'))result.items=[];else if(data.tags.length)result.items=result.items.slice(0,1);result.total=result.items.length;await route.fulfill({json:result});});
@@ -43,7 +45,7 @@ const assert=require('node:assert/strict');
   await modal.getByRole('button',{name:'Append to workflow',exact:true}).click();
   const editor=page.getByRole('dialog',{name:'Gallery Image Source',exact:true});await editor.waitFor();
   const state=await page.evaluate(()=>({positive:window.qaNodes[0].widgets[0].value,negative:window.qaNodes[1].widgets[0].value,manifest:JSON.parse(window.qaNodes[2].widgets[0].value)}));
-  assert.equal(state.positive,'mountain, standing, hands_up, source:qa');assert.equal(state.negative,'blurry, watermark');assert.ok(state.manifest.images[0].metadata.prompt);assert.ok(state.manifest.images[0].metadata.hydrus);
+  assert.equal(state.positive,'mountain, standing, hands up, source:qa');assert.equal(state.negative,'blurry, watermark');assert.ok(state.manifest.images[0].metadata.prompt);assert.ok(state.manifest.images[0].metadata.hydrus);
   assert.equal(await editor.getByRole('textbox',{name:'Source positive prompt',exact:true}).inputValue(),state.positive);
   await editor.getByRole('button',{name:'Cancel',exact:true}).click();
   await page.getByRole('button',{name:'Prompts & prefixes',exact:true}).click();

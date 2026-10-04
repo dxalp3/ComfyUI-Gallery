@@ -387,6 +387,13 @@ class BrowserTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(self.synced_tags['override_previously_deleted_mappings'])
         self.assertNotIn('service_keys_to_actions_to_tags', self.synced_tags)
 
+    async def test_danbooru_alias_search_preserves_and_exclusions(self):
+        await self.post('search', {'tags': ['blue eyes', '-long_hair'], 'expand_danbooru_aliases': True})
+        predicates = json.loads(next(query['tags'] for path, query in reversed(self.calls) if path == '/get_files/search_files'))
+        self.assertIn(['blue eyes', 'blue_eyes'], predicates)
+        self.assertIn('-long_hair', predicates)
+        self.assertIn('-long hair', predicates)
+
     async def test_metadata_prompt_search_and_or_and_dictionary(self):
         self.record['notes'] = {'ComfyUI Gallery generation metadata': json.dumps({'positive': 'blue hair, standing', 'negative': 'blurry'})}
         await self.bridge.sync.tick()

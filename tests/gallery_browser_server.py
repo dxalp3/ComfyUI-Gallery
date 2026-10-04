@@ -120,6 +120,8 @@ bridge = module.register_hydrus_routes(routes, lambda: str(MEDIA), storage_dir=M
 app.on_startup.append(bridge.sync.startup)
 app.on_cleanup.append(bridge.sync.cleanup)
 thumb_module.register_thumbnail_routes(routes, lambda: str(MEDIA))
+from gallery_qa.prefix_library import register_prefix_routes
+register_prefix_routes(routes, lambda request: MEMORY / "prompt-library.json")
 from gallery_qa.image_source_api import register_source_routes
 from gallery_qa.gallery_app import register_gallery_app_routes
 register_source_routes(routes, lambda: MEDIA, lambda: INPUT)
@@ -130,8 +132,8 @@ async def homepage(request):
     return web.Response(text='''<!doctype html><html><head><title>Gallery Hydrus QA</title><meta charset="utf-8"></head>
 <body style="margin:0;background:#20252b"><div class="workflow-tabs-container" style="height:44px;display:flex;background:#20252b"><div class="workflow-tabs" role="tablist"><button role="tab" aria-selected="true">Test workflow</button><button role="tab">Second workflow</button></div></div><div id="graph-canvas-container" style="height:calc(100vh - 44px)"></div><div class="flex gap-2 mx-2"></div>
 <script>window.qaNodes=[];window.qaListeners={};window.qaExtension=null;
-window.LiteGraph={createNode:type=>{const n={type,comfyClass:type,title:'Gallery Image Source',widgets:[{name:'sources',value:JSON.stringify({version:1,images:[],layout:'single',columns:2,gap:0,background:'#000000'})}],addWidget(type,name,value,callback,options){const w={type,name,value,callback,options};this.widgets.push(w);return w;},setSize(){},setDirtyCanvas(){}};window.qaExtension?.nodeCreated(n);return n;}};
-const graph={_nodes:window.qaNodes,add(node){node.id=window.qaNodes.length+1;window.qaNodes.push(node);},beforeChange(){},afterChange(){}};
+window.LiteGraph={createNode:type=>{const n={type,comfyClass:type,title:'Gallery Image Source',widgets:[{name:'sources',type:'customtext',value:JSON.stringify({version:1,images:[],layout:'single',columns:2,gap:0,background:'#000000'})}],addWidget(type,name,value,callback,options){const w={type,name,value,callback,options};this.widgets.push(w);return w;},addDOMWidget(name,type,element,options){let host=document.getElementById('qa-node-previews');if(!host){host=document.createElement('div');host.id='qa-node-previews';host.style.width='320px';document.body.append(host);}host.append(element);const w={name,type,options};this.widgets.push(w);return w;},setSize(){},setDirtyCanvas(){}};window.qaExtension?.nodeCreated(n);return n;}};
+const graph={_nodes:window.qaNodes,add(node){node.id=window.qaNodes.length+1;node.graph=this;window.qaNodes.push(node);},beforeChange(){},afterChange(){}};
 window.comfyAPI={app:{app:{graph,canvas:{graph,selected_nodes:{},selectNode(node){this.selected_nodes={[node.id]:node};}},api:{fetchApi:(url,options)=>fetch(url,options),addEventListener:(name,cb)=>window.qaListeners[name]=cb},extensionManager:{registerSidebarTab(tab){window.qaSidebar=tab;}},registerExtension:ext=>{window.qaExtension=ext;ext.init();ext.setup?.();}}}};</script>
 <script type="module" src="/assets/comfy-ui-gallery.js"></script></body></html>'''.replace('/assets/comfy-ui-gallery.js', '/assets-before/comfy-ui-gallery.js' if request.query.get('baseline') else '/assets/comfy-ui-gallery.js'), content_type='text/html')
 

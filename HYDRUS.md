@@ -549,3 +549,61 @@ only explicit export/tag-sync operations create outbound jobs. The prefix manage
 continues sharing its local definitions with the Prompt Library node. Local
 sidecars retain their transfer snapshot; current remote metadata is refreshed in
 the gallery's hash cache rather than rewriting every copy on disk.
+
+
+## Shared prefixes and source previews (hydrus.11)
+
+Gallery Image Source now displays source thumbnails and a count directly on the
+node, before running the workflow. Its native serialized STRING widget type is
+preserved; the preview widget is not serialized. Preview updates on append, edit,
+and workflow restoration. A successful append also shows a confirmation. Single
+layout still outputs the first image; use the editor's ordering controls or a
+stitch layout to choose how multiple sources contribute. The inline preview shows
+up to eight source thumbnails, and the editor manages all 32 supported sources.
+This is a source preview, not a rendered crop/stitch preview; use the editor for
+composition preview. A missing input file is reported on the preview.
+
+Gallery provides a **Gallery Prompt Library** STRING node. Existing
+`comfyui-prompt-library` **Prompt Library** nodes keep their class and outputs, but
+Gallery routes their **Open prompt library** button to the same manager. Keep the
+original package installed for workflows using its original node class. No
+ComfyUI core rewrite or edits to that package are needed.
+
+The canonical database is the current ComfyUI user's `prompt-library.json`, the
+same file used by the existing node. Gallery reads/writes it through user-scoped
+backend routes, preserving existing tag IDs, prefix IDs and unrelated entries.
+Writes are atomic and revision-checked: a stale edit gets an error rather than
+silently replacing a newer library. Refresh explicitly to review current data
+before resaving a draft. Other open gallery tabs receive change notifications.
+Legacy browser-only data can be imported explicitly into an empty shared library
+with **Import legacy browser library**; browser data is never automatically copied
+into another ComfyUI user. The dictionary remains an available vocabulary source;
+only chosen entries become saved prefix tags.
+
+Use **Create prefix from selection** in the grid toolbar or context menu, or
+**Create prefix from this image** in the append dialog. The draft starts with
+positive-prompt and Hydrus-tag terms, which can be removed individually. Buttons
+add positive, negative or Hydrus terms separately, or clear the draft. Name it and
+save. The prefix manager can edit/delete saved prefixes; deletion preserves their
+vocabulary tags and existing workflow text. On a Prompt Library node, **Use in
+this node** writes the selected prefix into its STRING widget; saving a prefix
+from that node's manager also loads it. Existing workflow text is a snapshot and
+is not silently rewritten by later edits in another tab.
+
+Type a saved prefix name or `@name` in local, Hydrus, OR-group, metadata-group,
+export or per-image prompt fields. Prefix terms expand separately, so local
+searches AND their terms instead of searching for one comma-joined string.
+Choose the existing search category/AND/OR controls to change matching behavior.
+Local search normalizes spaces/underscores. Hydrus searches submitted by the UI
+include both recognized Danbooru spellings as alternatives; exclusions exclude
+both forms. Creating a prefix does not add tags to files automatically.
+
+**Prefer spaces for recognized Danbooru prompt tags** defaults on. It affects
+prompt text written by workflow appending and the prefix-node manager. Turn it off
+to use canonical underscore names. **Apply spelling to draft** previews/applies it
+before saving a definition. Known aliases resolve to their canonical tag first;
+simple `(tag:weight)` syntax retains its weight. Unrecognized custom text, LoRA
+references and identifiers remain literal. The preference is remembered in the
+browser and shared between gallery prompt controls. Hydrus automatic Danbooru
+exports still use canonical underscore tags. This is a formatting preference,
+not a claim that every model or custom encoder tokenizes both forms identically.

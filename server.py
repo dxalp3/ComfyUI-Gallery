@@ -65,6 +65,9 @@ def get_gallery_static_root():
     return folder_paths.get_output_directory()
 
 
+from .prefix_library import register_prefix_routes
+register_prefix_routes(PromptServer.instance.routes, lambda request: PromptServer.instance.user_manager.get_request_user_filepath(request, "prompt-library.json"))
+
 from .hydrus import register_hydrus_routes
 from .thumbnails import register_thumbnail_routes
 from .gallery_app import register_gallery_app_routes

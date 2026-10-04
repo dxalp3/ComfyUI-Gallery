@@ -9,7 +9,7 @@ let sourceConstructor: any;
 export const registerSourceConstructor = (value: any) => { sourceConstructor = value; };
 const children = new Set<Window>();
 const graphNow = () => getComfyApp()?.canvas?.graph || getComfyApp()?.graph;
-const isSource = (node: any) => node?.comfyClass === 'GalleryImageSource' || node?.type === 'GalleryImageSource';
+const isSource = (node: any) => [node?.comfyClass, node?.type, node?.constructor?.comfyClass].includes('GalleryImageSource');
 const nodes = () => (graphNow()?._nodes || []).filter(isSource);
 
 export function readSourceManifest(node: any): ImageSourceManifest {
@@ -26,7 +26,11 @@ export function saveSourceManifest(node: any, manifest: ImageSourceManifest, rec
     const widget = node.widgets?.find((item: any) => item.name === 'sources');
     if (!widget) throw new Error('Restart ComfyUI to register Gallery Image Source.');
     if (recordChange) graph.beforeChange?.();
-    try { widget.value = JSON.stringify(manifest); widget.callback?.(widget.value); node.setDirtyCanvas?.(true, true); }
+    try {
+        widget.value = JSON.stringify(manifest); widget.callback?.(widget.value);
+        if (readSourceManifest(node).images.length !== manifest.images.length) throw new Error('ComfyUI did not retain the appended sources. Check this node’s sources input.');
+        node.__galleryRefreshPreview?.(); node.setDirtyCanvas?.(true, true);
+    }
     finally { if (recordChange) graph.afterChange?.(); }
 }
 
@@ -59,7 +63,9 @@ export function installSourceWidgets(node: any) {
     node.__gallerySourceInstalled = true;
     // Keep the STRING widget serialized, but present the visual editor instead.
     const widget = node.widgets?.find((item: any) => item.name === 'sources');
-    if (widget) { widget.type = 'hidden'; widget.hidden = true; widget.computeSize = () => [0, -4]; if (widget.inputEl) widget.inputEl.style.display = 'none'; }
+    // Preserve the native STRING/DOM widget type and serializer. Changing its
+    // type can break frontend extensions that own the widget's backing value.
+    if (widget) { widget.hidden = true; widget.computeSize = () => [0, -4]; if (widget.inputEl) widget.inputEl.style.display = 'none'; }
     const edit = node.addWidget('button', 'Edit images / crop / stitch', null, () => {
         target = node; window.dispatchEvent(new CustomEvent(SOURCE_EDITOR_EVENT, { detail: node }));
     }, { serialize: false });
@@ -68,6 +74,40 @@ export function installSourceWidgets(node: any) {
     }, { serialize: false });
     if (edit) edit.serialize = false;
     if (browse) browse.serialize = false;
+    if (typeof document !== 'undefined' && node.addDOMWidget) {
+        const preview = document.createElement('div');
+        preview.className = 'gallery-source-node-preview';
+        preview.style.cssText = 'display:flex;flex-direction:column;gap:6px;width:100%;height:220px;overflow:auto;color:var(--input-text,#ddd);background:var(--comfy-input-bg,#222);padding:6px;box-sizing:border-box;font:12px system-ui';
+        const refresh = () => {
+            preview.replaceChildren();
+            try {
+                const manifest = readSourceManifest(node);
+                const label = document.createElement('div');
+                label.textContent = `${manifest.images.length} image(s) · ${manifest.layout}${manifest.layout === 'single' && manifest.images.length > 1 ? ' · output uses the first image' : ''}`;
+                preview.append(label);
+                if (!manifest.images.length) { label.textContent = 'No images yet — append from Gallery.'; return; }
+                const grid = document.createElement('div');
+                grid.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap';
+                for (const image of manifest.images.slice(0, 8)) {
+                    const tile = document.createElement('div'); tile.style.cssText = `width:${manifest.images.length === 1 ? '100%' : 'calc(50% - 4px)'};min-width:80px`;
+                    const img = document.createElement('img');
+                    img.src = '/Gallery/source/thumbnail?url=' + encodeURIComponent('/static_gallery/' + image.input_name);
+                    img.alt = image.title || image.input_name; img.style.cssText = `width:100%;height:${manifest.images.length === 1 ? 165 : 75}px;object-fit:contain`;
+                    const caption = document.createElement('div'); caption.style.cssText = 'font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
+                    caption.textContent = image.title || image.input_name;
+                    img.onerror = () => { caption.textContent = 'Preview unavailable: ' + (image.title || image.input_name); };
+                    tile.append(img, caption); grid.append(tile);
+                }
+                preview.append(grid);
+            } catch (error) { preview.textContent = String(error); }
+        };
+        node.__galleryRefreshPreview = refresh;
+        const dom = node.addDOMWidget('gallery_source_preview', 'gallery_source_preview', preview, { serialize: false, hideOnZoom: false, getHeight: () => 220 });
+        if (dom) { dom.serialize = false; dom.computeSize = () => [320, 220]; }
+        const configure = node.onConfigure;
+        node.onConfigure = function (...args: any[]) { const result = configure?.apply(this, args); refresh(); return result; };
+        refresh();
+    }
     node.setSize?.([320, Math.max(180, node.computeSize?.()[1] || 180)]);
 }
 

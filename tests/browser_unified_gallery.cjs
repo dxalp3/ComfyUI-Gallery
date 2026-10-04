@@ -63,7 +63,7 @@ const assert = require('node:assert/strict');
   await page.waitForFunction(()=>window.qaNodes.length===1&&JSON.parse(window.qaNodes[0].widgets.find(w=>w.name==='sources').value).images.length===7);
   // Switching back to workflows keeps the same gallery state and graph.
   await page.getByRole('tab',{name:'Test workflow',exact:true}).click();
-  assert.equal(await page.locator('#comfy-gallery-workspace').isVisible(),false);
+  await page.locator('#comfy-gallery-workspace').waitFor({state:'hidden'});
   await page.getByRole('tab',{name:'Gallery workspace',exact:true}).click();
   assert.equal(await page.locator('[data-gallery-entry] input:checked').count(),7);
   await page.getByRole('button',{name:'Workflow',exact:true}).click();

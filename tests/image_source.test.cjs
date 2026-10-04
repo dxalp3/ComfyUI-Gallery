@@ -37,7 +37,7 @@ function bridgeFixture() {
     const graph = { _nodes: [], add(n) { n.id = this._nodes.length + 1; this._nodes.push(n); } };
     const app = { graph, canvas: { graph, selected_nodes: {} } };
     const window = { addEventListener() {}, dispatchEvent() {}, LiteGraph: { createNode() { return {
-        comfyClass: 'GalleryImageSource', widgets: [{ name: 'sources', value: JSON.stringify(geometry.emptyImageSourceManifest()) }],
+        comfyClass: 'GalleryImageSource', widgets: [{ name: 'sources', type: 'customtext', value: JSON.stringify(geometry.emptyImageSourceManifest()) }],
         addWidget(type, name, value, callback, options) { this.widgets.push({ type, name, value, callback, options }); },
     }; } } };
     const bridge = compile('ImageSourceBridge', { window, CustomEvent: class { constructor(type, detail) { this.type=type;this.detail=detail; } } }, { './ComfyAppApi': { getComfyApp: () => app, STANDALONE: false }, './ImageSourceGeometry': geometry });
@@ -55,6 +55,7 @@ test('append creates one dedicated node and keeps serialized crop/layout across 
     assert.equal(bridge.readSourceManifest(node).layout, 'grid');
     assert.equal(bridge.readSourceManifest(node).images[0].crop.width, .5);
     assert.equal(node.widgets[0].hidden, true);
+    assert.equal(node.widgets[0].type, 'customtext', 'preserve the native widget serializer type');
     assert.equal(node.widgets[0].options?.serialize, undefined);
 });
 test('explicit targets, deleted nodes and source count limits are checked', async () => {

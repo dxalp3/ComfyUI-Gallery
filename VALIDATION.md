@@ -1,3 +1,30 @@
+# Shared prefixes and visible sources — hydrus.11 (2026-10-04)
+
+- Backend: **97 passed, 2 skipped** (99 tests); existing Windows symlink skips.
+- JavaScript: **26 passed**. TypeScript and production build pass. Existing Vite
+  third-party directive and large-bundle warnings remain.
+- Six Chrome suites cover shared prefixes, prompt-aware hybrid search, Image
+  Source, unified gallery, export controls, and the 10,000-image workspace.
+- New browser coverage creates a prefix from selected image metadata, opens the
+  shared manager from an existing `TagPrefixPromptLibrary` node, writes the
+  chosen prefix to its STRING widget with spaced/canonical spellings, creates
+  another prefix there, searches it by name, then appends an image and verifies
+  both serialized source data and a loaded inline node thumbnail before execution.
+- Backend tests cover preserving original library IDs, case-insensitive prefix
+  updates, rejecting concurrent stale writes, explicit browser migration, user
+  isolation, invalid-file preservation, model-text formatting without changing
+  custom/LoRA identifiers, and native Hydrus spelling alternatives/exclusions.
+- Source tests now assert retention of the native STRING widget type instead of
+  changing it to `hidden`. The preview is a nonserialized DOM widget.
+
+The browser uses synthetic images and a simulated ComfyUI graph with DOM widgets,
+not a running installed ComfyUI/GPU workflow. The installed node and frontend
+versions were inspected read-only. No installed files, real user library or
+Hydrus data were changed. The original Prompt Library package is still needed
+for workflows using its node class; Gallery adds its own equivalent for new ones.
+
+---
+
 # Background sync and prompt index — hydrus.10 (2026-10-02)
 
 - Backend: **90 passed, 2 skipped** (92 tests). The two existing skips require

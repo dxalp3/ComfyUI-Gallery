@@ -659,6 +659,25 @@ class HydrusBridge:
             if not predicates or any(re.match(r"-?system\s*:\s*limit", tag, re.I) for tag in predicates):
                 raise HydrusError("OR groups cannot be empty or contain system:limit.")
             tags.append(predicates)
+        if data.get('expand_danbooru_aliases') is True:
+            try:
+                from .tag_dictionary import dictionary, normalize
+            except ImportError:
+                from tag_dictionary import dictionary, normalize
+            lookup = await asyncio.to_thread(dictionary)
+            def aliases(tag):
+                canonical = lookup.get(normalize(tag))
+                return list(dict.fromkeys([tag, canonical, canonical.replace('_', ' ')])) if canonical else [tag]
+            expanded = []
+            for predicate in tags:
+                if isinstance(predicate, list):
+                    expanded.append(list(dict.fromkeys(alias for tag in predicate for alias in aliases(tag))))
+                elif predicate.startswith('-'):
+                    expanded.extend('-' + alias for alias in aliases(predicate[1:]))
+                else:
+                    alternatives = aliases(predicate)
+                    expanded.append(alternatives if len(alternatives) > 1 else predicate)
+            tags = expanded
         sort_type = data.get("file_sort_type", 2)
         ascending = data.get("file_sort_asc", False)
         if type(sort_type) is not int or sort_type not in (set(range(28)) - {17}):
@@ -1025,6 +1044,14 @@ def register_hydrus_routes(routes, get_root, storage_dir=None, get_input_root=No
                     result = await bridge.services(data)
                 elif action == "status":
                     result = await bridge.status(data)
+                elif action == "format_terms":
+                    try:
+                        from .tag_dictionary import format_terms
+                    except ImportError:
+                        from tag_dictionary import format_terms
+                    terms = clean_tags(data.get('terms', []))
+                    if type(data.get('prefer_spaces', True)) is not bool: raise HydrusError('Invalid prompt spelling preference.')
+                    result = {'terms': await asyncio.to_thread(format_terms, terms, data.get('prefer_spaces', True))}
                 elif action == "dictionary":
                     try:
                         from .tag_dictionary import dictionary, normalize
@@ -1084,7 +1111,7 @@ def register_hydrus_routes(routes, get_root, storage_dir=None, get_input_root=No
 
     for method, path, action in (("post", "sync_status", "sync_status"), ("post", "sync_retry", "sync_retry"), ("post", "sync_resolve", "sync_resolve"), ("get", "settings", "get_settings"), ("post", "settings", "save_settings"),
                                  ("post", "test", "test"), ("post", "status", "status"),
-                                 ("post", "services", "services"), ("post", "dictionary", "dictionary"), ("post", "tag_sync", "tag_sync"), ("post", "danbooru_tags", "danbooru_tags"), ("post", "save_output", "save_output"), ("post", "trash", "trash"),
+                                 ("post", "services", "services"), ("post", "dictionary", "dictionary"), ("post", "format_terms", "format_terms"), ("post", "tag_sync", "tag_sync"), ("post", "danbooru_tags", "danbooru_tags"), ("post", "save_output", "save_output"), ("post", "trash", "trash"),
                                  ("post", "export", "export"), ("post", "refresh", "refresh"),
                                  ("post", "search", "search"), ("post", "pages", "pages"),
                                  ("post", "suggest", "suggest"), ("get", "download", "download"), ("get", "original", "original"),

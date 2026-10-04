@@ -1,3 +1,4 @@
+import { installPrefixWidgets } from './PrefixLibrary';
 import { installWorkspaceTab, openWorkspace, closeWorkspace } from './GalleryWorkspace';
 import { getComfyApp } from './ComfyAppApi';
 import { installSourceWidgets, registerSourceConstructor } from './ImageSourceBridge';
@@ -41,6 +42,7 @@ if (STANDALONE) {
     afterConfigureGraph() { closeWorkspace(); },
     async nodeCreated(node: any) {
         installSourceWidgets(node);
+        installPrefixWidgets(node);
         try {
             if (node.comfyClass === "GalleryNode") {
                 node.addWidget("button", "Open Gallery", null, () => {
