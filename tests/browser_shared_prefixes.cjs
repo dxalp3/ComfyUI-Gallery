@@ -53,6 +53,10 @@ const assert = require('node:assert/strict');
   await search.fill('@sky selection'); await search.press('Enter'); await search.press('Escape');
   await page.waitForFunction(() => document.querySelectorAll('[data-gallery-entry]').length === 1);
   assert.equal(await page.locator('.cg-search .ant-select-selection-item').count(), 2);
+  // A copied prefix expansion must also split, even though it has no @name.
+  while (await page.locator('.cg-search .ant-select-selection-item-remove').count()) await page.locator('.cg-search .ant-select-selection-item-remove').first().click();
+  await search.fill('azure sky, mountain'); await search.press('Enter'); await search.press('Escape');
+  assert.equal(await page.locator('.cg-search .ant-select-selection-item').count(), 2);
   // Append persists the manifest and presents the actual image on the node.
   await page.getByAltText('study-1.png', { exact: true }).click({ button: 'right' });
   await page.getByRole('menuitem', { name: 'Append to Image Source (1)', exact: true }).click();

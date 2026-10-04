@@ -82,7 +82,7 @@ export function HydrusBrowser({ open, source = 'hydrus', searchMode, viewRevisio
                 if (version !== requestVersion.current) return;
                 setPages(data.pages?.pages || (data.pages?.is_media_page ? [data.pages] : []));
             } else {
-                const data = !settings?.has_access_key && kind === 'search' ? { items: [], total: 0 } : await hydrusRequest<Results>(kind, kind === 'search' ? { tags, match, limit, metadata_terms: localBranch, metadata_field: localField, field_join: fieldJoin, or_groups: orGroups, file_sort_type: sortType, file_sort_asc: ascending, expand_danbooru_aliases: true } : { page_key: key, offset, limit });
+                const data = !settings?.has_access_key && kind === 'search' ? { items: [], total: 0 } : await hydrusRequest<Results>(kind, kind === 'search' ? { tags, match, limit, metadata_terms: localBranch, metadata_field: localField, field_join: fieldJoin, or_groups: orGroups, file_sort_type: sortType, file_sort_asc: ascending, expand_danbooru_aliases: gallery.settings.hydrusSearchAliases !== false } : { page_key: key, offset, limit });
                 if (version !== requestVersion.current) return;
                 setResult(data); reloadMemory();
                 if (kind === 'search') {

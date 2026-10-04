@@ -1,6 +1,6 @@
 import { FolderRules } from './FolderRules';
 import Modal from 'antd/es/modal/Modal';
-import { Button, Flex, Input, Select, Switch, Typography, message } from 'antd';
+import { Button, Checkbox, Flex, Input, Select, Switch, Typography, message } from 'antd';
 import { useGalleryContext, type SettingsState } from './GalleryContext';
 import { useSetState } from 'ahooks';
 import { useEffect, useState } from 'react';
@@ -80,6 +80,7 @@ const GallerySettingsModal = () => {
                 </div>
 
                 <div><Typography.Title level={5}>Extra local folders</Typography.Title><Select mode="tags" aria-label="Extra local folders" value={staged.extraFolders || []} onChange={extraFolders => setStaged({ extraFolders })} style={{ width: '100%' }} placeholder="Absolute folder path — Enter to add" /><Typography.Text type="secondary">Saved roots appear beside the folder selector and can be routing destinations.</Typography.Text></div>
+                <div><Checkbox checked={staged.hydrusSearchAliases !== false} onChange={event => setStaged({ hydrusSearchAliases: event.target.checked })}>Match Danbooru aliases, spaces and underscores in Hydrus searches</Checkbox><Typography.Paragraph type="secondary">For known dictionary tags, search both blue_eyes and blue eyes (and recognized aliases). Turn off to search the exact tags entered. Applies to Hydrus and Both; does not rename stored tags or change prompt spelling.</Typography.Paragraph></div>
                 <FolderRules settings={staged} change={value => setStaged(previous => ({ ...previous, ...value }))} />
                 <div>
                     <Typography.Title

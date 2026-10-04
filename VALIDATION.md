@@ -1,3 +1,11 @@
+# Prefix search chips and optional aliases — hydrus.12 (2026-10-04)
+
+- JavaScript: **29 passed**, including named/copied prefix expansion, compound library entries, exclusions and preservation of comma-bearing literal predicates.
+- TypeScript and production build pass; existing Vite warnings remain.
+- Backend Hydrus browser/search tests: **32 passed**.
+- Two Chrome suites pass: shared prefixes (including copied text becoming two chips and the Image Source preview) and hybrid prompts (including saving alias opt-out and checking the outgoing search request).
+- Browser validation uses the synthetic Gallery fixture, not the installed ComfyUI or real Hydrus database.
+
 # Shared prefixes and visible sources — hydrus.11 (2026-10-04)
 
 - Backend: **97 passed, 2 skipped** (99 tests); existing Windows symlink skips.

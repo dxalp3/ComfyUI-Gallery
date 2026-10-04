@@ -1,6 +1,6 @@
 # ComfyUI Gallery
 
-## Hydrus edition — 2.7.1-hydrus.11
+## Hydrus edition — 2.7.1-hydrus.12
 
 This customized edition adds image export to the Hydrus Client API, persistent
 SHA-256 export history, cached Hydrus metadata, bulk actions, checkboxes, range

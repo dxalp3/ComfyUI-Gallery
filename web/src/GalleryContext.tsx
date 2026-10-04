@@ -50,6 +50,7 @@ export interface SettingsState {
     imageThumbFit: 'width' | 'height';
     videoThumbFit: 'width' | 'height';
     deduplicateSymlinks: boolean;
+    hydrusSearchAliases: boolean;
 }
 
 export const DEFAULT_SETTINGS: SettingsState = {
@@ -70,6 +71,7 @@ export const DEFAULT_SETTINGS: SettingsState = {
     imageThumbFit: 'width',
     videoThumbFit: 'height',
     deduplicateSymlinks: true,
+    hydrusSearchAliases: true,
 };
 export const STORAGE_KEY = 'comfy-ui-gallery-settings';
 

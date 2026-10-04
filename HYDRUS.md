@@ -607,3 +607,11 @@ references and identifiers remain literal. The preference is remembered in the
 browser and shared between gallery prompt controls. Hydrus automatic Danbooru
 exports still use canonical underscore tags. This is a formatting preference,
 not a claim that every model or custom encoder tokenizes both forms identically.
+
+## Search spelling and prefix chips (hydrus.12)
+
+Gallery settings includes **Match Danbooru aliases, spaces and underscores in Hydrus searches** (on by default). Known dictionary terms become spelling alternatives in remote tag searches, including OR groups and exclusions. Disable it for exact entered tags. This does not rename Hydrus tags, alter the export dictionary, or change the separate prompt-spelling checkbox in the prefix manager and append dialog.
+
+In Both, with **Match these Hydrus tags against local prompts and cached tags too** enabled, each main search term matches local positive prompt phrases or cached Hydrus tags and searches remote Hydrus tags. Local comparisons normalize spaces/underscores; they do not expand dictionary synonyms. AND/OR applies within each source, and the gallery combines the two result sets. Searching remote positive/negative prompts requires the corresponding metadata group and indexed Gallery metadata notes; ordinary tag searches do not search arbitrary note contents.
+
+Saved prefixes expand to individual editable chips. Saved compound vocabulary entries and copied comma-separated prefix expansions now do too, in local search, Hydrus/Both search, OR groups and the prefix draft. Unknown literal tags and Hydrus system predicates retain their commas. Use `@prefix name` to explicitly choose a saved prefix. The local quick search and manager Search button select the Local view; enter the prefix in Both's main search to search both libraries.

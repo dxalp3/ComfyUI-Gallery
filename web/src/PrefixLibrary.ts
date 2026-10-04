@@ -42,6 +42,16 @@ export function expandPrefix(library: PrefixLibrary, name: string): string[] {
     const prefix = library.prefixes.find(item => item.name.toLowerCase() === clean.toLowerCase());
     return prefix ? prefix.tags.flatMap(id => (library.tags.find(tag => tag.id === id)?.text || '').split(/[,\n]+/)).map(value => (excluded ? '-' : '') + value.trim()).filter(value => value && value !== '-') : [name];
 }
+/** Expand saved compound vocabulary and copied prefix text without splitting literal Hydrus predicates. */
+export function expandSearchTerms(library: PrefixLibrary, value: string): string[] {
+    const expanded = expandPrefix(library, value);
+    if (expanded.length !== 1 || expanded[0] !== value) return expanded;
+    const excluded = value.startsWith('-');
+    const text = (excluded ? value.slice(1) : value).trim();
+    const compound = library.tags.some(tag => tag.text.trim() === text) || library.prefixes.some(prefix =>
+        prefix.tags.map(id => library.tags.find(tag => tag.id === id)?.text).filter(Boolean).join(', ') === text);
+    return compound ? Array.from(new Set(text.split(/[,\n]+/).map(term => term.trim()).filter(Boolean).map(term => (excluded ? '-' : '') + term))) : [value];
+}
 export async function savePrefix(name: string, values: string[], revision?: string) {
     const result = await request({ action: 'save', name, terms: values, revision: revision || (await loadPrefixes()).revision });
     localStorage.setItem('comfy.prompt-library.v2', JSON.stringify(result.library));

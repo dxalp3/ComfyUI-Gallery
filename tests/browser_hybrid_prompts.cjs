@@ -17,6 +17,16 @@ const assert=require('node:assert/strict');
   assert.equal(await page.getByRole('combobox',{name:'Filter local files',exact:true}).count(),0);
   await page.getByRole('button',{name:'Search',exact:true}).click();await count(8);
   assert.equal(await page.getByRole('button',{name:'Search',exact:true}).isVisible(),true);
+  // Persist alias opt-out in settings and verify the actual search request.
+  await page.getByRole('button',{name:'Settings',exact:true}).click();
+  await page.getByRole('menuitem',{name:'Gallery settings',exact:true}).click();
+  const settingsDialog=page.getByRole('dialog',{name:'Settings',exact:true});
+  await settingsDialog.getByRole('checkbox',{name:'Match Danbooru aliases, spaces and underscores in Hydrus searches',exact:true}).uncheck();
+  await settingsDialog.getByRole('button',{name:'Save',exact:true}).click();
+  await settingsDialog.waitFor({state:'hidden'});
+  const aliasRequest=page.waitForRequest(request=>request.url().endsWith('/Gallery/hydrus/search'));
+  await page.getByRole('button',{name:'Search',exact:true}).click();
+  assert.equal((await aliasRequest).postDataJSON().expand_danbooru_aliases,false);await count(8);
   const previousRequests=requests;
   await choose('Gallery order','Random');
   const ids=()=>page.locator('[data-gallery-entry]').evaluateAll(els=>els.map(e=>e.dataset.galleryEntry));

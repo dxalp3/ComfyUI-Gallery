@@ -1,4 +1,4 @@
-import { savePrefix, loadPrefixes, migrateBrowserPrefixes, expandPrefix, deletePrefix, applyLibraryPrefix, PREFIX_MANAGER_EVENT, type SharedLibrary, type PrefixSeed } from './PrefixLibrary';
+import { savePrefix, loadPrefixes, migrateBrowserPrefixes, expandPrefix, expandSearchTerms, deletePrefix, applyLibraryPrefix, PREFIX_MANAGER_EVENT, type SharedLibrary, type PrefixSeed } from './PrefixLibrary';
 import { usePromptSpelling, formatPromptTerms } from './PromptSpelling';
 import { HydrusTagSelect } from './HydrusTagSelect';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -84,7 +84,7 @@ export function LocalPromptSearch({ onLocalSearch, managerOnly = false }: { onLo
             }
         }}><Select mode="tags" aria-label="Filter local files" value={gallery.localTerms} searchValue={gallery.searchFileName}
             onSearch={value => { gallery.setSearchFileName(value); onLocalSearch(); }}
-            onChange={values => { gallery.setLocalTerms(Array.from(new Set(values.flatMap(value => gallery.localTerms.includes(value) ? [value] : expandPrefix(shared, value))))); gallery.setSearchFileName(''); onLocalSearch(); }}
+            onChange={values => { gallery.setLocalTerms(Array.from(new Set(values.flatMap(value => expandSearchTerms(shared, value))))); gallery.setSearchFileName(''); onLocalSearch(); }}
             style={{ width: '100%' }} popupMatchSelectWidth={480} filterOption={false} optionLabelProp="value" allowClear
             options={options.filter(item => !gallery.localTerms.includes(item.value)).map((item, i) => ({ key: item.side + i, value: item.side === 'Library prefix' ? '@' + item.label : item.value, label: <span>{item.label} <small>· {item.side}{item.count ? ' · ' + item.count + ' local files' : ''}</small></span> }))}
             placeholder="Local search · Enter stacks a term (AND)" /></div>
@@ -105,11 +105,11 @@ export function LocalPromptSearch({ onLocalSearch, managerOnly = false }: { onLo
             <Typography.Paragraph type="secondary">{status}. Prefix definitions are shared with your Prompt Library node. Save only selected vocabulary tags; the full dictionary stays available without duplicating it.</Typography.Paragraph>
             <div style={{ maxHeight: '55vh', overflow: 'auto' }}>{rows.map((item, i) => <div key={item.side + i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 0', borderBottom: '1px solid #8883' }}>
                 <div style={{ flex: 1, minWidth: 0 }}><strong>{item.label}</strong><div style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{item.value !== item.label ? item.value : ''}</div><small>{item.side} {item.count ? '· ' + item.count + ' files' : ''}</small></div>
-                <Button onClick={() => { gallery.setLocalSearchField(item.side === 'Library prefix' ? 'all' : item.side === 'hydrus' ? 'hydrus' : item.side === 'negative' ? 'negative' : 'positive'); gallery.setLocalTerms(item.side === 'Library prefix' ? expandPrefix(shared, '@' + item.label) : [item.value]); gallery.setSearchFileName(''); onLocalSearch(); setOpen(false); }}>Search</Button>
+                <Button onClick={() => { gallery.setLocalSearchField(item.side === 'Library prefix' ? 'all' : item.side === 'hydrus' ? 'hydrus' : item.side === 'negative' ? 'negative' : 'positive'); gallery.setLocalTerms(item.side === 'Library prefix' ? expandPrefix(shared, '@' + item.label) : expandSearchTerms(shared, item.value)); gallery.setSearchFileName(''); onLocalSearch(); setOpen(false); }}>Search</Button>
                 {item.side === 'Library prefix' && seed.node && <Button onClick={() => { const prefix = shared.prefixes.find(value => value.name === item.label)!; void formatPromptTerms(expandPrefix(shared, '@' + prefix.name), spaces).then(terms => { applyLibraryPrefix(seed.node, shared, prefix.id, terms.join(', ')); message.success('Prefix loaded into the node'); }).catch(error => message.error(String(error))); }}>Use in this node</Button>}
                 {item.side === 'Library prefix' && <Button onClick={() => { setPrefixName(item.label); setPrefixTags(promptTags(item.value, '')); }}>Edit prefix</Button>}
                 {item.side === 'Library prefix' && <Button danger onClick={() => Modal.confirm({ title: 'Delete prefix ' + item.label + '?', content: 'Its vocabulary tags and existing workflow text are retained.', zIndex: BASE_Z_INDEX + 90, onOk: async () => { await deletePrefix(shared.prefixes.find(prefix => prefix.name === item.label)!.id, shared.revision!); await load(); } })}>Delete prefix</Button>}
-                {item.side !== 'Library prefix' && <Button onClick={() => setPrefixTags(old => Array.from(new Set([...old, item.value])))}>Add to draft</Button>}
+                {item.side !== 'Library prefix' && <Button onClick={() => setPrefixTags(old => Array.from(new Set([...old, ...expandSearchTerms(shared, item.value)])))}>Add to draft</Button>}
                 <Button onClick={() => navigator.clipboard.writeText(item.value).then(() => message.success('Copied prompt text')).catch(error => message.error(String(error)))}>Copy</Button>
             </div>)}</div><Typography.Text type="secondary">Showing up to 100 matches. Refine your search to find more.</Typography.Text>
         </Modal>

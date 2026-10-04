@@ -1,4 +1,4 @@
-import { loadPrefixes, expandPrefix, type PrefixLibrary } from './PrefixLibrary';
+import { loadPrefixes, expandSearchTerms, type PrefixLibrary } from './PrefixLibrary';
 import { useEffect, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { Button, Select, Typography } from 'antd';
@@ -45,7 +45,7 @@ export function HydrusTagSelect({ localSuggestions = [], value = [], onChange, d
     useEffect(() => { if (!active) { setQuery(''); setOpen(false); } }, [active]);
     useEffect(() => { let live = true; const timer = setTimeout(() => { if (query.trim()) void hydrusRequest<{ tags: string[] }>('dictionary', { query }).then(data => { if (live) setDictionary(data.tags); }).catch(() => {}); else setDictionary([]); }, 250); return () => { live = false; clearTimeout(timer); }; }, [query]);
     useEffect(() => { if (open) void loadPrefixes().then(setLibrary).catch(() => {}); }, [open]);
-    const change = (tags: string[]) => { onChange?.(Array.from(new Set(tags.flatMap(tag => value.includes(tag) ? [tag] : expandPrefix(library, tag))))); setQuery(''); };
+    const change = (tags: string[]) => { onChange?.(Array.from(new Set(tags.flatMap(tag => expandSearchTerms(library, tag))))); setQuery(''); };
     const prefix = query.trim().startsWith('-') ? '-' : '';
     const choices: Suggestion[] = [...suggestions, ...Array.from(new Set([...library.prefixes.map(prefix => '@' + prefix.name), ...localSuggestions, ...dictionary])).filter(tag => query.trim() && tag.toLocaleLowerCase().replace(/_/g, ' ').includes(query.trim().replace(/^-/, '').toLocaleLowerCase().replace(/_/g, ' ')) && !suggestions.some(remote => remote.value === tag)).slice(0, 40).map(value => ({ value, local: true }))];
     return <div className="cg-tag-input" style={style} onKeyDownCapture={event => {
