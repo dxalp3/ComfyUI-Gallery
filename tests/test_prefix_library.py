@@ -5,8 +5,8 @@ import tempfile
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from prefix_library import read, update, GalleryPromptLibrary
-from tag_dictionary import format_terms, prompt_tags
+from prefix_library import read, update, GalleryPromptLibrary, GalleryPromptEncode
+from tag_dictionary import format_terms, prompt_tags, browse_vocabulary
 
 
 class LibraryTests(unittest.TestCase):
@@ -26,6 +26,47 @@ class LibraryTests(unittest.TestCase):
         self.assertEqual(value['prefixes'], [{'id': 'p1', 'name': 'Portrait', 'tags': ['tag1', value['tags'][1]['id']]}])
         self.assertEqual(value['tags'][0]['name'], 'Eyes')
         self.assertEqual(GalleryPromptLibrary().output_prefix('blue eyes'), ('blue eyes',))
+
+    def test_image_pairing_survives_reload_and_unrelated_prefix_updates(self):
+        result = update(self.path, {'action': 'save', 'revision': read(self.path)[1], 'name': 'Pose only', 'terms': ['standing'], 'image_keys': ['sha256:example', 'local:./:/output/example.png']})
+        pair = result['library']['associations']['sha256:example']
+        self.assertEqual(pair['terms'], ['standing'])
+        self.save('Hair', ['long_hair'])
+        self.assertEqual(read(self.path)[0]['associations']['sha256:example'], pair)
+        self.assertEqual(read(self.path)[0]['associations']['local:./:/output/example.png'], pair)
+
+    def test_bad_image_pairing_does_not_write_library(self):
+        self.save('Existing', ['standing'])
+        before = self.path.read_bytes()
+        with self.assertRaises(ValueError):
+            update(self.path, {'action': 'save', 'revision': read(self.path)[1], 'name': 'Bad', 'terms': ['sitting'], 'image_keys': [123]})
+        self.assertEqual(self.path.read_bytes(), before)
+
+    def test_encoder_uses_editable_text_and_scheduled_clip_api(self):
+        class Clip:
+            def tokenize(self, text):
+                self.text = text
+                return {'tokens': text}
+            def encode_from_tokens_scheduled(self, tokens):
+                return [['conditioning', {'text': tokens['tokens']}]]
+        clip = Clip()
+        encoded, text = GalleryPromptEncode().encode(clip, 'manually edited, (blue eyes:1.2)')
+        self.assertEqual(clip.text, text)
+        self.assertEqual(encoded[0][1]['text'], text)
+        self.assertEqual(GalleryPromptEncode.RETURN_TYPES, ('CONDITIONING', 'STRING'))
+        with self.assertRaises(ValueError): GalleryPromptEncode().encode(None, '')
+
+    def test_wiki_categories_sort_search_and_favorites(self):
+        data = browse_vocabulary({'category': 'tag_group:attire', 'sort': 'alphabetical', 'limit': 100})
+        names = [row['name'] for row in data['items']]
+        self.assertEqual(names, sorted(names))
+        self.assertGreater(data['total'], 100)
+        self.assertIn('dress', [row['name'] for row in browse_vocabulary({'category': 'tag_group:attire', 'query': 'dress', 'limit': 100})['items']])
+        self.assertIn('smile', [row['name'] for row in browse_vocabulary({'category': 'tag_group:face_tags', 'query': 'smile'})['items']])
+        self.assertEqual(browse_vocabulary({'favorites': []})['total'], 0)
+        self.assertEqual([row['name'] for row in browse_vocabulary({'favorites': ['blue_eyes']})['items']], ['blue_eyes'])
+        popular = browse_vocabulary({})['items']
+        self.assertEqual([row['count'] for row in popular], sorted([row['count'] for row in popular], reverse=True))
 
     def test_concurrent_edit_is_rejected_without_losing_data(self):
         first = self.save('pose', ['standing'])

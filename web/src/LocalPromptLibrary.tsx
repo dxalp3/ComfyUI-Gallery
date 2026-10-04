@@ -1,4 +1,5 @@
-import { savePrefix, loadPrefixes, migrateBrowserPrefixes, expandPrefix, expandSearchTerms, deletePrefix, applyLibraryPrefix, PREFIX_MANAGER_EVENT, type SharedLibrary, type PrefixSeed } from './PrefixLibrary';
+import { PromptPalette } from './PromptPalette';
+import { savePrefix, writeLibraryNodeText, loadPrefixes, migrateBrowserPrefixes, expandPrefix, expandSearchTerms, deletePrefix, applyLibraryPrefix, PREFIX_MANAGER_EVENT, type SharedLibrary, type PrefixSeed } from './PrefixLibrary';
 import { usePromptSpelling, formatPromptTerms } from './PromptSpelling';
 import { HydrusTagSelect } from './HydrusTagSelect';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -35,6 +36,7 @@ export function LocalPromptSearch({ onLocalSearch, managerOnly = false }: { onLo
     const [shared, setShared] = useState<SharedLibrary>({ version: 2, tags: [], prefixes: [] });
     const [seed, setSeed] = useState<PrefixSeed>({});
     const [spaces, setSpaces] = usePromptSpelling();
+    const [nodeText, setNodeText] = useState('');
     const [prefixName, setPrefixName] = useState('');
     const [prefixTags, setPrefixTags] = useState<string[]>([]);
     const [open, setOpen] = useState(false);
@@ -55,6 +57,7 @@ export function LocalPromptSearch({ onLocalSearch, managerOnly = false }: { onLo
         const refresh = () => { if (openRef.current) setStatus('Library may have changed. Refresh library before saving a stale draft.'); else void load(); };
         const show = (event: Event) => {
             const value = (event as CustomEvent<PrefixSeed>).detail || {};
+            setNodeText(value.node?.widgets?.find((widget: any) => ['prefix', 'text'].includes(widget.name))?.value || '');
             setSeed(value); setSide(value.node ? 'library' : 'all'); setOpen(true); setPrefixName(value.name || '');
             setPrefixTags(Array.from(new Set([...(value.positive || []), ...(value.hydrus || [])])));
             if (value.node) void load().then(data => {
@@ -90,23 +93,25 @@ export function LocalPromptSearch({ onLocalSearch, managerOnly = false }: { onLo
             placeholder="Local search · Enter stacks a term (AND)" /></div>
         <Select aria-label="Local search category" value={gallery.localSearchField} onChange={value => { gallery.setLocalSearchField(value); onLocalSearch(); }} style={{ width: 150 }} options={[{ value: 'all', label: 'All fields' }, { value: 'positive', label: 'Positive prompt' }, { value: 'negative', label: 'Negative prompt' }, { value: 'hydrus', label: 'Hydrus tag' }, { value: 'name', label: 'Filename' }]} />
         </>}<Button onClick={() => { setSeed({}); setPrefixName(''); setPrefixTags([]); setOpen(true); }}>Prompts & prefixes</Button>
-        <Modal title="Prompts & prefixes" open={open} onCancel={() => setOpen(false)} footer={null} width={950} zIndex={BASE_Z_INDEX + 70}>
-            <Typography.Paragraph strong>Shared prefix manager</Typography.Paragraph>
+        <Modal title="Prompts & prefixes" open={open} onCancel={() => setOpen(false)} footer={null} width={1050} styles={{ body: { maxHeight: '78vh', overflowY: 'auto' } }} zIndex={BASE_Z_INDEX + 70}>
+            <Typography.Paragraph strong>Shared prefix manager</Typography.Paragraph>{!!seed.imageKeys?.length && <Typography.Paragraph>Saving pairs this prefix with the selected image(s). Its terms will be enabled when you append them to a workflow.</Typography.Paragraph>}
             {!shared.tags.length && !shared.prefixes.length && <Button onClick={() => { void migrateBrowserPrefixes(shared.revision!).then(load).catch(error => message.error(String(error))); }}>Import legacy browser library</Button>}
             {seed.node && <Typography.Paragraph>Editing for {seed.node.title || 'Prompt Library'} #{seed.node.id}. Choose “Use in this node” on a saved prefix below.</Typography.Paragraph>}
+            {seed.node && <><Input.TextArea aria-label="Editable node prompt" autoSize={{ minRows: 3, maxRows: 9 }} value={nodeText} onChange={event => setNodeText(event.target.value)} /><Button onClick={() => { try { writeLibraryNodeText(seed.node, nodeText); message.success('Node prompt updated'); } catch (error) { message.error(String(error)); } }}>Apply edited text to node</Button><Button onClick={() => setNodeText(seed.node?.widgets?.find((widget: any) => ['prefix', 'text'].includes(widget.name))?.value || '')}>Read current node text</Button></>}
             {(seed.positive || seed.negative || seed.hydrus) && <Space wrap>{(['positive', 'negative', 'hydrus'] as const).map(side => <Button key={side} disabled={!seed[side]?.length} onClick={() => setPrefixTags(old => Array.from(new Set([...old, ...(seed[side] || [])])))}>Add image {side} ({seed[side]?.length || 0})</Button>)}<Button onClick={() => setPrefixTags([])}>Clear draft terms</Button></Space>}
+            <PromptPalette onChoose={terms => setPrefixTags(old => Array.from(new Set([...old, ...terms])))} />
             <Input aria-label="Prefix name" placeholder="Prefix name (existing name updates it)" value={prefixName} onChange={event => setPrefixName(event.target.value)} />
             <HydrusTagSelect label="Prefix tags" value={prefixTags} onChange={setPrefixTags} active={open} placeholder="Search Danbooru tags, Hydrus tags, or type @prefix" />
             <Checkbox checked={spaces} onChange={event => { setSpaces(event.target.checked); }}>Prefer spaces for recognized Danbooru prompt tags (off preserves canonical underscores)</Checkbox>
             <Button onClick={() => { void formatPromptTerms(prefixTags, spaces).then(setPrefixTags).catch(error => message.error(String(error))); }}>Apply spelling to draft</Button>
-            <Button onClick={() => { void savePrefix(prefixName, prefixTags, shared.revision).then(async value => { message.success(value); const data = await load(); const prefix = data?.prefixes.find(item => item.name.toLowerCase() === prefixName.trim().toLowerCase()); if (seed.node && data && prefix) applyLibraryPrefix(seed.node, data, prefix.id, (await formatPromptTerms(expandPrefix(data, '@' + prefix.name), spaces)).join(', ')); }).catch(error => message.error(String(error))); }}>Save prefix</Button>
+            <Button onClick={() => { void savePrefix(prefixName, prefixTags, shared.revision, seed.imageKeys).then(async value => { message.success(value); const data = await load(); const prefix = data?.prefixes.find(item => item.name.toLowerCase() === prefixName.trim().toLowerCase()); if (prefix) seed.onSaved?.(prefixTags, prefix.id); if (seed.node && data && prefix) applyLibraryPrefix(seed.node, data, prefix.id, (await formatPromptTerms(expandPrefix(data, '@' + prefix.name), spaces)).join(', ')); }).catch(error => message.error(String(error))); }}>Save prefix</Button>
             <Typography.Paragraph>{indexed.length.toLocaleString()} positive/negative phrases indexed across the loaded local root. Comma/newline phrases stay intact. Missing embedded prompts cannot be inferred.</Typography.Paragraph>
             <Space wrap><Input aria-label="Find indexed prompt" value={filter} onChange={event => setFilter(event.target.value)} placeholder="Find a phrase or prefix" /><Select aria-label="Prompt vocabulary" value={side} onChange={setSide} options={['positive', 'negative', 'hydrus', 'library', 'all'].map(value => ({ value, label: value }))} /><Button onClick={() => void load()}>Refresh library</Button></Space>
             <Typography.Paragraph type="secondary">{status}. Prefix definitions are shared with your Prompt Library node. Save only selected vocabulary tags; the full dictionary stays available without duplicating it.</Typography.Paragraph>
             <div style={{ maxHeight: '55vh', overflow: 'auto' }}>{rows.map((item, i) => <div key={item.side + i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 0', borderBottom: '1px solid #8883' }}>
                 <div style={{ flex: 1, minWidth: 0 }}><strong>{item.label}</strong><div style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{item.value !== item.label ? item.value : ''}</div><small>{item.side} {item.count ? '· ' + item.count + ' files' : ''}</small></div>
                 <Button onClick={() => { gallery.setLocalSearchField(item.side === 'Library prefix' ? 'all' : item.side === 'hydrus' ? 'hydrus' : item.side === 'negative' ? 'negative' : 'positive'); gallery.setLocalTerms(item.side === 'Library prefix' ? expandPrefix(shared, '@' + item.label) : expandSearchTerms(shared, item.value)); gallery.setSearchFileName(''); onLocalSearch(); setOpen(false); }}>Search</Button>
-                {item.side === 'Library prefix' && seed.node && <Button onClick={() => { const prefix = shared.prefixes.find(value => value.name === item.label)!; void formatPromptTerms(expandPrefix(shared, '@' + prefix.name), spaces).then(terms => { applyLibraryPrefix(seed.node, shared, prefix.id, terms.join(', ')); message.success('Prefix loaded into the node'); }).catch(error => message.error(String(error))); }}>Use in this node</Button>}
+                {item.side === 'Library prefix' && seed.node && <Button onClick={() => { const prefix = shared.prefixes.find(value => value.name === item.label)!; void formatPromptTerms(expandPrefix(shared, '@' + prefix.name), spaces).then(terms => { applyLibraryPrefix(seed.node, shared, prefix.id, terms.join(', ')); setNodeText(terms.join(', ')); message.success('Prefix loaded into the node'); }).catch(error => message.error(String(error))); }}>Use in this node</Button>}
                 {item.side === 'Library prefix' && <Button onClick={() => { setPrefixName(item.label); setPrefixTags(promptTags(item.value, '')); }}>Edit prefix</Button>}
                 {item.side === 'Library prefix' && <Button danger onClick={() => Modal.confirm({ title: 'Delete prefix ' + item.label + '?', content: 'Its vocabulary tags and existing workflow text are retained.', zIndex: BASE_Z_INDEX + 90, onOk: async () => { await deletePrefix(shared.prefixes.find(prefix => prefix.name === item.label)!.id, shared.revision!); await load(); } })}>Delete prefix</Button>}
                 {item.side !== 'Library prefix' && <Button onClick={() => setPrefixTags(old => Array.from(new Set([...old, ...expandSearchTerms(shared, item.value)])))}>Add to draft</Button>}

@@ -50,6 +50,9 @@ function polarity(name: string): Polarity | undefined {
 }
 
 const encoderTextInputs: Record<string, string[]> = {
+    GalleryPromptEncode: ['text'],
+    GalleryPromptLibrary: ['prefix'],
+    TagPrefixPromptLibrary: ['prefix'],
     CLIPTextEncodeFlux: ['clip_l', 't5xxl'],
     CLIPTextEncodeSD3: ['clip_l', 'clip_g', 't5xxl'],
 };

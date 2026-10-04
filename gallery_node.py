@@ -23,3 +23,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {"GalleryNode": "Gallery Button", "GalleryImageSour
 from .prefix_library import GalleryPromptLibrary
 NODE_CLASS_MAPPINGS["GalleryPromptLibrary"] = GalleryPromptLibrary
 NODE_DISPLAY_NAME_MAPPINGS["GalleryPromptLibrary"] = "Gallery Prompt Library"
+
+from .prefix_library import GalleryPromptEncode
+NODE_CLASS_MAPPINGS['GalleryPromptEncode'] = GalleryPromptEncode
+NODE_DISPLAY_NAME_MAPPINGS['GalleryPromptEncode'] = 'Gallery Prompt Encode (Library)'

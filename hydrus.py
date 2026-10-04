@@ -1057,9 +1057,16 @@ def register_hydrus_routes(routes, get_root, storage_dir=None, get_input_root=No
                         from .tag_dictionary import dictionary, normalize
                     except ImportError:
                         from tag_dictionary import dictionary, normalize
-                    query = normalize(str(data.get('query', ''))[:256])
-                    values = await asyncio.to_thread(dictionary)
-                    result = {'tags': list(dict.fromkeys(value for key, value in values.items() if query and query in key))[:80]}
+                    if data.get('browse'):
+                        try:
+                            from .tag_dictionary import browse_vocabulary
+                        except ImportError:
+                            from tag_dictionary import browse_vocabulary
+                        result = await asyncio.to_thread(browse_vocabulary, data)
+                    else:
+                        query = normalize(str(data.get('query', ''))[:256])
+                        values = await asyncio.to_thread(dictionary)
+                        result = {'tags': list(dict.fromkeys(value for key, value in values.items() if query and query in key))[:80]}
                 elif action == "tag_sync":
                     digest = bridge.validate_hash(data.get('hash'))
                     settings = bridge.settings.load()

@@ -31,6 +31,13 @@ def validate(value):
     for row in result['prefixes']:
         if not isinstance(row.get('tags'), list) or any(not isinstance(tag, str) or tag not in tags for tag in row['tags']) or len(set(row['tags'])) != len(row['tags']):
             raise ValueError('A prefix refers to invalid tags.')
+    associations = value.get('associations', {})
+    if not isinstance(associations, dict) or len(associations) > 50000:
+        raise ValueError('Invalid image associations.')
+    for key, item in associations.items():
+        if not isinstance(key, str) or len(key) > 4096 or not isinstance(item, dict) or not isinstance(item.get('prefix_id'), str) or not isinstance(item.get('terms'), list) or len(item['terms']) > 500 or any(not isinstance(term, str) or len(term) > 1024 for term in item['terms']):
+            raise ValueError('Invalid image association.')
+    if associations: result['associations'] = associations
     return result
 
 
@@ -77,6 +84,14 @@ def update(path, data):
                 existing['tags'] = ids
             else:
                 library['prefixes'].append({'id': str(uuid.uuid4()), 'name': name, 'tags': ids})
+            image_keys = data.get('image_keys', [])
+            if not isinstance(image_keys, list) or len(image_keys) > 64 or any(not isinstance(key, str) or not key or len(key) > 4096 for key in image_keys):
+                raise ValueError('Invalid image keys.')
+            if image_keys:
+                saved = next(p for p in library['prefixes'] if p['name'].casefold() == name.casefold())
+                for key in image_keys:
+                    library.setdefault('associations', {})[key] = {'prefix_id': saved['id'], 'terms': list(dict.fromkeys(term.strip() for term in terms))}
+                validate(library)
         else:
             raise ValueError('Invalid library action.')
         raw = json.dumps(library, ensure_ascii=False, indent=2).encode()
@@ -139,3 +154,20 @@ class GalleryPromptLibrary:
 
     def output_prefix(self, prefix):
         return (prefix,)
+
+
+class GalleryPromptEncode:
+    """Editable prompt + shared library picker, compatible with standard CLIP conditioning."""
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {'required': {'clip': ('CLIP',), 'text': ('STRING', {'multiline': True, 'dynamicPrompts': True, 'default': ''})}}
+
+    RETURN_TYPES = ('CONDITIONING', 'STRING')
+    RETURN_NAMES = ('conditioning', 'text')
+    FUNCTION = 'encode'
+    CATEGORY = 'prompt/library'
+
+    def encode(self, clip, text):
+        if clip is None:
+            raise ValueError('Connect a CLIP text encoder to Gallery Prompt Encode.')
+        return (clip.encode_from_tokens_scheduled(clip.tokenize(text)), text)

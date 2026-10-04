@@ -166,3 +166,10 @@ test('downloaded Hydrus notes expose polarity without guessing from tags',()=>{
  assert.equal(compiled.exports.matchesLibrarySearch({name:'x'},search,['blue hair'],{positive:'standing',negative:''}),false);
  assert.equal(compiled.exports.matchesLibrarySearch({name:'x'},{...search,fieldJoin:'any'},['blue hair'],{positive:'standing',negative:''}),true);
 });
+
+test('Gallery conditioning encoders preserve positive/negative polarity and manual text', () => {
+    const prompt = { '1': { class_type: 'GalleryPromptEncode', inputs: { text: 'blue eyes, standing', clip: ['4', 1] } }, '2': { class_type: 'GalleryPromptEncode', inputs: { text: 'blurry', clip: ['4', 1] } }, '3': { class_type: 'KSampler', inputs: { positive: ['1', 0], negative: ['2', 0] } } };
+    assert.deepEqual(extractLocalPrompts({ prompt }), { positive: 'blue eyes, standing', negative: 'blurry' });
+    const workflow = { nodes: [{ id: 1, type: 'GalleryPromptEncode', widgets_values: ['manual portrait'] }, { id: 2, type: 'KSampler', inputs: [{ name: 'positive', link: 1 }] }], links: [[1, 1, 0, 2, 1, 'CONDITIONING']] };
+    assert.equal(extractLocalPrompts({ workflow }).positive, 'manual portrait');
+});

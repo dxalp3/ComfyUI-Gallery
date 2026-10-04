@@ -1,3 +1,4 @@
+import { PreviewMedia } from './PreviewMedia';
 import { Typography, Button, Flex, Descriptions, Tooltip, message, Image, Popconfirm } from 'antd';
 import { parseComfyMetadata } from './metadata-parser/metadataParser';
 import { useState, useMemo, useCallback } from 'react';
@@ -325,7 +326,7 @@ export function MetadataView({
                         />
                     )}
                     {image.type == "media" && (
-                        <video
+                        <PreviewMedia
                             style={{
                                 objectFit: 'cover',
                                 maxWidth: 420,
@@ -342,7 +343,7 @@ export function MetadataView({
                     {image.type == "audio" && (
                         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', width: '420px', height: '400px', background: '#23272f', borderRadius: 12 }}>
                             <SoundOutlined style={{ fontSize: '100px', color: '#1890ff', marginBottom: '40px' }} />
-                            <audio
+                            <PreviewMedia audio
                                 style={{ width: '80%' }}
                                 src={`${BASE_PATH}${image.url}`}
                                 autoPlay={true}

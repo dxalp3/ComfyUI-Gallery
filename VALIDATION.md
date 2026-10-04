@@ -1,3 +1,17 @@
+# Categories, conditioning, associations and viewer lifecycle — hydrus.13 (2026-10-04)
+
+- Backend: **101 passed, 2 skipped** (103 tests); existing Windows symlink skips.
+- JavaScript: **30 passed**, including new encoder prompt extraction.
+- TypeScript and production build pass (existing Vite directive/bundle warnings).
+- New Chrome suite tests category filtering, tag favorites, prefix-only browsing,
+  persisted image pairing across dialogs, enabled prompt subsets in serialized
+  sources, manual conditioning-node text editing, deletion advancing the viewer,
+  shared selection, and real WebM playback stopping/detaching on preview close.
+- Existing shared-prefix, hybrid-prompt and unified-viewer Chrome suites also pass.
+- Uses generated PNG/WebM fixtures and a simulated ComfyUI graph. CLIP encoding
+  is tested with a mock implementing the installed ComfyUI scheduled-encoding API;
+  no GPU generation or modification of the user's installed ComfyUI was performed.
+
 # Prefix search chips and optional aliases — hydrus.12 (2026-10-04)
 
 - JavaScript: **29 passed**, including named/copied prefix expansion, compound library entries, exclusions and preservation of comma-bearing literal predicates.

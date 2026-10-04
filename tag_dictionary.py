@@ -56,3 +56,34 @@ def format_terms(terms, prefer_spaces=True):
             text = '(' + text + ':' + weighted[2] + ')'
         result.append(text)
     return result
+
+
+@lru_cache(maxsize=1)
+def vocabulary_rows():
+    lookup = dictionary()
+    with gzip.open(Path(__file__).parent / 'data' / 'danbooru.csv.gz', 'rt', encoding='utf-8-sig') as stream:
+        return tuple({'name': row[0], 'count': int(row[2]), 'aliases': row[3] if len(row) > 3 else ''} for row in csv.reader(stream) if len(row) >= 3 and row[0] in lookup and lookup[row[0]] == row[0])
+
+
+@lru_cache(maxsize=1)
+def tag_groups():
+    import json
+    source = json.loads((Path(__file__).parent / 'data' / 'danbooru-groups.json').read_text(encoding='utf-8'))
+    lookup = dictionary()
+    return {key: {**group, 'tags': frozenset(lookup[tag] for tag in group['tags'] if tag in lookup)} for key, group in source['groups'].items()}
+
+
+def browse_vocabulary(data):
+    groups = tag_groups()
+    category = str(data.get('category', ''))
+    if category and category not in groups: raise ValueError('Unknown wiki category')
+    query = normalize(str(data.get('query', ''))[:256])
+    favorites = data.get('favorites')
+    if favorites is not None and (not isinstance(favorites, list) or len(favorites) > 10000 or any(not isinstance(value, str) for value in favorites)):
+        raise ValueError('Invalid favorite tags')
+    favorites = set(favorites) if favorites is not None else None
+    rows = [row for row in vocabulary_rows() if (not category or row['name'] in groups[category]['tags']) and (favorites is None or row['name'] in favorites) and (not query or query in row['name'] or query in row['aliases'])]
+    rows.sort(key=(lambda row: row['name']) if data.get('sort') == 'alphabetical' else (lambda row: (-row['count'], row['name'])))
+    offset = max(0, min(200000, int(data.get('offset', 0))))
+    limit = max(1, min(100, int(data.get('limit', 60))))
+    return {'items': [{'name': row['name'], 'count': row['count']} for row in rows[offset:offset + limit]], 'total': len(rows), 'categories': [{'value': key, 'label': group['label'], 'count': len(group['tags']), 'source': group['source']} for key, group in sorted(groups.items()) if group['tags']]}

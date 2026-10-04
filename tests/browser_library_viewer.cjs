@@ -1,0 +1,84 @@
+const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
+const assert = require('node:assert/strict');
+(async () => {
+ const browser = await chromium.launch({ executablePath: process.env.CHROME_PATH, headless: true, args: ['--autoplay-policy=no-user-gesture-required'] });
+ const page = await browser.newPage({ viewport: { width: 1550, height: 1100 } });
+ const errors = []; page.on('pageerror', error => errors.push(error.message));
+ const base = 'http://127.0.0.1:8191';
+ const choose = async (scope, label, title) => { const input=scope.getByRole('combobox',{name:label,exact:true}); await input.press('ArrowDown'); const id=await input.getAttribute('aria-controls'); await page.locator('[id="'+id+'"]').locator('xpath=ancestor::div[contains(@class,"ant-select-dropdown")][1]').getByTitle(title,{exact:true}).click(); };
+ try {
+  await page.goto(base); await page.getByRole('tab',{name:'Gallery workspace',exact:true}).click();
+  await page.getByAltText('study-1.png',{exact:true}).click({button:'right'});
+  await page.getByRole('menuitem',{name:'Append to Image Source (1)',exact:true}).click();
+  const append=page.getByRole('dialog',{name:'Append images and prompts',exact:true});
+  await append.getByRole('button',{name:'Create prefix from this image',exact:true}).click();
+  const manager=page.getByRole('dialog',{name:'Prompts & prefixes',exact:true});
+  await manager.getByRole('textbox',{name:'Prefix name',exact:true}).fill('paired browser test');
+  const picker=manager.getByRole('combobox',{name:'Prefix tags',exact:true});
+  await manager.getByRole('button',{name:'Clear draft terms',exact:true}).click();
+  await picker.fill('standing'); await picker.press('Enter'); await picker.press('Escape');
+  const palette=manager.locator('.cg-prompt-palette');
+  const catalog=await (await page.request.post(base+'/Gallery/hydrus/dictionary',{data:{browse:true}})).json();
+  const attire=catalog.categories.find(group=>group.value==='tag_group:attire');
+  await choose(palette,'Danbooru wiki category',attire.label+' ('+attire.count+')');
+  await palette.getByRole('textbox',{name:'Browse vocabulary',exact:true}).fill('dress');
+  await palette.getByRole('button',{name:'Add dress',exact:true}).waitFor();
+  await palette.getByRole('button',{name:'Favorite dress',exact:true}).click();
+  await palette.getByRole('checkbox',{name:'Favorites only',exact:true}).check();
+  await page.waitForFunction(()=>document.querySelector('[role="dialog"] .cg-prompt-palette')!==null);
+  await palette.getByRole('button',{name:'Add dress',exact:true}).click();
+  const saved=page.waitForResponse(r=>r.url().endsWith('/Gallery/prefixes')&&r.request().method()==='POST');
+  await manager.getByRole('button',{name:'Save prefix',exact:true}).click(); assert.equal((await saved).status(),200);
+  await palette.getByRole('tab',{name:'Prefixes',exact:true}).click();
+  await palette.getByRole('checkbox',{name:'Favorites only',exact:true}).uncheck();
+  await palette.getByRole('textbox',{name:'Browse vocabulary',exact:true}).fill('paired browser');
+  await palette.getByRole('button',{name:'Add paired browser test',exact:true}).waitFor();
+  if(process.env.GALLERY_QA_SCREENSHOT) await manager.screenshot({path:process.env.GALLERY_QA_SCREENSHOT});
+  await manager.getByRole('button',{name:'Close',exact:true}).click();
+  assert.equal(await append.getByRole('checkbox',{name:'Load positive prompt',exact:true}).isChecked(),true);
+  await append.getByRole('button',{name:'Cancel',exact:true}).click();
+  // Reopening uses persisted association; it must not reload the entire source prompt.
+  await page.getByAltText('study-1.png',{exact:true}).click({button:'right'});
+  await page.getByRole('menuitem',{name:'Append to Image Source (1)',exact:true}).click();
+  await append.getByText('Image prefix paired · selected terms are enabled below',{exact:true}).waitFor();
+  assert.equal(await append.getByRole('checkbox',{name:'Load positive prompt',exact:true}).isChecked(),true);
+  await append.getByRole('button',{name:'Append to workflow',exact:true}).click();
+  const editor=page.getByRole('dialog',{name:'Gallery Image Source',exact:true}); await editor.waitFor();
+  const image=await page.evaluate(()=>JSON.parse(window.qaNodes.find(n=>n.comfyClass==='GalleryImageSource').widgets.find(w=>w.name==='sources').value).images[0]);
+  assert.equal(image.prompt.positive,'standing, dress'); assert(image.metadata.gallery_prefix.id);
+  await editor.getByRole('button',{name:'Cancel',exact:true}).click();
+  // A native editable conditioning node gets the same manager and manual editing.
+  await page.evaluate(()=>{ const n={comfyClass:'GalleryPromptEncode',title:'Positive',widgets:[{name:'text',value:'old text',inputEl:{readOnly:true,value:'old text'}},{name:'Open prompt library'}],properties:{},setDirtyCanvas(){}}; window.comfyAPI.app.app.graph.add(n);window.qaExtension.nodeCreated(n);window.qaEncoder=n; });
+  await page.waitForFunction(()=>typeof window.qaEncoder.widgets[1].callback==='function');
+  await page.evaluate(()=>window.qaEncoder.widgets[1].callback());
+  await manager.getByRole('textbox',{name:'Editable node prompt',exact:true}).fill('manually edited, blue eyes');
+  await manager.getByRole('button',{name:'Apply edited text to node',exact:true}).click();
+  assert.equal(await page.evaluate(()=>window.qaEncoder.widgets[0].value),'manually edited, blue eyes');
+  assert.equal(await page.evaluate(()=>window.qaEncoder.widgets[0].inputEl.readOnly),false);
+  await manager.getByRole('button',{name:'Close',exact:true}).click();
+  // Delete in the viewer advances instead of closing, and selection remains shared.
+  await page.route('**/Gallery/delete',route=>route.fulfill({json:{}}));
+  await page.getByAltText('study-4.png',{exact:true}).click();
+  const viewer=page.getByRole('dialog',{name:/Gallery viewer/});
+  await viewer.getByRole('button',{name:'Delete',exact:true}).click();
+  await page.getByRole('dialog',{name:'Delete 1 local file(s)?',exact:true}).getByRole('button',{name:'Delete permanently',exact:true}).click();
+  await viewer.getByAltText('Viewing study-3.png',{exact:true}).waitFor();
+  await viewer.getByRole('checkbox',{name:'Selected',exact:true}).click();
+  await viewer.getByRole('button',{name:'Show in grid',exact:true}).click();
+  assert.equal(await page.getByRole('checkbox',{name:'Select study-3.png',exact:true}).isChecked(),true);
+  await page.getByRole('checkbox',{name:'Select study-3.png',exact:true}).click();
+  // Real synthetic WebM: closing the preview must stop and detach playback.
+  const bytes=require('node:fs').readFileSync(require('node:path').join(__dirname,'fixtures/viewer.webm'));
+  await page.route('**/Gallery/hydrus/search',async route=>{const response=await route.fetch();const result=await response.json();result.items=[{...result.items[0],mime:'video/webm'}];result.total=1;await route.fulfill({json:result});});
+  await page.route('**/Gallery/hydrus/original?**',route=>route.fulfill({contentType:'video/webm',body:Buffer.from(bytes)}));
+  await page.getByText('Hydrus',{exact:true}).click(); await page.getByRole('button',{name:'Search',exact:true}).click();
+  await page.locator('[data-gallery-entry^="hydrus:"] img').first().click();
+  await viewer.locator('video').waitFor();
+  await page.evaluate(async()=>{window.qaVideo=document.querySelector('.cg-viewer video');window.qaVideo.loop=true;await window.qaVideo.play();});
+  assert.equal(await page.evaluate(()=>window.qaVideo.paused),false);
+  await viewer.getByRole('button',{name:'Close',exact:true}).click();
+  await page.waitForFunction(()=>window.qaVideo.paused && !window.qaVideo.isConnected);
+  assert.deepEqual(errors,[]);
+  console.log('PASS palette/favorites, image-prefix persistence, editable encoder UI, viewer delete/selection and real video playback cleanup.');
+ }catch(error){console.log(await page.locator('body').innerText());throw error;}finally{await browser.close();}
+})().catch(error=>{console.error(error);process.exit(1);});

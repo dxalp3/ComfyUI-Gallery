@@ -1,12 +1,12 @@
 import { getComfyApp } from './ComfyAppApi';
-export type PrefixLibrary = { version: number; tags: { id: string; name: string; text: string }[]; prefixes: { id: string; name: string; tags: string[] }[] };
+export type PrefixLibrary = { version: number; associations?: Record<string, { prefix_id: string; terms: string[] }>; tags: { id: string; name: string; text: string }[]; prefixes: { id: string; name: string; tags: string[] }[] };
 async function api() {
     const current = (window as any).comfyAPI?.api?.api || getComfyApp()?.api;
     if (current?.fetchApi) return current;
     try { return (await import(/* @vite-ignore */ `${location.origin}/scripts/api.js`)).api; } catch { return current; }
 }
 export const PREFIX_MANAGER_EVENT = 'gallery-prefix-manager';
-export type PrefixSeed = { name?: string; positive?: string[]; negative?: string[]; hydrus?: string[]; node?: any };
+export type PrefixSeed = { name?: string; positive?: string[]; negative?: string[]; hydrus?: string[]; node?: any; imageKeys?: string[]; onSaved?: (terms: string[], prefixId: string) => void };
 export function openPrefixManager(seed: PrefixSeed = {}) { window.dispatchEvent(new CustomEvent(PREFIX_MANAGER_EVENT, { detail: seed })); }
 export type SharedLibrary = PrefixLibrary & { revision?: string };
 async function request(body?: unknown): Promise<{ library: PrefixLibrary; revision: string }> {
@@ -52,8 +52,8 @@ export function expandSearchTerms(library: PrefixLibrary, value: string): string
         prefix.tags.map(id => library.tags.find(tag => tag.id === id)?.text).filter(Boolean).join(', ') === text);
     return compound ? Array.from(new Set(text.split(/[,\n]+/).map(term => term.trim()).filter(Boolean).map(term => (excluded ? '-' : '') + term))) : [value];
 }
-export async function savePrefix(name: string, values: string[], revision?: string) {
-    const result = await request({ action: 'save', name, terms: values, revision: revision || (await loadPrefixes()).revision });
+export async function savePrefix(name: string, values: string[], revision?: string, imageKeys?: string[]) {
+    const result = await request({ action: 'save', name, terms: values, image_keys: imageKeys || [], revision: revision || (await loadPrefixes()).revision });
     localStorage.setItem('comfy.prompt-library.v2', JSON.stringify(result.library));
     changed();
     return 'Saved to shared Prompt Library';
@@ -63,15 +63,17 @@ export async function deletePrefix(id: string, revision: string) {
     localStorage.setItem('comfy.prompt-library.v2', JSON.stringify(result.library));
     changed();
 }
-const isPrefixNode = (node: any) => ['TagPrefixPromptLibrary', 'GalleryPromptLibrary'].includes(node?.comfyClass || node?.type || node?.constructor?.comfyClass);
+const isPrefixNode = (node: any) => ['TagPrefixPromptLibrary', 'GalleryPromptLibrary', 'GalleryPromptEncode'].includes(node?.comfyClass || node?.type || node?.constructor?.comfyClass);
 export function applyLibraryPrefix(node: any, library: PrefixLibrary, id: string, text?: string) {
-    const widget = node?.widgets?.find((value: any) => value.name === 'prefix');
+    const widget = node?.widgets?.find((value: any) => value.name === 'prefix' || value.name === 'text');
     const prefix = library.prefixes.find(value => value.id === id);
     if (!widget || !prefix || !node.graph) throw new Error('The Prompt Library node is no longer in the workflow.');
     node.graph.beforeChange?.();
     try {
         node.properties ||= {}; node.properties.prompt_library_selected_prefix = id;
+        if (widget.inputEl) widget.inputEl.readOnly = false;
         widget.value = text ?? expandPrefix(library, '@' + prefix.name).join(', ');
+        if (widget.inputEl) widget.inputEl.value = widget.value;
         widget.callback?.(widget.value); node.setDirtyCanvas?.(true, true);
     } finally { node.graph.afterChange?.(); }
 }
@@ -80,9 +82,23 @@ export function installPrefixWidgets(node: any) {
     // Other node packages run their creation hook too. Replace only this known
     // manager button once those hooks have installed it; leave its STRING output intact.
     setTimeout(() => {
+        const prompt = node.widgets?.find((widget: any) => ['prefix', 'text'].includes(widget.name));
+        if (prompt?.inputEl) { prompt.inputEl.readOnly = false; prompt.inputEl.disabled = false; }
         const existing = node.widgets?.find((widget: any) => widget.name === 'Open prompt library');
         const open = () => openPrefixManager({ node });
         if (existing) existing.callback = open;
         else node.addWidget?.('button', 'Open prompt library', null, open, { serialize: false });
     }, 0);
+}
+
+export function imagePrefixKeys(entry: { hash?: string; local?: { url: string } }, root: string): string[] {
+    return [...(entry.hash ? ['sha256:' + entry.hash] : []), ...(entry.local ? ['local:' + root + ':' + entry.local.url] : [])];
+}
+
+export function writeLibraryNodeText(node: any, text: string) {
+    const widget = node?.widgets?.find((value: any) => value.name === 'prefix' || value.name === 'text');
+    if (!widget || !node.graph) throw new Error('The prompt node is no longer in the workflow.');
+    node.graph.beforeChange?.();
+    try { widget.value = text; if (widget.inputEl) { widget.inputEl.value = text; widget.inputEl.readOnly = false; } widget.callback?.(text); node.setDirtyCanvas?.(true, true); }
+    finally { node.graph.afterChange?.(); }
 }
