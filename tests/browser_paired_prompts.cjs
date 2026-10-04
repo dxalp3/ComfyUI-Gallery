@@ -1,0 +1,41 @@
+const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
+const assert=require('node:assert/strict');
+(async()=>{const browser=await chromium.launch({executablePath:process.env.CHROME_PATH,headless:true});const page=await browser.newPage({viewport:{width:1550,height:1100}});const errors=[];page.on('pageerror',e=>errors.push(e.message));
+try {
+ await page.goto('http://127.0.0.1:8191');await page.getByRole('tab',{name:'Gallery workspace',exact:true}).click();
+ await page.getByAltText('study-1.png',{exact:true}).click({button:'right'});await page.getByRole('menuitem',{name:'Append to Image Source (1)',exact:true}).click();
+ const append=page.getByRole('dialog',{name:'Append images and prompts',exact:true});await append.getByRole('button',{name:'Create prefix from this image',exact:true}).click();
+ const manager=page.getByRole('dialog',{name:'Prompts & prefixes',exact:true});await manager.getByRole('button',{name:'Clear draft terms',exact:true}).click();
+ await manager.getByRole('textbox',{name:'Prefix name',exact:true}).fill('paired polarity');
+ const positive=manager.getByRole('combobox',{name:'Prefix tags',exact:true});await positive.fill('standing');await positive.press('Enter');await positive.press('Escape');
+ const negative=manager.getByRole('combobox',{name:'Negative prefix tags',exact:true});await negative.fill('blurry');await negative.press('Enter');await negative.press('Escape');
+ const save=page.waitForResponse(r=>r.url().endsWith('/Gallery/prefixes')&&r.request().method()==='POST');await manager.getByRole('button',{name:'Save prefix',exact:true}).click();assert.equal((await save).status(),200);
+ await manager.locator('summary').filter({hasText:'Associated images'}).first().click();
+ const linked=manager.locator('a[title="Open associated original image"]').first();await linked.waitFor();assert.match(await linked.getAttribute('href'),/study-1.png/);await linked.locator('img').evaluate(img=>img.decode());
+ await manager.getByRole('button',{name:'Close',exact:true}).click();assert(await append.getByRole('checkbox',{name:'Load negative prompt',exact:true}).isChecked());
+ await append.getByRole('button',{name:'Cancel',exact:true}).click();
+ await page.getByAltText('study-1.png',{exact:true}).click({button:'right'});await page.getByRole('menuitem',{name:'Append to Image Source (1)',exact:true}).click();
+ await append.getByText('Image prefix paired · selected terms are enabled below',{exact:true}).waitFor();assert(await append.getByRole('checkbox',{name:'Load negative prompt',exact:true}).isChecked());
+ await append.getByRole('button',{name:'Append to workflow',exact:true}).click();const editor=page.getByRole('dialog',{name:'Gallery Image Source',exact:true});await editor.waitFor();await editor.getByRole('button',{name:'Cancel',exact:true}).click();
+ const actual=await page.evaluate(()=>JSON.parse(window.qaNodes.find(n=>n.comfyClass==='GalleryImageSource').widgets.find(w=>w.name==='sources').value).images[0].prompt);assert.equal(actual.negative,'blurry');assert.equal(actual.positive,'standing');
+ await page.getByRole('button',{name:'Workflow',exact:true}).click();
+ await page.evaluate(()=>{
+  const graph=window.comfyAPI.app.app.graph;const source=graph._nodes.find(n=>n.comfyClass==='GalleryImageSource');window.qaSource=source;
+  const widget=source.widgets.find(w=>w.name==='sources');const manifest=JSON.parse(widget.value);manifest.images.push({...manifest.images[0],title:'second reference',prompt:{positive:'sitting',negative:'watermark',tags:[]}});widget.value=JSON.stringify(manifest);source.__galleryRefreshPreview();
+  graph.links={901:{origin_id:source.id,origin_slot:4},902:{origin_id:source.id,origin_slot:5}};
+  for(const [name,link] of [['Positive',901],['Negative',902]]){const node={comfyClass:'GalleryPromptEncode',title:name,widgets:[{name:'text',value:'fallback '+name.toLowerCase()}],inputs:[{name:'source_text',link}],properties:{},setDirtyCanvas(){},addWidget(type,name,value,callback){this.widgets.push({type,name,value,callback});},addDOMWidget(name,type,element){element.dataset.encoder=name;document.querySelector('#qa-node-previews').append(element);return {name,type};}};graph.add(node);window.qaExtension.nodeCreated(node);}
+ });
+ await page.waitForFunction(()=>document.querySelectorAll('textarea[aria-label="Effective encoder prompt"]').length===2);
+ const effective=page.getByRole('textbox',{name:'Effective encoder prompt',exact:true});assert.equal(await effective.nth(0).inputValue(),'standing');assert.equal(await effective.nth(1).inputValue(),'blurry');
+ await page.getByRole('button',{name:'Use image 2: second reference',exact:true}).click();
+ assert.equal(await effective.nth(0).inputValue(),'sitting');assert.equal(await effective.nth(1).inputValue(),'watermark');
+ assert.equal(await page.evaluate(()=>JSON.parse(window.qaSource.widgets.find(w=>w.name==='sources').value).active_index),1);
+ await page.evaluate(()=>{const nodes=window.qaNodes.filter(n=>n.comfyClass==='GalleryPromptEncode');nodes.forEach(n=>{n.inputs[0].link=null;n.onConnectionsChange();});});
+ await page.waitForFunction(()=>document.querySelector('textarea[aria-label="Effective encoder prompt"]').value==='fallback positive');assert.equal(await effective.nth(1).inputValue(),'fallback negative');
+ await page.getByRole('tab',{name:'Gallery workspace',exact:true}).click();await page.getByRole('button',{name:'Prompts & prefixes',exact:true}).click();
+ await manager.getByRole('combobox',{name:'Prompt vocabulary',exact:true}).press('ArrowDown');await page.locator('.ant-select-dropdown:visible').getByTitle('library',{exact:true}).click();
+ await manager.getByRole('textbox',{name:'Find indexed prompt',exact:true}).fill('paired polarity');
+ await manager.getByRole('button',{name:'Negative: blurry',exact:true}).click();
+ await page.waitForFunction(()=>document.querySelector('.cg-search')?.textContent.includes('blurry'));
+ assert.deepEqual(errors,[]);console.log('PASS negative pairing/reload, associated thumbnail links, individual tag search, active thumbnail selection, connected prompt display and fallback restoration.');
+}catch(e){console.log(await page.locator('body').innerText());throw e;}finally{await browser.close();}})().catch(e=>{console.error(e);process.exit(1)});

@@ -71,7 +71,7 @@ def parse_manifest(value):
     layout = value.get("layout", "single")
     if layout not in ("single", "horizontal", "vertical", "grid"):
         raise ImageSourceError("Choose a single, horizontal, vertical, or grid layout.")
-    result = {"version": 1, "images": [], "layout": layout,
+    result = {"version": 1, "images": [], "layout": layout, "active_index": _integer(value.get("active_index", 0), "Active image", 0, len(images) - 1),
               "columns": _integer(value.get("columns", 2), "Grid columns", 1, MAX_IMAGES),
               "gap": _integer(value.get("gap", 0), "Image gap", 0, 4096),
               "background": value.get("background", "#ffffff")}
@@ -167,7 +167,7 @@ def plan_composition(manifest, input_root):
             raise ImageSourceError("An input image changed while reading; please retry.")
         inspected.append(Source(path, before, box, box[2] - box[0], box[3] - box[1]))
     layout, gap = manifest["layout"], manifest["gap"]
-    sources = inspected[:1] if layout == "single" else inspected
+    sources = [inspected[manifest["active_index"]]] if layout == "single" else inspected
     columns = (len(sources) if layout == "horizontal" else 1 if layout in ("single", "vertical")
                else min(manifest["columns"], len(sources)))
     rows = (len(sources) + columns - 1) // columns
@@ -237,6 +237,11 @@ def preview_composition(manifest, input_root):
         image.close()
 
 
+def source_prompts(manifest):
+    images = manifest['images'][manifest['active_index']:manifest['active_index'] + 1] if manifest['layout'] == 'single' else manifest['images']
+    return tuple(', '.join(str(item.get('prompt', {}).get(side, '')) for item in images if item.get('prompt', {}).get(side)) for side in ('positive', 'negative'))
+
+
 class GalleryImageSource:
     CATEGORY = "image/gallery"
     RETURN_TYPES = ("IMAGE", "MASK", "INT", "INT", "STRING", "STRING", "STRING")
@@ -283,8 +288,7 @@ class GalleryImageSource:
             rgb = torch.from_numpy(pixels[:, :, :3].copy()).unsqueeze(0)
             mask = torch.from_numpy(1.0 - pixels[:, :, 3]).unsqueeze(0)
             manifest = parse_manifest(sources)
-            def text(side):
-                return ', '.join(str(item.get('prompt', {}).get(side, '')) for item in manifest['images'] if item.get('prompt', {}).get(side))
-            return rgb, mask, plan.width, plan.height, text('positive'), text('negative'), json.dumps(manifest['images'], ensure_ascii=False)
+            positive, negative = source_prompts(manifest)
+            return rgb, mask, plan.width, plan.height, positive, negative, json.dumps(manifest['images'], ensure_ascii=False)
         finally:
             image.close()

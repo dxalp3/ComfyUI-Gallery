@@ -1,12 +1,14 @@
+import { sourcePrompt } from './ImageSourceGeometry';
 import { getComfyApp } from './ComfyAppApi';
-export type PrefixLibrary = { version: number; associations?: Record<string, { prefix_id: string; terms: string[] }>; tags: { id: string; name: string; text: string }[]; prefixes: { id: string; name: string; tags: string[] }[] };
+export type PrefixImage = { name?: string; local_url?: string; root?: string; hash?: string };
+export type PrefixLibrary = { version: number; associations?: Record<string, { prefix_id: string; terms: string[]; negative_terms?: string[]; image?: PrefixImage }>; tags: { id: string; name: string; text: string }[]; prefixes: { id: string; name: string; tags: string[]; negative_terms?: string[] }[] };
 async function api() {
     const current = (window as any).comfyAPI?.api?.api || getComfyApp()?.api;
     if (current?.fetchApi) return current;
     try { return (await import(/* @vite-ignore */ `${location.origin}/scripts/api.js`)).api; } catch { return current; }
 }
 export const PREFIX_MANAGER_EVENT = 'gallery-prefix-manager';
-export type PrefixSeed = { name?: string; positive?: string[]; negative?: string[]; hydrus?: string[]; node?: any; imageKeys?: string[]; onSaved?: (terms: string[], prefixId: string) => void };
+export type PrefixSeed = { name?: string; positive?: string[]; negative?: string[]; hydrus?: string[]; node?: any; imageKeys?: string[]; imageRefs?: Record<string, PrefixImage>; onSaved?: (terms: string[], prefixId: string, negativeTerms: string[]) => void };
 export function openPrefixManager(seed: PrefixSeed = {}) { window.dispatchEvent(new CustomEvent(PREFIX_MANAGER_EVENT, { detail: seed })); }
 export type SharedLibrary = PrefixLibrary & { revision?: string };
 async function request(body?: unknown): Promise<{ library: PrefixLibrary; revision: string }> {
@@ -52,8 +54,8 @@ export function expandSearchTerms(library: PrefixLibrary, value: string): string
         prefix.tags.map(id => library.tags.find(tag => tag.id === id)?.text).filter(Boolean).join(', ') === text);
     return compound ? Array.from(new Set(text.split(/[,\n]+/).map(term => term.trim()).filter(Boolean).map(term => (excluded ? '-' : '') + term))) : [value];
 }
-export async function savePrefix(name: string, values: string[], revision?: string, imageKeys?: string[]) {
-    const result = await request({ action: 'save', name, terms: values, image_keys: imageKeys || [], revision: revision || (await loadPrefixes()).revision });
+export async function savePrefix(name: string, values: string[], revision?: string, imageKeys?: string[], negativeTerms?: string[], imageRefs?: Record<string, PrefixImage>) {
+    const result = await request({ action: 'save', name, terms: values, image_keys: imageKeys || [], negative_terms: negativeTerms, image_refs: imageRefs || {}, revision: revision || (await loadPrefixes()).revision });
     localStorage.setItem('comfy.prompt-library.v2', JSON.stringify(result.library));
     changed();
     return 'Saved to shared Prompt Library';
@@ -84,6 +86,7 @@ export function installPrefixWidgets(node: any) {
     setTimeout(() => {
         const prompt = node.widgets?.find((widget: any) => ['prefix', 'text'].includes(widget.name));
         if (prompt?.inputEl) { prompt.inputEl.readOnly = false; prompt.inputEl.disabled = false; }
+        installEffectivePrompt(node);
         const existing = node.widgets?.find((widget: any) => widget.name === 'Open prompt library');
         const open = () => openPrefixManager({ node });
         if (existing) existing.callback = open;
@@ -101,4 +104,38 @@ export function writeLibraryNodeText(node: any, text: string) {
     node.graph.beforeChange?.();
     try { widget.value = text; if (widget.inputEl) { widget.inputEl.value = text; widget.inputEl.readOnly = false; } widget.callback?.(text); node.setDirtyCanvas?.(true, true); }
     finally { node.graph.afterChange?.(); }
+}
+
+export function imagePrefixRefs(entry: { name?: string; hash?: string; local?: { url: string } }, root: string): Record<string, PrefixImage> {
+    return Object.fromEntries(imagePrefixKeys(entry, root).map(key => [key, { name: entry.name || '', ...(entry.hash ? { hash: entry.hash } : {}), ...(entry.local ? { local_url: entry.local.url, root } : {}) }]));
+}
+
+export function effectiveSourceText(node: any): string | undefined {
+    const input = node.inputs?.find((input: any) => input.name === 'source_text');
+    if (input?.link == null) return undefined;
+    const graph = node.graph || getComfyApp()?.graph;
+    const link = graph?.links?.get?.(input.link) || graph?.links?.[input.link];
+    let source = graph?.getNodeById?.(link?.origin_id) || graph?._nodes?.find((value: any) => value.id === link?.origin_id);
+    if ((source?.comfyClass || source?.type) === 'GalleryImageSource' && [4, 5].includes(link?.origin_slot)) {
+        try { return sourcePrompt(JSON.parse(source.widgets.find((value: any) => value.name === 'sources').value), link.origin_slot === 4 ? 'positive' : 'negative'); } catch { return 'Source settings unavailable'; }
+    }
+    return node.__galleryRuntimePrompt ?? 'Connected prompt will be shown after execution.';
+}
+function installEffectivePrompt(node: any) {
+    if ((node.comfyClass || node.type) !== 'GalleryPromptEncode' || node.__galleryEffectiveInstalled || !node.addDOMWidget) return;
+    node.__galleryEffectiveInstalled = true;
+    const box = document.createElement('div');
+    const label = document.createElement('div'); const text = document.createElement('textarea');
+    text.readOnly = true; text.setAttribute('aria-label', 'Effective encoder prompt');
+    text.style.cssText = 'width:100%;height:100px;box-sizing:border-box;resize:vertical;background:var(--comfy-input-bg,#222);color:var(--input-text,#ddd)';
+    box.append(label, text);
+    const refresh = () => { if (!node.inputs?.some((input: any) => input.name === 'source_text')) node.addInput?.('source_text', 'STRING'); const incoming = effectiveSourceText(node); label.textContent = incoming === undefined ? 'Effective prompt · editable fallback' : 'Effective prompt · connected source'; text.value = incoming ?? node.widgets?.find((value: any) => value.name === 'text')?.value ?? ''; };
+    const dom = node.addDOMWidget('effective_prompt', 'effective_prompt', box, { serialize: false, getHeight: () => 125 }); if (dom) dom.serialize = false;
+    const widget = node.widgets?.find((value: any) => value.name === 'text'); const callback = widget?.callback;
+    if (widget) widget.callback = function (...args: any[]) { const result = callback?.apply(this, args); refresh(); return result; };
+    for (const key of ['onConnectionsChange', 'onConfigure']) { const previous = node[key]; node[key] = function (...args: any[]) { node.__galleryRuntimePrompt = undefined; const result = previous?.apply(this, args); setTimeout(refresh, 0); return result; }; }
+    const executed = node.onExecuted; node.onExecuted = function (data: any) { const result = executed?.call(this, data); if (Array.isArray(data?.effective_prompt)) node.__galleryRuntimePrompt = data.effective_prompt[0]; refresh(); return result; };
+    window.addEventListener('gallery-source-changed', refresh);
+    const removed = node.onRemoved; node.onRemoved = function (...args: any[]) { window.removeEventListener('gallery-source-changed', refresh); return removed?.apply(this, args); };
+    refresh(); node.setSize?.([Math.max(320, node.size?.[0] || 320), Math.max(node.size?.[1] || 0, node.computeSize?.()[1] || 280)]);
 }

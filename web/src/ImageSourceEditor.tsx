@@ -41,7 +41,7 @@ export function ImageSourceEditor({ open, manifest, onApply, onClose, onBrowse }
     const canApply = draft.images.length <= 32;
 
     useEffect(() => {
-        if (open) { setDraft(cloneManifest(manifest)); setSelected(index => Math.min(index, Math.max(0, manifest.images.length - 1))); }
+        if (open) { setDraft(cloneManifest(manifest)); setSelected(Math.min(manifest.active_index || 0, Math.max(0, manifest.images.length - 1))); }
         drag.current = null; setDragCrop(undefined);
     }, [open, incoming]);
 
@@ -82,12 +82,13 @@ export function ImageSourceEditor({ open, manifest, onApply, onClose, onBrowse }
         setDraft(previous => {
             const images = previous.images.slice();
             [images[index], images[destination]] = [images[destination], images[index]];
-            return { ...previous, images };
+            const active = previous.active_index || 0;
+            return { ...previous, images, active_index: active === index ? destination : active === destination ? index : active };
         });
         setSelected(previous => previous === index ? destination : previous === destination ? index : previous);
     };
     const remove = (index: number) => {
-        setDraft(previous => ({ ...previous, images: previous.images.filter((_, at) => at !== index) }));
+        setDraft(previous => ({ ...previous, images: previous.images.filter((_, at) => at !== index), active_index: Math.max(0, (previous.active_index || 0) > index ? (previous.active_index || 0) - 1 : Math.min(previous.active_index || 0, previous.images.length - 2)) }));
         setSelected(previous => Math.max(0, previous > index ? previous - 1 : Math.min(previous, draft.images.length - 2)));
     };
     const point = (event: PointerEvent<HTMLDivElement>) => {
@@ -162,7 +163,7 @@ export function ImageSourceEditor({ open, manifest, onApply, onClose, onBrowse }
                     <Typography.Title level={5} style={{ marginTop: 0 }}>Sources in output order</Typography.Title>
                     <div className="gallery-source-list" aria-label="Image source list">
                         {draft.images.map((image, index) => <div className={`gallery-source-item${selected === index ? ' active' : ''}`} key={`${index}:${image.input_name}`}>
-                            <button className="gallery-source-pick" type="button" aria-pressed={selected === index} aria-label={`Edit image ${index + 1}: ${image.title || describe(image.input_name)}`} onClick={() => setSelected(index)}>
+                            <button className="gallery-source-pick" type="button" aria-pressed={selected === index} aria-label={`Edit image ${index + 1}: ${image.title || describe(image.input_name)}`} onClick={() => { setSelected(index); setDraft(previous => ({ ...previous, active_index: index })); }}>
                                 <img src={`/Gallery/source/thumbnail?url=${encodeURIComponent(`/static_gallery/${image.input_name}`)}`} loading="lazy" alt="" />
                                 <span style={{ overflowWrap: 'anywhere', lineHeight: 1.4 }}><strong>{index + 1}.</strong> {image.title || describe(image.input_name)}{image.crop && <small style={{ display: 'block' }}>Cropped</small>}</span>
                             </button>
@@ -193,11 +194,11 @@ export function ImageSourceEditor({ open, manifest, onApply, onClose, onBrowse }
                     </>}
                     <Typography.Title level={5} style={{ margin: '20px 0 10px' }}>Combine images</Typography.Title>
                     <Space wrap align="end">
-                        <label style={{ display: 'grid', gap: 4 }}><span>Layout</span><Select aria-label="Composition layout" value={draft.layout} onChange={layout => setDraft(previous => ({ ...previous, layout }))} style={{ width: 205 }} options={[{ value: 'single', label: 'Single — first image' }, { value: 'horizontal', label: 'Stitch horizontally' }, { value: 'vertical', label: 'Stitch vertically' }, { value: 'grid', label: 'Grid' }]} /></label>
+                        <label style={{ display: 'grid', gap: 4 }}><span>Layout</span><Select aria-label="Composition layout" value={draft.layout} onChange={layout => setDraft(previous => ({ ...previous, layout }))} style={{ width: 205 }} options={[{ value: 'single', label: 'Single — selected image' }, { value: 'horizontal', label: 'Stitch horizontally' }, { value: 'vertical', label: 'Stitch vertically' }, { value: 'grid', label: 'Grid' }]} /></label>
                         {draft.layout === 'grid' && <label style={{ display: 'grid', gap: 4 }}><span>Columns</span><InputNumber aria-label="Grid columns" min={1} max={32} precision={0} value={draft.columns} onChange={value => setDraft(previous => ({ ...previous, columns: value || 1 }))} /></label>}
                         {draft.layout !== 'single' && <><label style={{ display: 'grid', gap: 4 }}><span>Gap (px)</span><InputNumber aria-label="Stitch gap" min={0} max={4096} precision={0} value={draft.gap} onChange={value => setDraft(previous => ({ ...previous, gap: value || 0 }))} /></label><label style={{ display: 'grid', gap: 4 }}><span>Background</span><input aria-label="Stitch background" type="color" value={draft.background} onChange={event => setDraft(previous => ({ ...previous, background: event.target.value }))} style={{ height: 32, width: 60, cursor: 'pointer' }} /></label></>}
                     </Space>
-                    {draft.layout === 'single' && draft.images.length > 1 && <Alert style={{ marginTop: 10 }} type="info" message="Single mode outputs only the first image. Choose a stitch layout to include every source." />}
+                    {draft.layout === 'single' && draft.images.length > 1 && <Alert style={{ marginTop: 10 }} type="info" message={`Single mode outputs image ${(draft.active_index || 0) + 1} and its prompts. Click a thumbnail to choose; stitch layouts include all sources.`} />}
                     <Typography.Title level={5} style={{ margin: '20px 0 8px' }}>Output preview</Typography.Title>
                     {previewError && <Alert showIcon type="error" message={previewError} style={{ marginBottom: 8 }} />}
                     <div className="gallery-source-stage" aria-live="polite" aria-busy={previewBusy}>

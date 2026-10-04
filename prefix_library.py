@@ -31,12 +31,21 @@ def validate(value):
     for row in result['prefixes']:
         if not isinstance(row.get('tags'), list) or any(not isinstance(tag, str) or tag not in tags for tag in row['tags']) or len(set(row['tags'])) != len(row['tags']):
             raise ValueError('A prefix refers to invalid tags.')
+        negatives = row.get('negative_terms', [])
+        if not isinstance(negatives, list) or len(negatives) > 500 or any(not isinstance(term, str) or len(term) > 1024 for term in negatives):
+            raise ValueError('Invalid negative prefix terms.')
     associations = value.get('associations', {})
     if not isinstance(associations, dict) or len(associations) > 50000:
         raise ValueError('Invalid image associations.')
     for key, item in associations.items():
         if not isinstance(key, str) or len(key) > 4096 or not isinstance(item, dict) or not isinstance(item.get('prefix_id'), str) or not isinstance(item.get('terms'), list) or len(item['terms']) > 500 or any(not isinstance(term, str) or len(term) > 1024 for term in item['terms']):
             raise ValueError('Invalid image association.')
+        negatives = item.get('negative_terms', [])
+        if not isinstance(negatives, list) or len(negatives) > 500 or any(not isinstance(term, str) or len(term) > 1024 for term in negatives):
+            raise ValueError('Invalid associated negative prompts.')
+        image = item.get('image')
+        if image is not None and (not isinstance(image, dict) or any(not isinstance(v, str) or len(v) > 4096 for v in image.values())):
+            raise ValueError('Invalid associated image reference.')
     if associations: result['associations'] = associations
     return result
 
@@ -69,8 +78,13 @@ def update(path, data):
             name, terms = data.get('name'), data.get('terms')
             if not isinstance(name, str) or not name.strip() or len(name) > 200:
                 raise ValueError('Enter a prefix name of up to 200 characters.')
-            if not isinstance(terms, list) or not 1 <= len(terms) <= 500 or any(not isinstance(term, str) or not term.strip() or len(term) > 1024 for term in terms):
+            if not isinstance(terms, list) or not 0 <= len(terms) <= 500 or any(not isinstance(term, str) or not term.strip() or len(term) > 1024 for term in terms):
                 raise ValueError('Choose 1–500 nonempty terms, each at most 1,024 characters.')
+            negatives = data.get('negative_terms')
+            if negatives is not None and (not isinstance(negatives, list) or len(negatives) > 500 or any(not isinstance(term, str) or not term.strip() or len(term) > 1024 for term in negatives)):
+                raise ValueError('Invalid negative prefix terms.')
+            if not terms and not negatives:
+                raise ValueError('Choose at least one positive or negative term.')
             name = name.strip()
             existing = next((p for p in library['prefixes'] if p['name'].casefold() == name.casefold()), None)
             ids = []
@@ -84,13 +98,17 @@ def update(path, data):
                 existing['tags'] = ids
             else:
                 library['prefixes'].append({'id': str(uuid.uuid4()), 'name': name, 'tags': ids})
+            saved = next(p for p in library['prefixes'] if p['name'].casefold() == name.casefold())
+            if negatives is not None: saved['negative_terms'] = list(dict.fromkeys(term.strip() for term in negatives))
+            references = data.get('image_refs', {})
+            if not isinstance(references, dict) or len(references) > 64: raise ValueError('Invalid image references.')
             image_keys = data.get('image_keys', [])
             if not isinstance(image_keys, list) or len(image_keys) > 64 or any(not isinstance(key, str) or not key or len(key) > 4096 for key in image_keys):
                 raise ValueError('Invalid image keys.')
             if image_keys:
                 saved = next(p for p in library['prefixes'] if p['name'].casefold() == name.casefold())
                 for key in image_keys:
-                    library.setdefault('associations', {})[key] = {'prefix_id': saved['id'], 'terms': list(dict.fromkeys(term.strip() for term in terms))}
+                    library.setdefault('associations', {})[key] = {'prefix_id': saved['id'], 'terms': list(dict.fromkeys(term.strip() for term in terms)), 'negative_terms': saved.get('negative_terms', []), **({'image': references[key]} if key in references else {})}
                 validate(library)
         else:
             raise ValueError('Invalid library action.')
@@ -160,14 +178,15 @@ class GalleryPromptEncode:
     """Editable prompt + shared library picker, compatible with standard CLIP conditioning."""
     @classmethod
     def INPUT_TYPES(cls):
-        return {'required': {'clip': ('CLIP',), 'text': ('STRING', {'multiline': True, 'dynamicPrompts': True, 'default': ''})}}
+        return {'required': {'clip': ('CLIP',), 'text': ('STRING', {'multiline': True, 'dynamicPrompts': True, 'default': ''})}, 'optional': {'source_text': ('STRING', {'forceInput': True})}}
 
     RETURN_TYPES = ('CONDITIONING', 'STRING')
     RETURN_NAMES = ('conditioning', 'text')
     FUNCTION = 'encode'
     CATEGORY = 'prompt/library'
 
-    def encode(self, clip, text):
+    def encode(self, clip, text, source_text=None):
         if clip is None:
             raise ValueError('Connect a CLIP text encoder to Gallery Prompt Encode.')
-        return (clip.encode_from_tokens_scheduled(clip.tokenize(text)), text)
+        effective = text if source_text is None else source_text
+        return {'ui': {'effective_prompt': [effective]}, 'result': (clip.encode_from_tokens_scheduled(clip.tokenize(effective)), effective)}

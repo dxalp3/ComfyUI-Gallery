@@ -29,7 +29,7 @@ export function saveSourceManifest(node: any, manifest: ImageSourceManifest, rec
     try {
         widget.value = JSON.stringify(manifest); widget.callback?.(widget.value);
         if (readSourceManifest(node).images.length !== manifest.images.length) throw new Error('ComfyUI did not retain the appended sources. Check this node’s sources input.');
-        node.__galleryRefreshPreview?.(); node.setDirtyCanvas?.(true, true);
+        node.__galleryRefreshPreview?.(); window.dispatchEvent(new CustomEvent('gallery-source-changed')); node.setDirtyCanvas?.(true, true);
     }
     finally { if (recordChange) graph.afterChange?.(); }
 }
@@ -83,13 +83,13 @@ export function installSourceWidgets(node: any) {
             try {
                 const manifest = readSourceManifest(node);
                 const label = document.createElement('div');
-                label.textContent = `${manifest.images.length} image(s) · ${manifest.layout}${manifest.layout === 'single' && manifest.images.length > 1 ? ' · output uses the first image' : ''}`;
+                label.textContent = `${manifest.images.length} image(s) · ${manifest.layout}${manifest.layout === 'single' && manifest.images.length > 1 ? ` · output image ${(manifest.active_index || 0) + 1} (click to choose)` : ''}`;
                 preview.append(label);
                 if (!manifest.images.length) { label.textContent = 'No images yet — append from Gallery.'; return; }
                 const grid = document.createElement('div');
                 grid.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap';
-                for (const image of manifest.images.slice(0, 8)) {
-                    const tile = document.createElement('div'); tile.style.cssText = `width:${manifest.images.length === 1 ? '100%' : 'calc(50% - 4px)'};min-width:80px`;
+                for (const [index, image] of manifest.images.entries()) {
+                    const tile = document.createElement('button'); tile.type = 'button'; tile.setAttribute('aria-label', `Use image ${index + 1}: ${image.title || image.input_name}`); tile.setAttribute('aria-pressed', String(index === (manifest.active_index || 0))); tile.onclick = () => saveSourceManifest(node, { ...manifest, active_index: index }); tile.style.cssText = `width:${manifest.images.length === 1 ? '100%' : 'calc(50% - 4px)'};min-width:80px;border:2px solid ${index === (manifest.active_index || 0) ? '#1677ff' : 'transparent'};background:transparent;color:inherit;cursor:pointer`;
                     const img = document.createElement('img');
                     img.src = '/Gallery/source/thumbnail?url=' + encodeURIComponent('/static_gallery/' + image.input_name);
                     img.alt = image.title || image.input_name; img.style.cssText = `width:100%;height:${manifest.images.length === 1 ? 165 : 75}px;object-fit:contain`;

@@ -102,6 +102,13 @@ function collectGraph(graph: Map<string, Node>): LocalPrompts {
             const node = graph.get(id);
             if (!node || visited[side].has(id)) return;
             visited[side].add(id);
+            if (node.type === 'GalleryPromptEncode' && node.inputs.source_text !== undefined) { collect(node.inputs.source_text, side, depth + 1); return; }
+            if (node.type === 'GalleryImageSource' && [4, 5].includes(Number(value[1]))) {
+                const manifest = object(node.inputs.sources ?? node.widgets?.[0]);
+                const images = Array.isArray(manifest.images) ? manifest.images : [];
+                const chosen = manifest.layout === 'single' ? images.slice(manifest.active_index || 0, (manifest.active_index || 0) + 1) : images;
+                chosen.forEach(image => collect(image.prompt?.[Number(value[1]) === 4 ? 'positive' : 'negative'] || '', side, depth + 1)); return;
+            }
             for (const [name, input] of Object.entries(node.inputs)) {
                 const branch = polarity(name);
                 if (branch ? branch === side : isPromptInput(name, node.type) || /reroute/i.test(node.type)) collect(input, side, depth + 1);

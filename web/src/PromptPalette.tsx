@@ -1,3 +1,4 @@
+import { PrefixImages } from './PrefixImages';
 import { useEffect, useState } from 'react';
 import { Alert, Button, Checkbox, Input, Select, Space, Tabs, Typography } from 'antd';
 import { hydrusRequest } from './HydrusApi';
@@ -6,7 +7,7 @@ import { expandPrefix, loadPrefixes, type SharedLibrary } from './PrefixLibrary'
 type Vocabulary = { items: { name: string; count: number }[]; total: number; categories: { value: string; label: string; count: number; source: string }[] };
 const FAVORITES = 'gallery-vocabulary-favorites';
 /** An explicit browseable vocabulary, separate from autocomplete suggestions. */
-export function PromptPalette({ onChoose }: { onChoose: (terms: string[], prefixId?: string) => void }) {
+export function PromptPalette({ onChoose, onSearch }: { onChoose: (terms: string[], prefixId?: string, negativeTerms?: string[]) => void; onSearch?: (terms: string[]) => void }) {
     const [tab, setTab] = useState('tags');
     const [query, setQuery] = useState('');
     const [category, setCategory] = useState('');
@@ -43,7 +44,8 @@ export function PromptPalette({ onChoose }: { onChoose: (terms: string[], prefix
         <div style={{ maxHeight: 235, overflowY: 'auto', marginTop: 8 }} aria-busy={busy}>
             {rows.map(row => <div key={row.key} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0' }}>
                 <Button size="small" aria-label={'Favorite ' + row.label} aria-pressed={favorites.includes(row.key)} onClick={() => favorite(row.key)}>{favorites.includes(row.key) ? '★' : '☆'}</Button>
-                <Button size="small" disabled={busy && tab === 'tags'} onClick={() => onChoose(row.terms, row.prefixId)} aria-label={'Add ' + row.label}>{row.label.replace(/_/g, ' ')}</Button>
+                <Button size="small" disabled={busy && tab === 'tags'} onClick={() => onChoose(row.terms, row.prefixId, library.prefixes.find(prefix => prefix.id === row.prefixId)?.negative_terms)} aria-label={'Add ' + row.label}>{row.label.replace(/_/g, ' ')}</Button>
+                {onSearch && <Button size="small" onClick={() => onSearch(row.terms)} aria-label={'Search local for ' + row.label}>Search</Button>}{row.prefixId && <PrefixImages library={library} prefixId={row.prefixId} />}
                 <Typography.Text type="secondary" style={{ overflowWrap: 'anywhere' }}>{row.detail}</Typography.Text>
             </div>)}
             {!rows.length && !busy && <Typography.Text type="secondary">No matches. Create a prefix below or change the filters.</Typography.Text>}

@@ -1,3 +1,17 @@
+# Paired negative prompts and connected encoders — hydrus.14 (2026-10-04)
+
+- Backend: **104 passed, 2 skipped** (106 tests), including selected-image pixels,
+  matching positive/negative output, negative association persistence, and connected
+  text overriding fallback even when empty. Existing Windows symlink skips remain.
+- JavaScript: **31 passed**, including prompt indexing through connected encoders.
+- TypeScript and production build pass; existing Vite warnings remain.
+- New Chrome coverage checks associated thumbnail links, per-tag searches,
+  negative pairing after reopening append, clicking the second source thumbnail,
+  both encoder displays updating immediately, and fallback restoration on disconnect.
+- Existing Image Source Chrome regression passes, including crop/stitch and standalone-tab append.
+- Browser tests use synthetic media,
+  a simulated ComfyUI graph, and mock CLIP; no installed/GPU workflow was executed.
+
 # Categories, conditioning, associations and viewer lifecycle — hydrus.13 (2026-10-04)
 
 - Backend: **101 passed, 2 skipped** (103 tests); existing Windows symlink skips.

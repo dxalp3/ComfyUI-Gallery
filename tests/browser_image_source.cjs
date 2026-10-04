@@ -21,6 +21,8 @@ const assert = require('node:assert/strict');
         await page.getByRole('button', { name: 'Append to Image Source (3)', exact: true }).click();
         await page.getByRole('button', { name: 'Append to workflow', exact: true }).click();
         await page.getByRole('dialog', { name: 'Gallery Image Source', exact: true }).getByRole('button', { name: 'Cancel', exact: true }).click();
+        await page.getByRole('dialog', { name: 'Append images and prompts', exact: true }).waitFor({state:'hidden'});
+        await page.getByRole('dialog', { name: 'Gallery Image Source', exact: true }).waitFor({state:'hidden'});
         await page.waitForFunction(() => window.qaNodes.length === 1 && JSON.parse(window.qaNodes[0].widgets[0].value).images.length === 3);
         assert.equal(await page.evaluate(() => window.qaNodes[0].type), 'GalleryImageSource');
         assert.equal((await value()).images.length, 3);

@@ -13,7 +13,7 @@ from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from image_source import (GalleryImageSource, ImageSourceError, parse_manifest,
-                          plan_composition, render_composition, resolve_input)
+                          plan_composition, render_composition, resolve_input, source_prompts)
 from image_source_api import import_local_image, register_source_routes
 from gallery_app import register_gallery_app_routes
 
@@ -42,6 +42,19 @@ class CompositionTests(unittest.TestCase):
         image = self.render(value)
         self.assertEqual(image.size, (2, 3))
         self.assertEqual(image.getpixel((0, 0)), (255, 0, 0, 128))
+
+    def test_active_image_changes_pixels_and_corresponding_prompts(self):
+        value = manifest('red.png', 'blue.png')
+        value['active_index'] = 1
+        value['images'][0]['prompt'] = {'positive': 'red', 'negative': 'first negative'}
+        value['images'][1]['prompt'] = {'positive': 'blue', 'negative': 'second negative'}
+        self.assertEqual(self.render(value).size, (2, 5))
+        self.assertEqual(self.render(value).getpixel((0, 0)), (0, 0, 255, 255))
+        self.assertEqual(source_prompts(parse_manifest(value)), ('blue', 'second negative'))
+        value['layout'] = 'horizontal'
+        self.assertEqual(source_prompts(parse_manifest(value)), ('red, blue', 'first negative, second negative'))
+        value['active_index'] = 2
+        with self.assertRaises(ImageSourceError): parse_manifest(value)
 
     def test_stitch_layouts_gap_and_background(self):
         horizontal = self.render(manifest('red.png', 'blue.png', layout='horizontal'))

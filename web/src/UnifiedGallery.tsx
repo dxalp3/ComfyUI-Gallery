@@ -1,5 +1,5 @@
 import { PreviewMedia, stopMedia } from './PreviewMedia';
-import { openPrefixManager, imagePrefixKeys } from './PrefixLibrary';
+import { openPrefixManager, imagePrefixKeys, imagePrefixRefs } from './PrefixLibrary';
 import { extractLocalPrompts, extractHydrusTags } from './LocalImageSearch';
 import JSZip from 'jszip';
 import FileSaver from 'file-saver';
@@ -117,7 +117,7 @@ export function UnifiedGallery({ sortRequest, source, remote, selectedRemote, se
                 const prompts = extractLocalPrompts(metadata);
                 return { positive: prompts.positive.split(/[,\n]+/).map(value => value.trim()).filter(Boolean), negative: prompts.negative.split(/[,\n]+/).map(value => value.trim()).filter(Boolean), hydrus: extractHydrusTags(metadata) };
             });
-            openPrefixManager({ imageKeys: list.flatMap(item => imagePrefixKeys(item, gallery.settings.relativePath)), positive: sets.flatMap(item => item.positive), negative: sets.flatMap(item => item.negative), hydrus: sets.flatMap(item => item.hydrus) }); return;
+            openPrefixManager({ imageRefs: Object.assign({}, ...list.map(item => imagePrefixRefs(item, gallery.settings.relativePath))), imageKeys: list.flatMap(item => imagePrefixKeys(item, gallery.settings.relativePath)), positive: sets.flatMap(item => item.positive), negative: sets.flatMap(item => item.negative), hydrus: sets.flatMap(item => item.hydrus) }); return;
         }
         if (key === 'source') { setAppending(list.filter(isImage)); return; }
         if (key === 'trash') { setTrashing(list.filter(item => item.remote)); return; }

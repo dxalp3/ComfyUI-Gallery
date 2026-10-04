@@ -2,6 +2,7 @@ export type ImageSourceCrop = { x: number; y: number; width: number; height: num
 export type ImageSourceImage = { input_name: string; title?: string; crop?: ImageSourceCrop; metadata?: Record<string, any>; prompt?: { positive: string; negative: string; tags: string[] } };
 export type ImageSourceManifest = {
     version: 1;
+    active_index?: number;
     images: ImageSourceImage[];
     layout: 'single' | 'horizontal' | 'vertical' | 'grid';
     columns: number;
@@ -47,4 +48,9 @@ export type PromptApply = { positive?: string; negative?: string; mode: 'replace
 export function mergePrompt(old: string, added: string, mode: PromptApply['mode']) {
     if (!added.trim()) return old;
     return mode === 'replace' ? added : (mode === 'before' ? [added, old] : [old, added]).filter(Boolean).join(', ');
+}
+
+export function sourcePrompt(manifest: ImageSourceManifest, side: 'positive' | 'negative'): string {
+    const images = manifest.layout === 'single' ? manifest.images.slice(manifest.active_index || 0, (manifest.active_index || 0) + 1) : manifest.images;
+    return images.map(image => image.prompt?.[side] || '').filter(Boolean).join(', ');
 }

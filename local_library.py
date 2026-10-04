@@ -60,6 +60,19 @@ def prompts(metadata):
             if key in seen: return
             seen.add(key)
             node = obj(graph.get(key))
+            inputs = obj(node.get('inputs'))
+            if node.get('class_type') == 'GalleryPromptEncode' and 'source_text' in inputs:
+                collect(inputs['source_text'], polarity, seen, depth + 1)
+                return
+            if node.get('class_type') == 'GalleryImageSource' and value[1] in (4, 5):
+                manifest = obj(inputs.get('sources'))
+                images = manifest.get('images', [])
+                if not isinstance(images, list): return
+                index = manifest.get('active_index', 0)
+                if type(index) is not int: return
+                if manifest.get('layout', 'single') == 'single': images = images[index:index + 1]
+                for image in images: collect(obj(obj(image).get('prompt')).get('positive' if value[1] == 4 else 'negative', ''), polarity, seen, depth + 1)
+                return
             for name, item in obj(node.get('inputs')).items():
                 branch = side(name)
                 if (branch == polarity or (not branch and re.match(r'^(text|prompt|prefix|wildcard|populated_text|value|string|conditioning|clip_l|clip_g|t5xxl)(_|\d|$)', name))):

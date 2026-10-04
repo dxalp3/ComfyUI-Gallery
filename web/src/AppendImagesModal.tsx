@@ -1,7 +1,7 @@
 import { PromptPalette } from './PromptPalette';
 import { useGalleryContext } from './GalleryContext';
 import { usePromptSpelling, formatPromptTerms } from './PromptSpelling';
-import { openPrefixManager, loadPrefixes, imagePrefixKeys } from './PrefixLibrary';
+import { openPrefixManager, loadPrefixes, imagePrefixKeys, imagePrefixRefs } from './PrefixLibrary';
 import { ImageSourceTarget } from './ImageSourceHost';
 import { useEffect, useState } from 'react';
 import { Alert, Button, Checkbox, Collapse, Modal, Select, Space, Typography, message } from 'antd';
@@ -38,7 +38,7 @@ export function AppendImagesModal({ entries, onClose }: { entries: GalleryEntry[
         setRows([]);
         void loadPrefixes().then(library => { if (live) setRows(initial.map(row => {
             const association = imagePrefixKeys(row.entry, gallery.settings.relativePath).map(key => library.associations?.[key]).find(Boolean);
-            return association ? { ...row, positive: association.terms, usePositive: true, prefixId: association.prefix_id } : row;
+            return association ? { ...row, positive: association.terms, usePositive: association.terms.length > 0, negative: association.negative_terms || row.negative, useNegative: !!association.negative_terms?.length, prefixId: association.prefix_id } : row;
         })); }).catch(reason => { if (live) { setRows(initial); setError('Could not load image-prefix associations: ' + String(reason)); } });
         void getPromptTargets().then(setTargets).catch(reason => setError(String(reason)));
         return () => { live = false; };
@@ -86,9 +86,9 @@ export function AppendImagesModal({ entries, onClose }: { entries: GalleryEntry[
         </Space>
         <Typography.Paragraph type="secondary">Without targets, enabled prompts remain on the source node's positive/negative STRING outputs. Connect its IMAGE output to your VAE Encode or ControlNet image input.</Typography.Paragraph>
         <Space wrap><Select aria-label="Vocabulary image" value={paletteImage} onChange={setPaletteImage} options={rows.map((row, value) => ({ value, label: row.entry.name }))} /><Select aria-label="Vocabulary destination" value={paletteSide} onChange={setPaletteSide} options={[{value:'positive',label:'Positive prompt'},{value:'negative',label:'Negative prompt'},{value:'tags',label:'Hydrus tags'}]} /></Space>
-        <PromptPalette onChoose={(terms, prefixId) => { const row = rows[paletteImage]; if (row) update(paletteImage, { [paletteSide]: Array.from(new Set([...row[paletteSide], ...terms])), ...(paletteSide === 'positive' ? {usePositive:true, prefixId:prefixId || row.prefixId} : paletteSide === 'negative' ? {useNegative:true} : {} ) }); }} />
+        <PromptPalette onChoose={(terms, prefixId, negatives) => { const row = rows[paletteImage]; if (row) update(paletteImage, { [paletteSide]: Array.from(new Set([...row[paletteSide], ...terms])), ...(paletteSide === 'positive' ? {usePositive:true, prefixId:prefixId || row.prefixId, ...(negatives?.length ? {negative: Array.from(new Set([...row.negative, ...negatives])), useNegative:true} : {})} : paletteSide === 'negative' ? {useNegative:true} : {} ) }); }} />
         <Collapse defaultActiveKey={['0']} items={rows.map((row, index) => ({ key: String(index), label: row.entry.name, children: <Space direction="vertical" style={{ width: '100%' }}>
-            <Button onClick={() => openPrefixManager({ positive: row.positive, negative: row.negative, hydrus: row.tags, imageKeys: imagePrefixKeys(row.entry, gallery.settings.relativePath), onSaved: (terms, prefixId) => update(index, { positive: terms, usePositive: true, prefixId }) })}>Create prefix from this image</Button>
+            <Button onClick={() => openPrefixManager({ positive: row.positive, negative: row.negative, hydrus: row.tags, imageKeys: imagePrefixKeys(row.entry, gallery.settings.relativePath), imageRefs: imagePrefixRefs(row.entry, gallery.settings.relativePath), onSaved: (terms, prefixId, negativeTerms) => update(index, { positive: terms, usePositive: !!terms.length, negative: negativeTerms, useNegative: !!negativeTerms.length, prefixId }) })}>Create prefix from this image</Button>
             {row.prefixId && <Typography.Text type="success">Image prefix paired · selected terms are enabled below</Typography.Text>}
             <Checkbox checked={row.usePositive} onChange={event => update(index, { usePositive: event.target.checked })}>Load positive prompt</Checkbox>
             <HydrusTagSelect label={'Positive terms ' + index} value={row.positive} onChange={positive => update(index, { positive })} />

@@ -173,3 +173,9 @@ test('Gallery conditioning encoders preserve positive/negative polarity and manu
     const workflow = { nodes: [{ id: 1, type: 'GalleryPromptEncode', widgets_values: ['manual portrait'] }, { id: 2, type: 'KSampler', inputs: [{ name: 'positive', link: 1 }] }], links: [[1, 1, 0, 2, 1, 'CONDITIONING']] };
     assert.equal(extractLocalPrompts({ workflow }).positive, 'manual portrait');
 });
+
+test('connected Gallery source contributes selected prompts, never inactive encoder fallback', () => {
+ const sources = JSON.stringify({layout:'single',active_index:1,images:[{prompt:{positive:'first',negative:'first negative'}},{prompt:{positive:'second',negative:'second negative'}}]});
+ const prompt = {a:{class_type:'GalleryImageSource',inputs:{sources}},b:{class_type:'GalleryPromptEncode',inputs:{text:'unused fallback',source_text:['a',4]}},c:{class_type:'GalleryPromptEncode',inputs:{text:'unused negative',source_text:['a',5]}},d:{class_type:'KSampler',inputs:{positive:['b',0],negative:['c',0]}}};
+ assert.deepEqual(extractLocalPrompts({prompt}),{positive:'second',negative:'second negative'});
+});

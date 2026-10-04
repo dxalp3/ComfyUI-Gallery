@@ -50,11 +50,28 @@ class LibraryTests(unittest.TestCase):
             def encode_from_tokens_scheduled(self, tokens):
                 return [['conditioning', {'text': tokens['tokens']}]]
         clip = Clip()
-        encoded, text = GalleryPromptEncode().encode(clip, 'manually edited, (blue eyes:1.2)')
+        encoded, text = GalleryPromptEncode().encode(clip, 'manually edited, (blue eyes:1.2)')['result']
         self.assertEqual(clip.text, text)
         self.assertEqual(encoded[0][1]['text'], text)
         self.assertEqual(GalleryPromptEncode.RETURN_TYPES, ('CONDITIONING', 'STRING'))
         with self.assertRaises(ValueError): GalleryPromptEncode().encode(None, '')
+
+    def test_connected_prompt_overrides_fallback_including_empty_text(self):
+        class Clip:
+            def tokenize(self, value): return value
+            def encode_from_tokens_scheduled(self, value): return value
+        node = GalleryPromptEncode()
+        self.assertEqual(node.encode(Clip(), 'fallback', 'source')['result'], ('source', 'source'))
+        self.assertEqual(node.encode(Clip(), 'fallback', '')['result'], ('', ''))
+        self.assertEqual(node.encode(Clip(), 'fallback')['ui']['effective_prompt'], ['fallback'])
+
+    def test_negative_image_pairing_and_reference_survive_reload(self):
+        result = update(self.path, {'action': 'save', 'revision': read(self.path)[1], 'name': 'paired', 'terms': ['standing'], 'negative_terms': ['blurry'], 'image_keys': ['sha256:test'], 'image_refs': {'sha256:test': {'name': 'example.png', 'local_url': '/static_gallery/example.png', 'root': './'}}})
+        self.assertEqual(result['library']['prefixes'][0]['negative_terms'], ['blurry'])
+        self.save('other', ['sitting'])
+        pair = read(self.path)[0]['associations']['sha256:test']
+        self.assertEqual(pair['negative_terms'], ['blurry'])
+        self.assertEqual(pair['image']['name'], 'example.png')
 
     def test_wiki_categories_sort_search_and_favorites(self):
         data = browse_vocabulary({'category': 'tag_group:attire', 'sort': 'alphabetical', 'limit': 100})
