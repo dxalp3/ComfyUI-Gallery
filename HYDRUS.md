@@ -653,3 +653,12 @@ Braces use the workflow's dynamic-prompt processing. The encoder's editable nati
 The viewer, prompt library, image append review, Image Source editor, metadata and Hydrus export windows are movable, resizable panels. They leave the gallery clickable, so references and manual tagging tools can stay open side by side. Drag a title bar to move a panel or its bottom-right corner to resize it. The title-bar left/right buttons place it on half the screen; reset restores its default layout. Size and position are remembered per panel in this browser.
 
 Click a panel to bring it forward. Collapse keeps its draft intact; double-clicking the title bar also collapses/expands. Collapsing the viewer pauses media, and closing it stops and detaches media. Escape closes the focused panel outside text inputs/search controls. Panels are kept within the viewport when resizing the browser. Delete confirmations and settings remain modal.
+
+
+## Multiple categories and optional alternatives (hydrus.17)
+
+Use **Categories to append** to select several wiki categories, then **Append categories (N)**. This inserts each complete category, independent of the current browse filter and favorites. **One group per category** produces `{long hair|short hair}, {smile|frown}`; **One combined group** puts all selected categories' tags in a single alternatives group, removing duplicates. Both modes respect insertion position, spelling, weight and affixes. Combined category selection is limited to 10,000 source tags.
+
+**Optional alternatives {a|b|c|}** adds a trailing empty branch. It is available for individual/bulk tags, prefixes and categories. A single choice stays `{a|}`; empty selections insert nothing. With separate category groups, each category has its own empty branch. This syntax means one listed alternative or no text, not all listed alternatives together. Prefixes keep their constituent tags together as one alternative. Affixes and weights surround the inserted block as before.
+
+The [ComfyUI dynamic prompt extension](https://github.com/Comfy-Org/ComfyUI_frontend/blob/main/src/extensions/core/dynamicPrompts.ts) resolves enabled text widgets at queue time. Gallery inserts the expressions; it does not add wildcard resolution to incoming STRING connections.

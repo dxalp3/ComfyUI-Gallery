@@ -14,11 +14,11 @@ try{
  assert.equal(await page.getByRole('textbox',{name:'Effective encoder prompt',exact:true}).inputValue(),'base, blue eyes, image prompt');
  await page.evaluate(()=>{window.qaBulkNode.widgets[0].value='base';window.qaBulkNode.widgets[0].callback();});
  await palette.getByRole('tab',{name:'Prefixes',exact:true}).click();await palette.getByRole('textbox',{name:'Browse vocabulary',exact:true}).fill('bulk ');
- await palette.getByRole('button',{name:'Select all matching',exact:true}).click();await palette.getByRole('button',{name:'Append selected (2)',exact:true}).waitFor();
+ await palette.getByRole('button',{name:'Select all matching',exact:true}).click();await palette.getByRole('button',{name:'Append selected (2)',exact:false}).waitFor();
  await choose(palette,'Insertion format','Alternatives {a|b|c}');await choose(palette,'Insertion position','Prepend before');
  await palette.getByRole('spinbutton',{name:'Insertion weight',exact:true}).fill('1.2');await palette.getByRole('spinbutton',{name:'Insertion weight',exact:true}).press('Tab');
  await palette.getByRole('textbox',{name:'Insertion prefix',exact:true}).fill('quality, ');await palette.getByRole('textbox',{name:'Insertion suffix',exact:true}).fill(', detailed');
- await palette.getByRole('button',{name:'Append selected (2)',exact:true}).click();
+ await palette.getByRole('button',{name:'Append selected (2)',exact:false}).click();
  await page.waitForFunction(()=>window.qaBulkNode.widgets[0].value.startsWith('(quality, {standing'));
  assert.equal(await value(),'(quality, {standing, blue eyes|sitting, green eyes}, detailed:1.2), base');
  // Whole-category insertion ignores the current search and includes results beyond page one.
@@ -31,11 +31,29 @@ try{
  await palette.getByRole('button',{name:'Append entire category as alternatives',exact:true}).click();await page.waitForFunction(()=>window.qaBulkNode.widgets[0].value.startsWith('base, {'));
  const formatted=await(await page.request.post(base+'/Gallery/hydrus/format_terms',{data:{terms:catalog.items.map(x=>x.name),prefer_spaces:true}})).json();
  assert.equal(await value(),'base, {'+[...new Set(formatted.terms)].join('|')+'}');
+ // Multiple whole categories can be independent optional groups or one combined group.
+ const attire=await(await page.request.post(base+'/Gallery/hydrus/dictionary',{data:{browse:true,category:'tag_group:attire',selection:true,limit:10000}})).json();
+ const formattedAttire=await(await page.request.post(base+'/Gallery/hydrus/format_terms',{data:{terms:attire.items.map(x=>x.name),prefer_spaces:true}})).json();
+ const categories=palette.getByRole('combobox',{name:'Categories to append',exact:true});
+ for(const [name,count] of [['Hair Styles',catalog.total],['Attire',attire.total]]) {
+  await categories.click();await categories.fill(name);await categories.press('ArrowDown');const id=await categories.getAttribute('aria-controls');
+  await page.locator('[id="'+id+'"]').locator('xpath=ancestor::div[contains(@class,"ant-select-dropdown")][1]').getByTitle(name+' ('+count+')',{exact:true}).click();await categories.press('Escape');
+ }
+ await choose(palette,'Insertion format','Optional alternatives {a|b|c|}');await choose(palette,'Insertion position','Prepend before');
+ await page.evaluate(()=>{window.qaBulkNode.widgets[0].value='base';window.qaBulkNode.widgets[0].callback();});
+ const optional=terms=>'{'+[...new Set(terms)].join('|')+'|}';
+ await palette.getByRole('button',{name:'Append categories (2)',exact:true}).click();
+ await page.waitForFunction(()=>window.qaBulkNode.widgets[0].value.endsWith('|}, base'));
+ assert.equal(await value(),optional(formatted.terms)+', '+optional(formattedAttire.terms)+', base');
+ await choose(palette,'Category grouping','One combined group');await choose(palette,'Insertion position','Append after');
+ await page.evaluate(()=>{window.qaBulkNode.widgets[0].value='base';window.qaBulkNode.widgets[0].callback();});
+ await palette.getByRole('button',{name:'Append categories (2)',exact:true}).click();await page.waitForFunction(()=>window.qaBulkNode.widgets[0].value.startsWith('base, {'));
+ assert.equal(await value(),'base, '+optional([...formatted.terms,...formattedAttire.terms]));
  // Select-all matching spans all pages too, and selection remains while paging.
  await palette.getByRole('textbox',{name:'Browse vocabulary',exact:true}).fill('');await palette.getByRole('button',{name:'Select all matching',exact:true}).click();
- await palette.getByRole('button',{name:'Append selected ('+catalog.total+')',exact:true}).waitFor();await palette.getByRole('button',{name:'Next vocabulary page',exact:true}).click();assert(await palette.getByRole('button',{name:'Append selected ('+catalog.total+')',exact:true}).isVisible());
+ await palette.getByRole('button',{name:'Append selected ('+catalog.total+')',exact:false}).waitFor();await palette.getByRole('button',{name:'Next vocabulary page',exact:true}).click();assert(await palette.getByRole('button',{name:'Append selected ('+catalog.total+')',exact:false}).isVisible());
  // Saving a definition does not overwrite the target prompt.
  const before=await value();await manager.getByRole('textbox',{name:'Prefix name',exact:true}).fill('saved without replacing');const tags=manager.getByRole('combobox',{name:'Prefix tags',exact:true});await tags.fill('cloud');await tags.press('Enter');await tags.press('Escape');const saved=page.waitForResponse(r=>r.url().endsWith('/Gallery/prefixes')&&r.request().method()==='POST');await manager.getByRole('button',{name:'Save prefix',exact:true}).click();assert.equal((await saved).status(),200);assert.equal(await value(),before);
  if(process.env.GALLERY_QA_SCREENSHOT)await manager.screenshot({path:process.env.GALLERY_QA_SCREENSHOT});
- assert.deepEqual(errors,[]);console.log('PASS individual and bulk direct insertion, prefix alternatives, weights/affixes, whole categories beyond one page, selection persistence, connected combined display and non-destructive definition save.');
+ assert.deepEqual(errors,[]);console.log('PASS individual and bulk direct insertion, prefix alternatives, weights/affixes, whole categories beyond one page, multiple separate/combined optional category groups, selection persistence, connected combined display and non-destructive definition save.');
 }catch(e){if(process.env.GALLERY_QA_SCREENSHOT)await page.screenshot({path:process.env.GALLERY_QA_SCREENSHOT.replace(/\.png$/, '-error.png')});console.log(await page.locator('body').innerText());throw e;}finally{await browser.close();}})().catch(e=>{console.error(e);process.exit(1)});

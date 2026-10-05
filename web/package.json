@@ -1,7 +1,7 @@
 {
     "name": "comfy-ui-gallery-react",
     "private": true,
-    "version": "2.7.1-hydrus.16",
+    "version": "2.7.1-hydrus.17",
     "packageManager": "pnpm@11.19.0",
     "type": "module",
     "scripts": {

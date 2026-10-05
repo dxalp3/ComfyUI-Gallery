@@ -13,3 +13,15 @@ test('weights and text affixes wrap the whole insertion without losing alternati
 test('source order supports appended default, prepending, explicit replacement and empty input',()=>{
  assert.equal(combineEncoderPrompt('base','source'),'base, source');assert.equal(combineEncoderPrompt('base','source','before'),'source, base');assert.equal(combineEncoderPrompt('base','','replace'),'');assert.equal(combineEncoderPrompt('base',''),'base');assert.equal(combineEncoderPrompt('base',undefined),'base');
 });
+
+test('optional alternatives preserve an empty branch even for a single unique choice',()=>{
+ assert.equal(formatInsertion([['a'],['b'],['c']],{...defaultInsertion,format:'optional'}),'{a|b|c|}');
+ assert.equal(formatInsertion([['a'],['a']],{...defaultInsertion,format:'optional'}),'{a|}');
+ assert.equal(formatInsertion([],{...defaultInsertion,format:'optional'}),'');
+ assert.equal(formatInsertion([['standing','blue eyes'],['sitting']],{...defaultInsertion,format:'optional'}),'{standing, blue eyes|sitting|}');
+});
+test('multiple categories produce independent groups, with optional branches and block modifiers',()=>{
+ const groups=[['long hair','short hair','long hair'],['smile','frown']];
+ assert.equal(formatInsertion(groups,{...defaultInsertion,format:'alternatives',categoryGroups:true}),'{long hair|short hair}, {smile|frown}');
+ assert.equal(formatInsertion(groups,{...defaultInsertion,format:'optional',categoryGroups:true,weight:1.2,prefix:'portrait, ',suffix:', detailed'}),'(portrait, {long hair|short hair|}, {smile|frown|}, detailed:1.2)');
+});

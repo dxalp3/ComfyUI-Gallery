@@ -17,6 +17,8 @@ export function PromptPalette({ onChoose, onSearch, onAppend }: { onAppend?: (gr
     const [tab, setTab] = useState('tags');
     const [query, setQuery] = useState('');
     const [category, setCategory] = useState('');
+    const [categoryPicks, setCategoryPicks] = useState<string[]>([]);
+    const [categoryGroups, setCategoryGroups] = useState(true);
     const [sort, setSort] = useState('popular');
     const [onlyFavorites, setOnlyFavorites] = useState(false);
     const [favorites, setFavorites] = useState<string[]>(() => { try { const stored = JSON.parse(localStorage.getItem(FAVORITES) || '[]'); return Array.isArray(stored) ? stored.filter(value => typeof value === 'string') : []; } catch { return []; } });
@@ -36,9 +38,9 @@ export function PromptPalette({ onChoose, onSearch, onAppend }: { onAppend?: (gr
     const favorite = (key: string) => setFavorites(old => { const next = old.includes(key) ? old.filter(value => value !== key) : [...old, key]; localStorage.setItem(FAVORITES, JSON.stringify(next)); return next; });
     const prefixes = library.prefixes.filter(prefix => (prefix.name + ' ' + expandPrefix(library, '@' + prefix.name).join(' ')).toLowerCase().includes(query.toLowerCase()) && (!onlyFavorites || favorites.includes('prefix:' + prefix.id))).sort((a, b) => sort === 'alphabetical' ? a.name.localeCompare(b.name) : Number(favorites.includes('prefix:' + b.id)) - Number(favorites.includes('prefix:' + a.id)) || a.name.localeCompare(b.name));
     const rows = tab === 'tags' ? data.items.map(item => ({ key: 'tag:' + item.name, label: item.name, detail: item.count.toLocaleString() + ' Danbooru snapshot uses', terms: [item.name], prefixId: undefined as string | undefined })) : prefixes.slice(offset, offset + 60).map(prefix => ({ key: 'prefix:' + prefix.id, label: prefix.name, detail: expandPrefix(library, '@' + prefix.name).join(', '), terms: expandPrefix(library, '@' + prefix.name), prefixId: prefix.id }));
-    const allMatching = async (wholeCategory = false): Promise<Pick[]> => {
+    const allMatching = async (wholeCategory = false, categoryValue = category): Promise<Pick[]> => {
         if (tab === 'prefixes') return prefixes.map(prefix => ({ key: 'prefix:' + prefix.id, label: prefix.name, terms: expandPrefix(library, '@' + prefix.name), prefixId: prefix.id }));
-        const value = await hydrusRequest<Vocabulary>('dictionary', { browse: true, selection: true, query: wholeCategory ? '' : query, category, sort, offset: 0, limit: 10000, ...(!wholeCategory && onlyFavorites ? { favorites: favorites.filter(value => value.startsWith('tag:')).map(value => value.slice(4)) } : {}) });
+        const value = await hydrusRequest<Vocabulary>('dictionary', { browse: true, selection: true, query: wholeCategory ? '' : query, category: categoryValue, sort, offset: 0, limit: 10000, ...(!wholeCategory && onlyFavorites ? { favorites: favorites.filter(value => value.startsWith('tag:')).map(value => value.slice(4)) } : {}) });
         if (value.total > 10000) throw new Error('More than 10,000 tags match. Choose a category or narrow the search before selecting all.');
         return value.items.map(item => ({ key: 'tag:' + item.name, label: item.name, terms: [item.name] }));
     };
@@ -49,6 +51,21 @@ export function PromptPalette({ onChoose, onSearch, onAppend }: { onAppend?: (gr
             const groups = picks.map(row => prefixSide === 'negative' && row.prefixId ? library.prefixes.find(prefix => prefix.id === row.prefixId)?.negative_terms || [] : row.terms).filter(terms => terms.length);
             if (!groups.length) throw new Error('These prefixes contain no terms on the selected side.');
             await onAppend(groups, options);
+        } catch (error) { setError(String(error)); } finally { setInserting(false); }
+    };
+    const appendCategories = async () => {
+        setInserting(true); setError('');
+        try {
+            const picks: Pick[] = [];
+            let total = 0;
+            for (const value of categoryPicks) {
+                const items = await allMatching(true, value);
+                total += items.length;
+                if (total > 10000) throw new Error('The selected categories exceed 10,000 tags. Select fewer categories.');
+                if (categoryGroups) picks.push({ key: value, label: value, terms: items.map(item => item.label) });
+                else picks.push(...items);
+            }
+            await append(picks, { ...insertion, format: insertion.format === 'optional' ? 'optional' : 'alternatives', categoryGroups });
         } catch (error) { setError(String(error)); } finally { setInserting(false); }
     };
     const selectAll = async () => { setInserting(true); setError(''); try { const all = await allMatching(); setSelected(Object.fromEntries(all.map(row => [row.key, row]))); } catch (error) { setError(String(error)); } finally { setInserting(false); } };
@@ -67,15 +84,19 @@ export function PromptPalette({ onChoose, onSearch, onAppend }: { onAppend?: (gr
             <Button disabled={busy || inserting} onClick={() => void selectAll()}>Select all matching</Button>
             <Button disabled={!Object.keys(selected).length || inserting} onClick={() => setSelected({})}>Clear picks</Button>
             <Button type="primary" disabled={!Object.keys(selected).length || busy} loading={inserting} onClick={() => void append(Object.values(selected))}>Append selected ({Object.keys(selected).length})</Button>
-            {tab === 'tags' && category && <Button disabled={busy || inserting} onClick={() => { setInserting(true); void allMatching(true).then(rows => append(rows, { ...insertion, format: 'alternatives' })).catch(error => setError(String(error))).finally(() => setInserting(false)); }}>Append entire category as alternatives</Button>}
+            {tab === 'tags' && category && <Button disabled={busy || inserting} onClick={() => { setInserting(true); void allMatching(true).then(rows => append(rows, { ...insertion, format: insertion.format === 'optional' ? 'optional' : 'alternatives' })).catch(error => setError(String(error))).finally(() => setInserting(false)); }}>Append entire category as alternatives</Button>}
         </Space><Space wrap style={{ marginTop: 8 }}>
             <Select aria-label="Insertion position" value={insertion.position} onChange={position => setInsertion(old => ({ ...old, position }))} options={[{value:'after',label:'Append after'},{value:'before',label:'Prepend before'}]} />
-            <Select aria-label="Insertion format" value={insertion.format} onChange={format => setInsertion(old => ({ ...old, format }))} options={[{value:'comma',label:'Comma-separated tags'},{value:'alternatives',label:'Alternatives {a|b|c}'}]} />
+            <Select aria-label="Insertion format" value={insertion.format} onChange={format => setInsertion(old => ({ ...old, format }))} options={[{value:'comma',label:'Comma-separated tags'},{value:'alternatives',label:'Alternatives {a|b|c}'},{value:'optional',label:'Optional alternatives {a|b|c|}'}]} />
             <label>Weight <InputNumber aria-label="Insertion weight" min={0} max={3} step={0.05} value={insertion.weight} onChange={weight => setInsertion(old => ({ ...old, weight: weight ?? 1 }))} /></label>
             <Input aria-label="Insertion prefix" placeholder="Text before insertion" value={insertion.prefix} onChange={event => setInsertion(old => ({ ...old, prefix: event.target.value }))} style={{width:175}} />
             <Input aria-label="Insertion suffix" placeholder="Text after insertion" value={insertion.suffix} onChange={event => setInsertion(old => ({ ...old, suffix: event.target.value }))} style={{width:175}} />
             {tab === 'prefixes' && <Select aria-label="Prefix polarity to append" value={prefixSide} onChange={setPrefixSide} options={[{value:'positive',label:'Positive prefix terms'},{value:'negative',label:'Negative prefix terms'}]} />}
-        </Space><div><Typography.Text type="secondary">Selection spans pages. Category append includes the whole category, ignoring search/favorites. Each prefix is one alternative. Braces use your workflow's dynamic-prompt handling.</Typography.Text></div></>}
+        </Space>{tab === 'tags' && <Space wrap style={{ marginTop: 8, display:'flex' }}>
+            <Select mode="multiple" showSearch optionFilterProp="label" aria-label="Categories to append" placeholder="Choose several whole categories" value={categoryPicks} onChange={setCategoryPicks} style={{minWidth:280, flex:1}} options={data.categories.map(item => ({value:item.value,label:item.label + ' (' + item.count + ')'}))} />
+            <Select aria-label="Category grouping" value={categoryGroups ? 'separate' : 'combined'} onChange={value => setCategoryGroups(value === 'separate')} options={[{value:'separate',label:'One group per category'},{value:'combined',label:'One combined group'}]} />
+            <Button disabled={!categoryPicks.length || inserting} onClick={() => void appendCategories()}>Append categories ({categoryPicks.length})</Button>
+        </Space>}<div><Typography.Text type="secondary">Selection spans pages. Category append includes the whole category, ignoring search/favorites. Each prefix is one alternative. Optional alternatives add an empty choice (one tag/prefix or nothing). Category groups can be separate or combined. Braces use your workflow's dynamic-prompt handling.</Typography.Text></div></>}
         <div style={{ maxHeight: 235, overflowY: 'auto', marginTop: 8 }} aria-busy={busy}>
             {rows.map(row => <div key={row.key} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0' }}>
                 {onAppend && <><Checkbox aria-label={'Pick ' + row.label} checked={!!selected[row.key]} disabled={busy || inserting} onChange={event => setSelected(old => { const next = { ...old }; if (event.target.checked) next[row.key] = row; else delete next[row.key]; return next; })} /><Button size="small" disabled={busy || inserting} aria-label={'Append ' + row.label} onClick={() => void append([row])}>Append</Button></>}

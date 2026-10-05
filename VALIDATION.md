@@ -1,3 +1,15 @@
+# Multi-category optional alternatives — hydrus.17 (2026-10-06)
+
+- All **37 JavaScript tests** pass, including optional empty branches, a single
+  optional choice, independent category groups, prefix grouping and modifiers.
+- TypeScript and production build pass; existing Vite warnings remain.
+- Chrome bulk-insertion regression passes: multiple categories (164 Hair Styles
+  and 536 Attire tags), separate optional groups prepended, one combined optional
+  group appended with deduplication, all-page selection, affixes, weights, prefix
+  alternatives, live encoder display and non-destructive definition saving.
+- Uses the synthetic gallery server and simulated graph, not a GPU generation.
+  Checks the inserted expressions; runtime choices remain ComfyUI's responsibility.
+
 # Floating tagging workspace — hydrus.16 (2026-10-06)
 
 - TypeScript and production build pass; existing Vite warnings remain.
