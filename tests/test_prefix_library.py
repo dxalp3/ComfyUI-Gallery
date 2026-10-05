@@ -56,14 +56,16 @@ class LibraryTests(unittest.TestCase):
         self.assertEqual(GalleryPromptEncode.RETURN_TYPES, ('CONDITIONING', 'STRING'))
         with self.assertRaises(ValueError): GalleryPromptEncode().encode(None, '')
 
-    def test_connected_prompt_overrides_fallback_including_empty_text(self):
+    def test_connected_prompt_combines_with_own_text_and_supports_explicit_replace(self):
         class Clip:
             def tokenize(self, value): return value
             def encode_from_tokens_scheduled(self, value): return value
         node = GalleryPromptEncode()
-        self.assertEqual(node.encode(Clip(), 'fallback', 'source')['result'], ('source', 'source'))
-        self.assertEqual(node.encode(Clip(), 'fallback', '')['result'], ('', ''))
+        self.assertEqual(node.encode(Clip(), 'fallback', 'source')['result'], ('fallback, source', 'fallback, source'))
+        self.assertEqual(node.encode(Clip(), 'fallback', '')['result'], ('fallback', 'fallback'))
         self.assertEqual(node.encode(Clip(), 'fallback')['ui']['effective_prompt'], ['fallback'])
+        self.assertEqual(node.encode(Clip(), 'fallback', 'source', 'before')['result'][1], 'source, fallback')
+        self.assertEqual(node.encode(Clip(), 'fallback', '', 'replace')['result'][1], '')
 
     def test_negative_image_pairing_and_reference_survive_reload(self):
         result = update(self.path, {'action': 'save', 'revision': read(self.path)[1], 'name': 'paired', 'terms': ['standing'], 'negative_terms': ['blurry'], 'image_keys': ['sha256:test'], 'image_refs': {'sha256:test': {'name': 'example.png', 'local_url': '/static_gallery/example.png', 'root': './'}}})
@@ -84,6 +86,12 @@ class LibraryTests(unittest.TestCase):
         self.assertEqual([row['name'] for row in browse_vocabulary({'favorites': ['blue_eyes']})['items']], ['blue_eyes'])
         popular = browse_vocabulary({})['items']
         self.assertEqual([row['count'] for row in popular], sorted([row['count'] for row in popular], reverse=True))
+
+    def test_select_whole_category_is_not_limited_to_visible_page(self):
+        whole = browse_vocabulary({'category': 'tag_group:hair_styles', 'selection': True, 'limit': 10000})
+        self.assertGreater(whole['total'], 60)
+        self.assertEqual(len(whole['items']), whole['total'])
+        self.assertEqual(len(browse_vocabulary({'category': 'tag_group:hair_styles', 'limit': 10000})['items']), min(100, whole['total']))
 
     def test_concurrent_edit_is_rejected_without_losing_data(self):
         first = self.save('pose', ['standing'])

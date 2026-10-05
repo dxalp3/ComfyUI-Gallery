@@ -85,5 +85,5 @@ def browse_vocabulary(data):
     rows = [row for row in vocabulary_rows() if (not category or row['name'] in groups[category]['tags']) and (favorites is None or row['name'] in favorites) and (not query or query in row['name'] or query in row['aliases'])]
     rows.sort(key=(lambda row: row['name']) if data.get('sort') == 'alphabetical' else (lambda row: (-row['count'], row['name'])))
     offset = max(0, min(200000, int(data.get('offset', 0))))
-    limit = max(1, min(100, int(data.get('limit', 60))))
+    limit = max(1, min(10000 if data.get('selection') is True else 100, int(data.get('limit', 60))))
     return {'items': [{'name': row['name'], 'count': row['count']} for row in rows[offset:offset + limit]], 'total': len(rows), 'categories': [{'value': key, 'label': group['label'], 'count': len(group['tags']), 'source': group['source']} for key, group in sorted(groups.items()) if group['tags']]}

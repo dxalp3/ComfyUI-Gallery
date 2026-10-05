@@ -1,3 +1,4 @@
+import { combineEncoderPrompt } from './PromptInsertion';
 import { sourcePrompt } from './ImageSourceGeometry';
 import { getComfyApp } from './ComfyAppApi';
 export type PrefixImage = { name?: string; local_url?: string; root?: string; hash?: string };
@@ -119,7 +120,7 @@ export function effectiveSourceText(node: any): string | undefined {
     if ((source?.comfyClass || source?.type) === 'GalleryImageSource' && [4, 5].includes(link?.origin_slot)) {
         try { return sourcePrompt(JSON.parse(source.widgets.find((value: any) => value.name === 'sources').value), link.origin_slot === 4 ? 'positive' : 'negative'); } catch { return 'Source settings unavailable'; }
     }
-    return node.__galleryRuntimePrompt ?? 'Connected prompt will be shown after execution.';
+    return node.__galleryRuntimeSource ?? 'Connected prompt will be shown after execution.';
 }
 function installEffectivePrompt(node: any) {
     if ((node.comfyClass || node.type) !== 'GalleryPromptEncode' || node.__galleryEffectiveInstalled || !node.addDOMWidget) return;
@@ -129,13 +130,16 @@ function installEffectivePrompt(node: any) {
     text.readOnly = true; text.setAttribute('aria-label', 'Effective encoder prompt');
     text.style.cssText = 'width:100%;height:100px;box-sizing:border-box;resize:vertical;background:var(--comfy-input-bg,#222);color:var(--input-text,#ddd)';
     box.append(label, text);
-    const refresh = () => { if (!node.inputs?.some((input: any) => input.name === 'source_text')) node.addInput?.('source_text', 'STRING'); const incoming = effectiveSourceText(node); label.textContent = incoming === undefined ? 'Effective prompt · editable fallback' : 'Effective prompt · connected source'; text.value = incoming ?? node.widgets?.find((value: any) => value.name === 'text')?.value ?? ''; };
+    const refresh = () => { if (!node.inputs?.some((input: any) => input.name === 'source_text')) node.addInput?.('source_text', 'STRING'); if (!node.widgets?.some((widget: any) => widget.name === 'source_mode')) node.addWidget?.('combo', 'source_mode', 'after', () => { node.__galleryRuntimePrompt = undefined; refresh(); }, { values: ['after', 'before', 'replace'] }); const incoming = effectiveSourceText(node); const own = node.widgets?.find((value: any) => value.name === 'text')?.value || ''; const mode = node.widgets?.find((value: any) => value.name === 'source_mode')?.value || 'after'; label.textContent = incoming === undefined ? 'Effective prompt · own text' : 'Effective prompt · source ' + mode; text.value = node.__galleryRuntimePrompt ?? combineEncoderPrompt(own, incoming, mode); };
     const dom = node.addDOMWidget('effective_prompt', 'effective_prompt', box, { serialize: false, getHeight: () => 125 }); if (dom) dom.serialize = false;
     const widget = node.widgets?.find((value: any) => value.name === 'text'); const callback = widget?.callback;
-    if (widget) widget.callback = function (...args: any[]) { const result = callback?.apply(this, args); refresh(); return result; };
+    if (widget) widget.callback = function (...args: any[]) { node.__galleryRuntimePrompt = undefined; const result = callback?.apply(this, args); refresh(); return result; };
     for (const key of ['onConnectionsChange', 'onConfigure']) { const previous = node[key]; node[key] = function (...args: any[]) { node.__galleryRuntimePrompt = undefined; const result = previous?.apply(this, args); setTimeout(refresh, 0); return result; }; }
     const executed = node.onExecuted; node.onExecuted = function (data: any) { const result = executed?.call(this, data); if (Array.isArray(data?.effective_prompt)) node.__galleryRuntimePrompt = data.effective_prompt[0]; refresh(); return result; };
-    window.addEventListener('gallery-source-changed', refresh);
-    const removed = node.onRemoved; node.onRemoved = function (...args: any[]) { window.removeEventListener('gallery-source-changed', refresh); return removed?.apply(this, args); };
+    const changed = () => { node.__galleryRuntimePrompt = undefined; refresh(); };
+    const modeWidget = node.widgets?.find((value: any) => value.name === 'source_mode'); const modeCallback = modeWidget?.callback;
+    if (modeWidget) modeWidget.callback = function (...args: any[]) { const result = modeCallback?.apply(this, args); changed(); return result; };
+    window.addEventListener('gallery-source-changed', changed);
+    const removed = node.onRemoved; node.onRemoved = function (...args: any[]) { window.removeEventListener('gallery-source-changed', changed); return removed?.apply(this, args); };
     refresh(); node.setSize?.([Math.max(320, node.size?.[0] || 320), Math.max(node.size?.[1] || 0, node.computeSize?.()[1] || 280)]);
 }

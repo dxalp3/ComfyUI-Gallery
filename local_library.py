@@ -62,7 +62,10 @@ def prompts(metadata):
             node = obj(graph.get(key))
             inputs = obj(node.get('inputs'))
             if node.get('class_type') == 'GalleryPromptEncode' and 'source_text' in inputs:
-                collect(inputs['source_text'], polarity, seen, depth + 1)
+                mode = inputs.get('source_mode', 'after')
+                if mode in ('before', 'replace'): collect(inputs['source_text'], polarity, seen, depth + 1)
+                if mode != 'replace': collect(inputs.get('text', ''), polarity, seen, depth + 1)
+                if mode not in ('before', 'replace'): collect(inputs['source_text'], polarity, seen, depth + 1)
                 return
             if node.get('class_type') == 'GalleryImageSource' and value[1] in (4, 5):
                 manifest = obj(inputs.get('sources'))

@@ -1049,7 +1049,8 @@ def register_hydrus_routes(routes, get_root, storage_dir=None, get_input_root=No
                         from .tag_dictionary import format_terms
                     except ImportError:
                         from tag_dictionary import format_terms
-                    terms = clean_tags(data.get('terms', []))
+                    terms = data.get('terms', [])
+                    if not isinstance(terms, list) or len(terms) > 10000 or any(not isinstance(term, str) for term in terms) or sum(len(term) for term in terms) > 1000000: raise HydrusError('Prompt formatting accepts up to 10,000 terms and 1 million characters.')
                     if type(data.get('prefer_spaces', True)) is not bool: raise HydrusError('Invalid prompt spelling preference.')
                     result = {'terms': await asyncio.to_thread(format_terms, terms, data.get('prefer_spaces', True))}
                 elif action == "dictionary":

@@ -31,12 +31,12 @@ const assert = require('node:assert/strict');
   await page.waitForTimeout(50);
   await page.evaluate(() => window.qaNodes[0].widgets[1].callback());
   await manager.waitFor();
-  const row = manager.locator('div').filter({ has: page.getByText('image reference', { exact: true }) }).filter({ has: page.getByRole('button', { name: 'Use in this node', exact: true }) }).last();
-  await row.getByRole('button', { name: 'Use in this node', exact: true }).click();
+  const row = manager.locator('div').filter({ has: page.getByText('image reference', { exact: true }) }).filter({ has: page.getByRole('button', { name: 'Append prefix to node', exact: true }) }).last();
+  await row.getByRole('button', { name: 'Append prefix to node', exact: true }).click();
   await page.waitForFunction(() => window.qaNodes[0].widgets[0].value.includes('blue eyes'));
   assert.equal(await page.evaluate(() => window.qaNodes[0].properties.prompt_library_selected_prefix), prefix.id);
   const spelling = manager.getByRole('checkbox', {name: 'Prefer spaces for recognized Danbooru prompt tags (off preserves canonical underscores)', exact: true});
-  await spelling.uncheck(); await row.getByRole('button', {name:'Use in this node',exact:true}).click();
+  await spelling.uncheck(); await row.getByRole('button', {name:'Append prefix to node',exact:true}).click();
   await page.waitForFunction(() => window.qaNodes[0].widgets[0].value.includes('blue_eyes'));
   await spelling.check();
   // Create a new prefix from the node manager and immediately find it in local search.

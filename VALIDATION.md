@@ -1,3 +1,19 @@
+# Bulk prompt insertion and combined encoders — hydrus.15 (2026-10-06)
+
+- Backend: **105 passed, 2 skipped** (107 tests), including before/after/replace
+  encoding and complete category selection. Existing Windows symlink skips remain.
+- JavaScript: **35 passed**, covering insertion formatting, grouped alternatives,
+  weights/affixes, combined prompt indexing and writes against current node text.
+- TypeScript and production build pass; existing Vite warnings remain.
+- Chrome bulk-insertion test passes: individual tags, multiple prefix alternatives,
+  weight and affixes, all 164 Hair Styles tags despite a search filter, selections
+  across pages, live combined prompt display, and saving without replacing text.
+- Shared-prefix browser regression also passes.
+- Paired prompt browser regression passes for image links, negative associations,
+  active-image changes, both encoder displays and disconnect behavior.
+- Tests use synthetic media and a simulated graph with mock CLIP, not a GPU run
+  or the user's installed ComfyUI/Hydrus data.
+
 # Paired negative prompts and connected encoders — hydrus.14 (2026-10-04)
 
 - Backend: **104 passed, 2 skipped** (106 tests), including selected-image pixels,

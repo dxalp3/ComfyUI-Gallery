@@ -102,7 +102,14 @@ function collectGraph(graph: Map<string, Node>): LocalPrompts {
             const node = graph.get(id);
             if (!node || visited[side].has(id)) return;
             visited[side].add(id);
-            if (node.type === 'GalleryPromptEncode' && node.inputs.source_text !== undefined) { collect(node.inputs.source_text, side, depth + 1); return; }
+            if (node.type === 'GalleryPromptEncode' && node.inputs.source_text !== undefined) {
+                const mode = node.inputs.source_mode || node.widgets?.[1] || 'after';
+                const own = node.inputs.text ?? node.widgets?.[0];
+                if (mode === 'before' || mode === 'replace') collect(node.inputs.source_text, side, depth + 1);
+                if (mode !== 'replace') collect(own, side, depth + 1);
+                if (mode !== 'before' && mode !== 'replace') collect(node.inputs.source_text, side, depth + 1);
+                return;
+            }
             if (node.type === 'GalleryImageSource' && [4, 5].includes(Number(value[1]))) {
                 const manifest = object(node.inputs.sources ?? node.widgets?.[0]);
                 const images = Array.isArray(manifest.images) ? manifest.images : [];

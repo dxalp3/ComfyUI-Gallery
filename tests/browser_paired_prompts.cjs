@@ -26,9 +26,9 @@ try {
   for(const [name,link] of [['Positive',901],['Negative',902]]){const node={comfyClass:'GalleryPromptEncode',title:name,widgets:[{name:'text',value:'fallback '+name.toLowerCase()}],inputs:[{name:'source_text',link}],properties:{},setDirtyCanvas(){},addWidget(type,name,value,callback){this.widgets.push({type,name,value,callback});},addDOMWidget(name,type,element){element.dataset.encoder=name;document.querySelector('#qa-node-previews').append(element);return {name,type};}};graph.add(node);window.qaExtension.nodeCreated(node);}
  });
  await page.waitForFunction(()=>document.querySelectorAll('textarea[aria-label="Effective encoder prompt"]').length===2);
- const effective=page.getByRole('textbox',{name:'Effective encoder prompt',exact:true});assert.equal(await effective.nth(0).inputValue(),'standing');assert.equal(await effective.nth(1).inputValue(),'blurry');
+ const effective=page.getByRole('textbox',{name:'Effective encoder prompt',exact:true});assert.equal(await effective.nth(0).inputValue(),'fallback positive, standing');assert.equal(await effective.nth(1).inputValue(),'fallback negative, blurry');
  await page.getByRole('button',{name:'Use image 2: second reference',exact:true}).click();
- assert.equal(await effective.nth(0).inputValue(),'sitting');assert.equal(await effective.nth(1).inputValue(),'watermark');
+ assert.equal(await effective.nth(0).inputValue(),'fallback positive, sitting');assert.equal(await effective.nth(1).inputValue(),'fallback negative, watermark');
  assert.equal(await page.evaluate(()=>JSON.parse(window.qaSource.widgets.find(w=>w.name==='sources').value).active_index),1);
  await page.evaluate(()=>{const nodes=window.qaNodes.filter(n=>n.comfyClass==='GalleryPromptEncode');nodes.forEach(n=>{n.inputs[0].link=null;n.onConnectionsChange();});});
  await page.waitForFunction(()=>document.querySelector('textarea[aria-label="Effective encoder prompt"]').value==='fallback positive');assert.equal(await effective.nth(1).inputValue(),'fallback negative');

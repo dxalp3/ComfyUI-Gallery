@@ -86,3 +86,14 @@ test('explicit prompt targets preserve per-image metadata and obey prepend/appen
  await assert.rejects(bridge.appendToImageSource([{input_name:'bad.png'}],{positive:JSON.stringify(['999',0]),mode:'after'}),/no longer/);
  assert.equal(bridge.readSourceManifest(graph._nodes[1]).images.length,length);
 });
+
+test('direct library insertion reads the current target text and records before/after changes', async () => {
+ const {bridge,graph}=bridgeFixture();let changes=0;graph.beforeChange=()=>changes++;
+ const node={id:17,title:'Positive',widgets:[{name:'text',value:'base',inputEl:{value:'base'}}]};graph._nodes.push(node);
+ const target=JSON.stringify(['17',0]);
+ assert.equal(await bridge.writePromptTarget(target,'{long hair|short hair}','after'),'base, {long hair|short hair}');
+ node.widgets[0].value='manually changed';
+ assert.equal(await bridge.writePromptTarget(target,'(blue eyes:1.2)','before'),'(blue eyes:1.2), manually changed');
+ assert.equal(node.widgets[0].inputEl.value,node.widgets[0].value);assert.equal(changes,2);
+ await assert.rejects(bridge.writePromptTarget(JSON.stringify(['missing',0]),'x','after'),/valid prompt target/);
+});

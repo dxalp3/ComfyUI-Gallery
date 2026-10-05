@@ -178,15 +178,16 @@ class GalleryPromptEncode:
     """Editable prompt + shared library picker, compatible with standard CLIP conditioning."""
     @classmethod
     def INPUT_TYPES(cls):
-        return {'required': {'clip': ('CLIP',), 'text': ('STRING', {'multiline': True, 'dynamicPrompts': True, 'default': ''})}, 'optional': {'source_text': ('STRING', {'forceInput': True})}}
+        return {'required': {'clip': ('CLIP',), 'text': ('STRING', {'multiline': True, 'dynamicPrompts': True, 'default': ''})}, 'optional': {'source_text': ('STRING', {'forceInput': True}), 'source_mode': (['after', 'before', 'replace'], {'default': 'after'})}}
 
     RETURN_TYPES = ('CONDITIONING', 'STRING')
     RETURN_NAMES = ('conditioning', 'text')
     FUNCTION = 'encode'
     CATEGORY = 'prompt/library'
 
-    def encode(self, clip, text, source_text=None):
+    def encode(self, clip, text, source_text=None, source_mode='after'):
         if clip is None:
             raise ValueError('Connect a CLIP text encoder to Gallery Prompt Encode.')
-        effective = text if source_text is None else source_text
+        if source_mode not in ('after', 'before', 'replace'): raise ValueError('Invalid source prompt order.')
+        effective = text if source_text is None else source_text if source_mode == 'replace' else ', '.join(part.strip() for part in ([source_text, text] if source_mode == 'before' else [text, source_text]) if part.strip())
         return {'ui': {'effective_prompt': [effective]}, 'result': (clip.encode_from_tokens_scheduled(clip.tokenize(effective)), effective)}

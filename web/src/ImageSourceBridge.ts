@@ -118,6 +118,15 @@ function targetInfo(): TargetInfo {
 }
 
 function localCommand(command: string, payload: any): any {
+    if (command === 'write_prompt') {
+        const [id, index] = JSON.parse(payload.target);
+        const node = (graphNow()?._nodes || []).find((node: any) => String(node.id) === id);
+        const widget = node?.widgets?.[index];
+        if (!widget || typeof widget.value !== 'string' || typeof payload.text !== 'string' || payload.text.length > 1000000 || !['before', 'after'].includes(payload.position)) throw new Error('Choose a valid prompt target and insertion.');
+        const graph = graphNow(); graph.beforeChange?.();
+        try { widget.value = mergePrompt(widget.value, payload.text, payload.position); if (widget.inputEl) widget.inputEl.value = widget.value; widget.callback?.(widget.value); node.setDirtyCanvas?.(true, true); return widget.value; }
+        finally { graph.afterChange?.(); }
+    }
     if (command === 'prompt_targets') return (graphNow()?._nodes || []).filter((node: any) => !isSource(node)).flatMap((node: any) => (node.widgets || []).flatMap((widget: any, index: number) => typeof widget.value === 'string' && /text|prompt|prefix|positive|negative/i.test(widget.name) ? [{ value: JSON.stringify([String(node.id), index]), label: `${node.title || node.type} #${node.id} · ${widget.name}` }] : []));
     if (command === 'targets') return targetInfo();
     if (command === 'target' && payload === 'new') { currentTarget(true, true); return targetInfo(); }
@@ -199,3 +208,5 @@ export function openGalleryTab() {
     children.add(child);
     for (const old of children) if (old.closed) children.delete(old);
 }
+
+export const writePromptTarget = (target: string, text: string, position: 'before' | 'after') => command<string>('write_prompt', { target, text, position });
