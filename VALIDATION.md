@@ -1,3 +1,15 @@
+# Floating tagging workspace — hydrus.16 (2026-10-06)
+
+- TypeScript and production build pass; existing Vite warnings remain.
+- Chrome verifies side-by-side library/viewer editing, an unblocked gallery grid,
+  image navigation, pointer dragging/resizing, draft retention on collapse,
+  saved geometry on reopen, viewport bounds and scoped Escape closing.
+- Existing library/viewer browser regression covers palette filtering/favorites,
+  image-prefix pairing, node editing, delete advancing to the next image, shared
+  selection and real synthetic WebM playback cleanup, including pause on collapse.
+- UI inspected at 1650×1100 with both panels side by side. Browser tests use the
+  synthetic server, not the user's installed ComfyUI or Hydrus database.
+
 # Bulk prompt insertion and combined encoders — hydrus.15 (2026-10-06)
 
 - Backend: **105 passed, 2 skipped** (107 tests), including before/after/replace

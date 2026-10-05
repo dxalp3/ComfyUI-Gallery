@@ -1,3 +1,4 @@
+import { FloatingPanel } from './FloatingPanel';
 import { useEffect, useRef, useState } from 'react';
 import type { PointerEvent } from 'react';
 import { Alert, Button, Empty, Input, InputNumber, Modal, Select, Space, Spin, Tag, Typography } from 'antd';
@@ -135,7 +136,7 @@ export function ImageSourceEditor({ open, manifest, onApply, onClose, onBrowse }
     const save = () => { if (canApply) { if (onApply(cloneManifest(draft)) !== false) onClose(); } };
     const browse = () => { if (onApply(cloneManifest(draft)) !== false) onBrowse(); };
 
-    return <Modal open={open} onCancel={onClose} title="Gallery Image Source" width={1180} zIndex={BASE_Z_INDEX + 60}
+    return <FloatingPanel panelKey="image-source" open={open} onCancel={onClose} title="Gallery Image Source" width={1180} zIndex={BASE_Z_INDEX + 60}
         styles={{ body: { maxHeight: 'calc(100vh - 220px)', overflowY: 'auto' } }}
         footer={<Space wrap><span style={{ marginRight: 12 }}>{dirty ? 'Unsaved changes' : 'Changes saved to this node'}</span><Button onClick={onClose}>Cancel</Button><Button type="primary" onClick={save} disabled={!canApply}>Save to node</Button></Space>}>
         <style>{`
@@ -210,5 +211,5 @@ export function ImageSourceEditor({ open, manifest, onApply, onClose, onBrowse }
                 </div>
             </div>}
         </div>
-    </Modal>;
+    </FloatingPanel>;
 }

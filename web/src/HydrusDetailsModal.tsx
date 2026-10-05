@@ -1,3 +1,4 @@
+import { FloatingPanel } from './FloatingPanel';
 import { useEffect, useState } from 'react';
 import { Alert, Button, Collapse, Descriptions, Empty, Modal, Space, Tag, Typography } from 'antd';
 import { BASE_Z_INDEX } from './ComfyAppApi';
@@ -36,7 +37,7 @@ export function HydrusDetailsModal() {
         finally { setBusy(false); }
     };
 
-    return <Modal title="Hydrus metadata" open={!!detailsUrl} zIndex={BASE_Z_INDEX + 20} width={780}
+    return <FloatingPanel panelKey="hydrus-metadata" title="Hydrus metadata" open={!!detailsUrl} zIndex={BASE_Z_INDEX + 20} width={780}
         onCancel={() => setDetailsUrl(undefined)} footer={<Space>
             <Button onClick={() => setDetailsUrl(undefined)}>Close</Button>
             <Button loading={busy} onClick={refreshOne}>Refresh from Hydrus</Button>
@@ -73,5 +74,5 @@ export function HydrusDetailsModal() {
         {notes.length > 0 && <Collapse style={{ marginTop: 12 }} items={notes.map(([key, value]) => ({ key, label: `Note: ${key}`, children: <pre style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{String(value)}</pre> }))} />}
         <Collapse style={{ marginTop: 16 }} items={[{ key: 'raw', label: 'Raw cached Hydrus metadata', children: Object.keys(metadata).length ?
             <pre style={{ maxHeight: 350, overflow: 'auto', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{JSON.stringify(metadata, null, 2)}</pre> : <Empty description="Refresh or export this image to record metadata." /> }]} />
-    </Modal>;
+    </FloatingPanel>;
 }

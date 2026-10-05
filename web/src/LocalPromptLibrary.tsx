@@ -1,3 +1,4 @@
+import { FloatingPanel } from './FloatingPanel';
 import { getPromptTargets, writePromptTarget } from './ImageSourceBridge';
 import { prepareInsertion } from './PromptSpelling';
 import { PrefixImages } from './PrefixImages';
@@ -102,7 +103,7 @@ export function LocalPromptSearch({ onLocalSearch, managerOnly = false }: { onLo
             placeholder="Local search · Enter stacks a term (AND)" /></div>
         <Select aria-label="Local search category" value={gallery.localSearchField} onChange={value => { gallery.setLocalSearchField(value); onLocalSearch(); }} style={{ width: 150 }} options={[{ value: 'all', label: 'All fields' }, { value: 'positive', label: 'Positive prompt' }, { value: 'negative', label: 'Negative prompt' }, { value: 'hydrus', label: 'Hydrus tag' }, { value: 'name', label: 'Filename' }]} />
         </>}<Button onClick={() => { setSeed({}); setPrefixName(''); setPrefixTags([]); setNegativeTags([]); setOpen(true); }}>Prompts & prefixes</Button>
-        <Modal title="Prompts & prefixes" open={open} onCancel={() => setOpen(false)} footer={null} width={1050} styles={{ body: { maxHeight: '78vh', overflowY: 'auto' } }} zIndex={BASE_Z_INDEX + 70}>
+        <FloatingPanel panelKey="prompt-library" title="Prompts & prefixes" open={open} onCancel={() => setOpen(false)} footer={null} width={1050} styles={{ body: { maxHeight: '78vh', overflowY: 'auto' } }} zIndex={BASE_Z_INDEX + 70}>
             <Typography.Paragraph strong>Shared prefix manager</Typography.Paragraph>{!!seed.imageKeys?.length && <Typography.Paragraph>Saving pairs this prefix with the selected image(s). Its terms will be enabled when you append them to a workflow.</Typography.Paragraph>}
             {!shared.tags.length && !shared.prefixes.length && <Button onClick={() => { void migrateBrowserPrefixes(shared.revision!).then(load).catch(error => message.error(String(error))); }}>Import legacy browser library</Button>}
             {seed.node && <Typography.Paragraph>Editing for {seed.node.title || 'Prompt Library'} #{seed.node.id}. Choose “Append prefix to node” on a saved prefix below.</Typography.Paragraph>}
@@ -128,6 +129,6 @@ export function LocalPromptSearch({ onLocalSearch, managerOnly = false }: { onLo
                 {item.side !== 'Library prefix' && <Button onClick={() => setPrefixTags(old => Array.from(new Set([...old, ...expandSearchTerms(shared, item.value)])))}>Add to draft</Button>}
                 <Button onClick={() => navigator.clipboard.writeText(item.value).then(() => message.success('Copied prompt text')).catch(error => message.error(String(error)))}>Copy</Button>
             </div>)}</div><Typography.Text type="secondary">Showing up to 100 matches. Refine your search to find more.</Typography.Text>
-        </Modal>
+        </FloatingPanel>
     </>;
 }

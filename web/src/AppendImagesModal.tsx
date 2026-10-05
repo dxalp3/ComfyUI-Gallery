@@ -1,3 +1,4 @@
+import { FloatingPanel } from './FloatingPanel';
 import { PromptPalette } from './PromptPalette';
 import { useGalleryContext } from './GalleryContext';
 import { usePromptSpelling, formatPromptTerms, prepareInsertion } from './PromptSpelling';
@@ -76,7 +77,7 @@ export function AppendImagesModal({ entries, onClose }: { entries: GalleryEntry[
         } catch (reason) { setError(String(reason)); }
         finally { setBusy(false); }
     };
-    return <Modal title="Append images and prompts" open={entries.length > 0} onCancel={() => { if (!busy) onClose(); }} width={1050} styles={{ body: { maxHeight: '78vh', overflowY: 'auto' } }} zIndex={3045} footer={<Space><Button disabled={busy} onClick={onClose}>Cancel</Button><Button type="primary" loading={busy} disabled={!!notice || !rows.length || rows.length > 32} onClick={() => void append()}>Append to workflow</Button></Space>}>
+    return <FloatingPanel panelKey="append-images" title="Append images and prompts" open={entries.length > 0} onCancel={() => { if (!busy) onClose(); }} width={1050} styles={{ body: { maxHeight: '78vh', overflowY: 'auto' } }} zIndex={3045} footer={<Space><Button disabled={busy} onClick={onClose}>Cancel</Button><Button type="primary" loading={busy} disabled={!!notice || !rows.length || rows.length > 32} onClick={() => void append()}>Append to workflow</Button></Space>}>
         <Typography.Paragraph>Each image retains its metadata. Enable only the prompt terms you want this reference to contribute. Saved prefixes expand into editable tags; removing a term here does not remove it from the original image.</Typography.Paragraph>
         <Checkbox checked={spaces} onChange={event => { setSpaces(event.target.checked); }}>Prefer spaces for recognized Danbooru prompt tags (off preserves canonical underscores)</Checkbox>
         <ImageSourceTarget /><Space wrap>
@@ -101,5 +102,5 @@ export function AppendImagesModal({ entries, onClose }: { entries: GalleryEntry[
             <Typography.Text type="secondary">Sync adds tags to your configured service; omitted tags are not deleted remotely.</Typography.Text>
         </Space> }))} style={{ marginTop: 12 }} />
         {notice && <Alert type="success" message={notice} />}{error && <Alert type="error" message={error} />}
-    </Modal>;
+    </FloatingPanel>;
 }

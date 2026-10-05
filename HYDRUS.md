@@ -646,3 +646,10 @@ Insertion controls support before/after placement, comma-separated tags or `{a|b
 Choose a Danbooru wiki category and use **Append entire category as alternatives** to include its whole vocabulary, ignoring the current search/favorites filter. For example, Hair Styles inserts all tags from that snapshot category, not just the first page. Bulk selection is limited to 10,000 matching tags; narrow broader selections first.
 
 Braces use the workflow's dynamic-prompt processing. The encoder's editable native text enables ComfyUI dynamic prompts; this feature does not add a backend wildcard resolver for arbitrary incoming STRING values. Use a suitable resolver for alternatives arriving through such connections.
+
+
+## Floating reference and editing panels (hydrus.16)
+
+The viewer, prompt library, image append review, Image Source editor, metadata and Hydrus export windows are movable, resizable panels. They leave the gallery clickable, so references and manual tagging tools can stay open side by side. Drag a title bar to move a panel or its bottom-right corner to resize it. The title-bar left/right buttons place it on half the screen; reset restores its default layout. Size and position are remembered per panel in this browser.
+
+Click a panel to bring it forward. Collapse keeps its draft intact; double-clicking the title bar also collapses/expands. Collapsing the viewer pauses media, and closing it stops and detaches media. Escape closes the focused panel outside text inputs/search controls. Panels are kept within the viewport when resizing the browser. Delete confirmations and settings remain modal.

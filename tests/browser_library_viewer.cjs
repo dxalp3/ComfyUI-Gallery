@@ -76,6 +76,8 @@ const assert = require('node:assert/strict');
   await viewer.locator('video').waitFor();
   await page.evaluate(async()=>{window.qaVideo=document.querySelector('.cg-viewer video');window.qaVideo.loop=true;await window.qaVideo.play();});
   assert.equal(await page.evaluate(()=>window.qaVideo.paused),false);
+  await viewer.getByRole('button',{name:'Collapse panel',exact:true}).click();assert.equal(await page.evaluate(()=>window.qaVideo.paused),true);
+  await viewer.getByRole('button',{name:'Expand panel',exact:true}).click();await page.evaluate(()=>window.qaVideo.play());
   await viewer.getByRole('button',{name:'Close',exact:true}).click();
   await page.waitForFunction(()=>window.qaVideo.paused && !window.qaVideo.isConnected);
   assert.deepEqual(errors,[]);

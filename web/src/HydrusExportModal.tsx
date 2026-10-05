@@ -1,3 +1,4 @@
+import { FloatingPanel } from './FloatingPanel';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Button, Checkbox, Collapse, List, Modal, Progress, Select, Space, Tag, Typography } from 'antd';
 import { BASE_Z_INDEX } from './ComfyAppApi';
@@ -122,7 +123,7 @@ export function HydrusExportModal() {
     });
     const ready = !!settings?.has_access_key && (!hasTags || !!serviceKey) && !invalidTags && (!danbooru || dictionaryReady === urlsKey);
 
-    return <Modal title={`Export to Hydrus · ${exportUrls.length} image${exportUrls.length === 1 ? '' : 's'}`}
+    return <FloatingPanel panelKey="hydrus-export" title={`Export to Hydrus · ${exportUrls.length} image${exportUrls.length === 1 ? '' : 's'}`}
         open={exportUrls.length > 0} zIndex={BASE_Z_INDEX + 20} width={680}
         styles={{ body: { maxHeight: '65vh', overflowY: 'auto', paddingRight: 8 } }}
         onCancel={() => { if (!running) setExportUrls([]); }} maskClosable={!running} closable={!running}
@@ -183,5 +184,5 @@ export function HydrusExportModal() {
             </div></List.Item>;
         }} />
         {stopping && <Alert type="info" message="The current import finishes safely. Images still waiting will remain available to export later." style={{ marginTop: 12 }} />}
-    </Modal>;
+    </FloatingPanel>;
 }

@@ -1,3 +1,4 @@
+import { FloatingPanel } from './FloatingPanel';
 import { PreviewMedia, stopMedia } from './PreviewMedia';
 import { openPrefixManager, imagePrefixKeys, imagePrefixRefs } from './PrefixLibrary';
 import { extractLocalPrompts, extractHydrusTags } from './LocalImageSearch';
@@ -257,7 +258,7 @@ export function UnifiedGallery({ sortRequest, source, remote, selectedRemote, se
                 </FixedSizeGrid>;
             }}</AutoSizer>}
         </div>
-        <Modal destroyOnHidden className="cg-viewer" title={current ? `Gallery viewer · ${index + 1} / ${entries.length} · ${current.name}` : 'Gallery viewer'} open={!!current && active} onCancel={closeViewer} width="96vw" zIndex={BASE_Z_INDEX + 10} footer={null}
+        <FloatingPanel panelKey="viewer" destroyOnHidden className="cg-viewer" title={current ? `Gallery viewer · ${index + 1} / ${entries.length} · ${current.name}` : 'Gallery viewer'} open={!!current && active} onCancel={closeViewer} width="96vw" zIndex={BASE_Z_INDEX + 10} footer={null}
             afterOpenChange={opened => { if (opened) viewerRef.current?.focus(); }}>
             {current && active && <div ref={viewerRef} tabIndex={-1} onKeyDown={event => {
                 if ((event.target as HTMLElement).closest('input,textarea,select,button,[role="menu"],[role="combobox"]') || info) return;
@@ -272,7 +273,7 @@ export function UnifiedGallery({ sortRequest, source, remote, selectedRemote, se
                     <span>{Math.round(zoom * 100)}% · Arrow keys browse · Space selects · Right-click for actions</span>
                 </Space>
                 <Dropdown trigger={['contextMenu']} disabled={disabled} menu={menu(current)}>
-                    <div style={{ height: '62vh', overflow: 'auto', background: '#111', textAlign: 'center' }}>
+                    <div style={{ height: 'min(55vh, 480px)', overflow: 'auto', background: '#111', textAlign: 'center' }}>
                         {current.local?.type === '3d' ? <ModelViewer url={original(current)} type={current.name.split('.').pop() || ''} /> : isVideo(current) ? <PreviewMedia onError={() => setMediaError(true)} key={current.id} controls autoPlay={gallery.settings.autoPlayVideos} src={original(current)} style={{ maxWidth: '100%', height: '100%' }} /> : current.local?.type === 'audio' ? <PreviewMedia audio key={current.id} controls src={original(current)} /> :
                         <img onClick={event => { if (event.detail === 1) toggle(current); }} key={current.id} src={failedOriginal === current.id ? thumbnail(current) : original(current)} alt={'Viewing ' + current.name} onError={() => setFailedOriginal(current.id)} style={{ height: zoom === 1 ? '100%' : `${zoom * 100}%`, maxWidth: zoom === 1 ? '100%' : 'none', objectFit: 'contain' }} />}
                     </div>
@@ -285,7 +286,7 @@ export function UnifiedGallery({ sortRequest, source, remote, selectedRemote, se
                     </Button>)}
                 </div>
             </div>}
-        </Modal>
+        </FloatingPanel>
         <Modal title={`Send ${trashing.length} Hydrus file(s) to trash?`} open={!!trashing.length} onCancel={() => setTrashing([])} zIndex={BASE_Z_INDEX + 80} okText="Send to Hydrus trash" okButtonProps={{ danger: true }} confirmLoading={actionBusy} onOk={() => run(async () => {
             const result = await hydrusRequest<{ trashed: string[] }>('trash', { hashes: trashing.map(entry => entry.hash), target: scope });
             advanceAfterRemoval(new Set(result.trashed.map(hash => 'hydrus:' + hash)));
@@ -302,8 +303,8 @@ export function UnifiedGallery({ sortRequest, source, remote, selectedRemote, se
             else message.success(`Deleted ${removed.size} local file(s)`);
             setDeleting([]);
         })}><p>This permanently deletes these local originals. Files on the Hydrus server are untouched.</p><ul style={{ maxHeight: 240, overflow: 'auto' }}>{deleting.map(entry => <li key={entry.id}>{entry.local?.url}</li>)}</ul></Modal>
-        <Modal destroyOnHidden title="Image metadata" open={!!info} onCancel={() => setInfo(undefined)} footer={null} width="85vw" zIndex={BASE_Z_INDEX + 60}>
+        <FloatingPanel panelKey="image-metadata" destroyOnHidden title="Image metadata" open={!!info} onCancel={() => setInfo(undefined)} footer={null} width="85vw" zIndex={BASE_Z_INDEX + 60}>
             {info?.local ? <MetadataView image={info.local} onShowRaw={() => setRaw(true)} showRawMetadata={raw} setShowRawMetadata={setRaw} /> : <pre style={{ maxHeight: '70vh', overflow: 'auto', whiteSpace: 'pre-wrap' }}>{JSON.stringify(info?.remote, null, 2)}</pre>}
-        </Modal>
+        </FloatingPanel>
     </div>;
 }
