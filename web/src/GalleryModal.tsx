@@ -1,9 +1,10 @@
 import { HydrusSyncPanel } from './HydrusSyncPanel';
-import { LocalPromptSearch } from './LocalPromptLibrary';
+import { LIBRARY_SEARCH_EVENT, PROMPTS_WINDOW_EVENT, LocalPromptSearch } from './LocalPromptLibrary';
+import { ImageSearchPanel } from './TagSearchPanel';
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Button, Dropdown, Input, Modal, Segmented, Select, Space, message, theme } from 'antd';
-import { ArrowLeftOutlined, ReloadOutlined, SettingOutlined, FilterOutlined, AppstoreOutlined } from '@ant-design/icons';
+import { ArrowLeftOutlined, ReloadOutlined, SettingOutlined, FilterOutlined, AppstoreOutlined, BookOutlined, TagsOutlined } from '@ant-design/icons';
 import { useGalleryContext } from './GalleryContext';
 import GalleryHeader from './GalleryHeader';
 import GallerySidebar from './GallerySidebar';
@@ -13,6 +14,7 @@ import { BASE_Z_INDEX, STANDALONE } from './ComfyAppApi';
 import { HydrusSettingsModal } from './HydrusSettingsModal';
 import { HydrusExportModal } from './HydrusExportModal';
 import { HydrusDetailsModal } from './HydrusDetailsModal';
+import { SourcePrefixPanel } from './ImageInfo';
 import { HydrusBrowser } from './HydrusBrowser';
 import { useHydrus } from './HydrusContext';
 import { ImageSourceTarget } from './ImageSourceHost';
@@ -66,6 +68,8 @@ const GalleryModal = () => {
                 <div className="cg-brand"><AppstoreOutlined /><strong>Gallery</strong></div>
                 <Segmented aria-label="Gallery sources" value={source} onChange={changeSource} options={[{ value: 'local', label: 'Local' }, { value: 'hydrus', label: 'Hydrus' }, { value: 'both', label: 'Both' }]} />
                 <div className="cg-spacer" />
+                <Button icon={<TagsOutlined />} title="Prompts & prefixes: palette, append to workflow, prefix editor" onClick={() => window.dispatchEvent(new Event(PROMPTS_WINDOW_EVENT))}>Prompts & prefixes</Button>
+                <Button icon={<BookOutlined />} title="Library search: saved prefixes and every prompt phrase" onClick={() => window.dispatchEvent(new Event(LIBRARY_SEARCH_EVENT))}>Library search</Button>
                 <HydrusSyncPanel visible={visible} />
                 <Button icon={<ReloadOutlined />} title="Reload local images" aria-label="Reload local images" loading={gallery.loading} onClick={() => { void runAsync().catch(error => message.error(String(error))); }} />
                 <Dropdown trigger={['click']} menu={{ items: [{ key: 'gallery', label: 'Gallery settings' }, { key: 'hydrus', label: 'Connection settings' }, { key: 'browser', label: 'Open in new browser tab' }], onClick: ({ key }) => { if (key === 'gallery') setShowSettings(true); if (key === 'hydrus') setSettingsOpen(true); if (key === 'browser') { try { openGalleryTab(); } catch (error) { message.error(String(error)); } } } }}><Button aria-label="Settings" icon={<SettingOutlined />}>Settings</Button></Dropdown>
@@ -90,7 +94,7 @@ const GalleryModal = () => {
             <GalleryHeader /><HydrusToolbar onBrowseHydrus={() => { changeSource('hydrus'); setTools(false); }} /><GallerySidebar />
         </Modal>
         {showSettings && <GallerySettingsModal />}
-        <HydrusSettingsModal /><HydrusExportModal /><HydrusDetailsModal />
+        <HydrusSettingsModal /><HydrusExportModal /><HydrusDetailsModal /><SourcePrefixPanel /><ImageSearchPanel />
     </>;
 };
 export default GalleryModal;

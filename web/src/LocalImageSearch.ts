@@ -1,4 +1,6 @@
 import type { FileDetails } from './types';
+import { encoderRecords, stripUnresolved, type EncoderRecord } from './PromptResolution';
+const SOURCE_MARKER = '\u27e6source\u27e7';
 
 export type LocalSearchField = 'all' | 'name' | 'hydrus' | 'positive' | 'negative';
 export interface LocalPrompts { positive: string; negative: string }
@@ -9,7 +11,7 @@ export function matchesLibrarySearch(file: FileDetails, search: LibrarySearch, t
     const hasRemote = search.tags.length > 0 || search.orGroups.length > 0;
     if (!hasRemote && !search.localTerms.length) return true;
     const normalize = (value: string) => value.toLocaleLowerCase().replace(/_/g, ' ').trim();
-    const phrases = prompts.positive.split(/[,\n]+/).map(value => normalize(value.trim().replace(/^\((.*):[\d.]+\)$/, '$1')));
+    const phrases = stripUnresolved(prompts.positive).split(/[,\n]+/).map(value => normalize(value.trim().replace(/^\((.*):[\d.]+\)$/, '$1')));
     const cached = [...tags, ...extractHydrusTags(file.metadata)].map(normalize);
     const term = (value: string): boolean => {
         const negative = value.startsWith('-');
@@ -91,7 +93,7 @@ function workflowGraph(raw: unknown): Map<string, Node> {
 }
 
 /** Follow named conditioning/text connections. Node IDs, colours and prompt wording do not determine polarity. */
-function collectGraph(graph: Map<string, Node>): LocalPrompts {
+function collectGraph(graph: Map<string, Node>, records: Record<string, EncoderRecord> = {}): LocalPrompts {
     const collected = { positive: new Set<string>(), negative: new Set<string>() };
     const visited = { positive: new Set<string>(), negative: new Set<string>() };
     let steps = 0;
@@ -102,9 +104,20 @@ function collectGraph(graph: Map<string, Node>): LocalPrompts {
             const node = graph.get(id);
             if (!node || visited[side].has(id)) return;
             visited[side].add(id);
+            // What a Gallery Prompt Encode actually encoded (source text included, every {a|b} picked).
+            if (node.type === 'GalleryPromptEncode' && typeof records[id]?.resolved === 'string') { if (records[id].resolved) collected[side].add(records[id].resolved!); return; }
             if (node.type === 'GalleryPromptEncode' && node.inputs.source_text !== undefined) {
                 const mode = node.inputs.source_mode || node.widgets?.[1] || 'after';
                 const own = node.inputs.text ?? node.widgets?.[0];
+                // Box layout: the source text goes where the marker sits; the marker itself is never a tag.
+                if (mode === 'boxes' && typeof own === 'string') {
+                    const [before, ...after] = own.split(SOURCE_MARKER);
+                    const tidy = (value: string) => value.replace(/^[\s,]+|[\s,]+$/g, '');
+                    collect(tidy(before), side, depth + 1);
+                    if (after.length) collect(node.inputs.source_text, side, depth + 1);
+                    collect(tidy(after.join(', ')), side, depth + 1);
+                    return;
+                }
                 if (mode === 'before' || mode === 'replace') collect(node.inputs.source_text, side, depth + 1);
                 if (mode !== 'replace') collect(own, side, depth + 1);
                 if (mode !== 'before' && mode !== 'replace') collect(node.inputs.source_text, side, depth + 1);
@@ -157,8 +170,9 @@ export function extractLocalPrompts(metadata: unknown): LocalPrompts {
     const notes = Object.entries(object(hydrus.notes)).filter(([name]) => name.startsWith('ComfyUI Gallery generation metadata')).map(([, value]) => object(value));
     const source = Object.assign({}, ...notes, raw);
     const directPrompt = object(source.prompt);
-    const api = collectGraph(promptGraph(source.prompt));
-    const workflow = (!api.positive || !api.negative) ? collectGraph(workflowGraph(source.workflow)) : { positive: '', negative: '' };
+    const records = encoderRecords(metadata);
+    const api = collectGraph(promptGraph(source.prompt), records);
+    const workflow = (!api.positive || !api.negative) ? collectGraph(workflowGraph(source.workflow), records) : { positive: '', negative: '' };
     const result: LocalPrompts = { positive: '', negative: '' };
     for (const side of ['positive', 'negative'] as const) {
         result[side] = api[side] || text(directPrompt[side]) || text(directPrompt[`${side}_prompt`]) || text(source[side]) || text(source[`${side}_prompt`]) || workflow[side];
@@ -199,8 +213,8 @@ export function matchesLocalImage(file: Pick<FileDetails, 'name' | 'metadata'>, 
     const contains = (value: string) => value.toLocaleLowerCase().replace(/_/g, ' ').includes(needle);
     return ((field === 'all' || field === 'name') && contains(file.name || '')) ||
         ((field === 'all' || field === 'hydrus') && [...hydrusTags, ...extractHydrusTags(file.metadata)].some(contains)) ||
-        ((field === 'all' || field === 'positive') && contains(parsed.positive)) ||
-        ((field === 'all' || field === 'negative') && contains(parsed.negative));
+        ((field === 'all' || field === 'positive') && contains(stripUnresolved(parsed.positive))) ||
+        ((field === 'all' || field === 'negative') && contains(stripUnresolved(parsed.negative)));
 }
 
 export type ImageQualities = { minWidth: number; minHeight: number; format: string };

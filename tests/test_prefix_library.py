@@ -5,8 +5,8 @@ import tempfile
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from prefix_library import read, update, GalleryPromptLibrary, GalleryPromptEncode
-from tag_dictionary import format_terms, prompt_tags, browse_vocabulary
+from prefix_library import read, update, GalleryPromptLibrary, GalleryPromptEncode, resolve_dynamic, RESOLVED_KEY
+from tag_dictionary import format_terms, prompt_tags, browse_vocabulary, term_aliases
 
 
 class LibraryTests(unittest.TestCase):
@@ -66,6 +66,57 @@ class LibraryTests(unittest.TestCase):
         self.assertEqual(node.encode(Clip(), 'fallback')['ui']['effective_prompt'], ['fallback'])
         self.assertEqual(node.encode(Clip(), 'fallback', 'source', 'before')['result'][1], 'source, fallback')
         self.assertEqual(node.encode(Clip(), 'fallback', '', 'replace')['result'][1], '')
+
+    def test_box_layout_substitutes_the_source_box_where_it_sits(self):
+        class Clip:
+            def tokenize(self, value): return value
+            def encode_from_tokens_scheduled(self, value): return value
+        node, marker = GalleryPromptEncode(), '\u27e6source\u27e7'
+        # Groups the browser did not resolve are picked here; braces never reach CLIP.
+        self.assertIn(node.encode(Clip(), 'a, ' + marker + ', {b|c|}', 'src, tags,', 'boxes')['result'][1], ('a, src, tags, b', 'a, src, tags, c', 'a, src, tags'))
+        self.assertEqual(node.encode(Clip(), marker + ', a', 'src', 'boxes')['result'][1], 'src, a')
+        self.assertEqual(node.encode(Clip(), 'a, ' + marker, None, 'boxes')['result'][1], 'a')
+        self.assertEqual(node.encode(Clip(), 'a', 'ignored', 'boxes')['result'][1], 'a')
+        self.assertEqual(node.encode(Clip(), 'a', 'x', 'boxes')['ui']['source_text'], ['x'])
+        with self.assertRaises(ValueError): node.encode(Clip(), 'a', 'x', 'sideways')
+
+    def test_unresolved_groups_are_picked_and_recorded_for_the_saved_image(self):
+        import random
+        class Clip:
+            def tokenize(self, value): return value
+            def encode_from_tokens_scheduled(self, value): return value
+        text, choices = resolve_dynamic('1girl, {blond hair|red hair}, {smile, open mouth|}, {x|{y|z}}', random.Random(3))
+        self.assertNotIn('{', text)
+        self.assertEqual(len(choices), 4)
+        self.assertTrue(all(choice['chosen'] in choice['options'] for choice in choices))
+        self.assertEqual(resolve_dynamic('a, \\{literal\\}, (b:1.2)')[0], 'a, \\{literal\\}, (b:1.2)')
+        info = {'workflow': {}}
+        result = GalleryPromptEncode().encode(Clip(), 'a, \u27e6source\u27e7', '{blond hair|red hair}, b', 'boxes', extra_pnginfo=info, unique_id='7')
+        record = info[RESOLVED_KEY]['7']
+        self.assertEqual(record['resolved'], result['result'][1])
+        self.assertEqual(record['text'], 'a, {blond hair|red hair}, b')
+        self.assertIn(record['choices'][0]['chosen'], ('blond hair', 'red hair'))
+        self.assertEqual(GalleryPromptEncode.IS_CHANGED(text='a, b') , '')
+        self.assertNotEqual(GalleryPromptEncode.IS_CHANGED(text='a', source_text='{b|c}'), GalleryPromptEncode.IS_CHANGED(text='a', source_text='{b|c}'))
+
+    def test_images_can_be_paired_and_unpaired_without_changing_prefix_terms(self):
+        self.save('Pose', ['standing', 'arms up'])
+        library, revision = read(self.path)
+        prefix = library['prefixes'][0]
+        update(self.path, {'action': 'associate', 'revision': revision, 'prefix_id': prefix['id'], 'image_keys': ['sha256:' + 'a' * 64, 'local:./:/static_gallery/x.png'], 'image_refs': {'sha256:' + 'a' * 64: {'hash': 'a' * 64}}})
+        library, revision = read(self.path)
+        self.assertEqual(library['associations']['sha256:' + 'a' * 64], {'prefix_id': prefix['id'], 'terms': ['standing', 'arms up'], 'negative_terms': [], 'image': {'hash': 'a' * 64}})
+        self.assertEqual(library['prefixes'][0]['tags'], prefix['tags'])
+        update(self.path, {'action': 'dissociate', 'revision': revision, 'image_keys': ['sha256:' + 'a' * 64]})
+        library, revision = read(self.path)
+        self.assertEqual(list(library['associations']), ['local:./:/static_gallery/x.png'])
+        with self.assertRaises(ValueError): update(self.path, {'action': 'associate', 'revision': revision, 'prefix_id': 'missing', 'image_keys': ['k']})
+
+    def test_unresolved_alternatives_never_become_danbooru_tags_and_aliases_expand(self):
+        self.assertEqual(prompt_tags('1girl, {blond hair|red hair}, blue eyes, {smile, open mouth|}'), ['1girl', 'blue_eyes'])
+        blue, custom = term_aliases(['blue eyes', 'my lora'])
+        self.assertIn('blue_eyes', blue); self.assertIn('blue eyes', blue)
+        self.assertEqual(custom, ['my lora'])
 
     def test_negative_image_pairing_and_reference_survive_reload(self):
         result = update(self.path, {'action': 'save', 'revision': read(self.path)[1], 'name': 'paired', 'terms': ['standing'], 'negative_terms': ['blurry'], 'image_keys': ['sha256:test'], 'image_refs': {'sha256:test': {'name': 'example.png', 'local_url': '/static_gallery/example.png', 'root': './'}}})

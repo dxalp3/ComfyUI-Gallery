@@ -31,17 +31,20 @@ const assert = require('node:assert/strict');
   await page.waitForTimeout(50);
   await page.evaluate(() => window.qaNodes[0].widgets[1].callback());
   await manager.waitFor();
-  const row = manager.locator('div').filter({ has: page.getByText('image reference', { exact: true }) }).filter({ has: page.getByRole('button', { name: 'Append prefix to node', exact: true }) }).last();
+  await manager.getByRole('button', { name: 'Library search…', exact: true }).click();
+  const libraryWindow = page.getByRole('dialog', { name: 'Library search', exact: true });
+  const row = libraryWindow.locator('div').filter({ has: page.getByText('image reference', { exact: true }) }).filter({ has: page.getByRole('button', { name: 'Append prefix to node', exact: true }) }).last();
   await row.getByRole('button', { name: 'Append prefix to node', exact: true }).click();
   await page.waitForFunction(() => window.qaNodes[0].widgets[0].value.includes('blue eyes'));
   assert.equal(await page.evaluate(() => window.qaNodes[0].properties.prompt_library_selected_prefix), prefix.id);
-  const spelling = manager.getByRole('checkbox', {name: 'Prefer spaces for recognized Danbooru prompt tags (off preserves canonical underscores)', exact: true});
-  await spelling.uncheck(); await row.getByRole('button', {name:'Append prefix to node',exact:true}).click();
+  // Tag spelling is a gallery setting now, not a checkbox in the manager.
+  const setSpaces = value => page.evaluate(value => { const settings = JSON.parse(localStorage.getItem('comfy-ui-gallery-settings') || '{}'); settings.preferPromptSpaces = value; localStorage.setItem('comfy-ui-gallery-settings', JSON.stringify(settings)); }, value);
+  await setSpaces(false); await row.getByRole('button', {name:'Append prefix to node',exact:true}).click();
   await page.waitForFunction(() => window.qaNodes[0].widgets[0].value.includes('blue_eyes'));
-  await spelling.check();
+  await setSpaces(true);
+  await libraryWindow.getByRole('button', { name: 'Close', exact: true }).click();
   // Create a new prefix from the node manager and immediately find it in local search.
   await manager.getByRole('textbox', { name: 'Prefix name', exact: true }).fill('sky selection');
-  await manager.getByRole('button', { name: 'Refresh library', exact: true }).click();
   const picker = manager.getByRole('combobox', { name: 'Prefix tags', exact: true });
   // The node manager starts with an empty draft on a node with no previous selection.
   await picker.fill('azure sky'); await picker.press('Enter'); await picker.press('Escape');

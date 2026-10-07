@@ -25,3 +25,9 @@ test('multiple categories produce independent groups, with optional branches and
  assert.equal(formatInsertion(groups,{...defaultInsertion,format:'alternatives',categoryGroups:true}),'{long hair|short hair}, {smile|frown}');
  assert.equal(formatInsertion(groups,{...defaultInsertion,format:'optional',categoryGroups:true,weight:1.2,prefix:'portrait, ',suffix:', detailed'}),'(portrait, {long hair|short hair|}, {smile|frown|}, detailed:1.2)');
 });
+test('optional group keeps all selected tags together as one optional comma-separated unit',()=>{
+ assert.equal(formatInsertion([['a'],['b'],['c']],{...defaultInsertion,format:'group'}),'{a, b, c|}');
+ assert.equal(formatInsertion([['a','b'],['b','c']],{...defaultInsertion,format:'group',weight:1.2}),'({a, b, c|}:1.2)');
+ assert.equal(formatInsertion([['d'],['e']],{...defaultInsertion,format:'group'}),'{d, e|}');
+ assert.equal(formatInsertion([],{...defaultInsertion,format:'group'}),'');
+});

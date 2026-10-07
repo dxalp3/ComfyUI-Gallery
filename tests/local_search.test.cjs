@@ -4,20 +4,10 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
-const ts = require('../web/node_modules/typescript');
-const filename = path.resolve(__dirname, '../web/src/LocalImageSearch.ts');
-const source = ts.transpileModule(fs.readFileSync(filename, 'utf8'), {
-    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
-}).outputText;
-const compiled = { exports: {} };
-vm.runInThisContext(`(function(exports,module){${source}\n})`, { filename })(compiled.exports, compiled);
+const { load } = require('./ts_loader.cjs');
+const compiled = { exports: load('LocalImageSearch') };
 const { extractLocalPrompts, extractHydrusTags, matchesLocalImage } = compiled.exports;
-const tagSource = ts.transpileModule(fs.readFileSync(path.resolve(__dirname, '../web/src/PromptTags.ts'), 'utf8'), {
-    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
-}).outputText;
-const tagModule = { exports: {} };
-vm.runInThisContext(`(function(exports,module){${tagSource}\n})`)(tagModule.exports, tagModule);
-const { promptTags } = tagModule.exports;
+const { promptTags } = load('PromptTags');
 
 test('prompt tags keep positive and negative phrases separately namespaced without splitting prose', () => {
     assert.deepEqual(promptTags(' blue sky, mountain\nblue sky,, a long sentence about a forest. ', 'positive_prompt'),

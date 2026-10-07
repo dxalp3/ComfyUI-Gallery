@@ -83,6 +83,38 @@ def import_local_image(gallery_root, input_root, url):
             temporary.unlink(missing_ok=True)
 
 
+HASH_CACHE = {}
+
+
+def local_hashes(gallery_root, urls):
+    """SHA-256 of gallery images (the same hash Hydrus and Gallery Image Source copies use).
+
+    Lets a prefix paired with a local image find the images that were generated from it.
+    Results are cached by file fingerprint; unreadable or vanished files are skipped.
+    """
+    if not isinstance(urls, list) or len(urls) > 5000 or any(not isinstance(url, str) for url in urls):
+        raise ImageSourceError("Send up to 5,000 gallery image URLs.")
+    result = {}
+    for url in dict.fromkeys(urls):
+        try:
+            path = resolve_image(gallery_root, url)
+            stamp = file_fingerprint(path)
+            cached = HASH_CACHE.get(str(path))
+            if cached and cached[0] == stamp:
+                result[url] = cached[1]
+                continue
+            digest = hashlib.sha256()
+            with path.open("rb") as stream:
+                for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                    digest.update(chunk)
+            if len(HASH_CACHE) > 50000: HASH_CACHE.clear()
+            HASH_CACHE[str(path)] = (stamp, digest.hexdigest())
+            result[url] = digest.hexdigest()
+        except (HydrusError, OSError):
+            continue
+    return {"hashes": result}
+
+
 def register_source_routes(routes, get_gallery_root, get_input_root):
     workers = asyncio.Semaphore(2)
     register_thumbnail_routes(routes, get_input_root, route_path="/Gallery/source/thumbnail")
@@ -100,6 +132,8 @@ def register_source_routes(routes, get_gallery_root, get_input_root):
             if not isinstance(data, dict):
                 raise ImageSourceError("Request body must be a JSON object.")
             async with workers:
+                if action == "hashes":
+                    return web.json_response(await asyncio.to_thread(local_hashes, get_gallery_root(), data.get("urls")))
                 if action == "local":
                     result = await asyncio.to_thread(import_local_image, get_gallery_root(), get_input_root(), data.get("url"))
                     if isinstance(data.get('metadata'), dict):
@@ -118,6 +152,10 @@ def register_source_routes(routes, get_gallery_root, get_input_root):
     @routes.post("/Gallery/source/local")
     async def import_local(request):
         return await handle(request, "local")
+
+    @routes.post("/Gallery/source/hashes")
+    async def hashes(request):
+        return await handle(request, "hashes")
 
     @routes.post("/Gallery/source/preview")
     async def preview(request):

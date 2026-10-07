@@ -1,7 +1,8 @@
-import { combineEncoderPrompt } from './PromptInsertion';
-import { sourcePrompt } from './ImageSourceGeometry';
+import { installPromptBoxes } from './EncoderNode';
 import { getComfyApp } from './ComfyAppApi';
-export type PrefixImage = { name?: string; local_url?: string; root?: string; hash?: string };
+// The encoder's source-prompt lookup moved next to the box editor; keep the old import path working.
+export { effectiveSourceText } from './EncoderNode';
+export type PrefixImage = { name?: string; local_url?: string; root?: string; hash?: string; /** Association keys this image is stored under (filled in when listing). */ keys?: string[] };
 export type PrefixLibrary = { version: number; associations?: Record<string, { prefix_id: string; terms: string[]; negative_terms?: string[]; image?: PrefixImage }>; tags: { id: string; name: string; text: string }[]; prefixes: { id: string; name: string; tags: string[]; negative_terms?: string[] }[] };
 async function api() {
     const current = (window as any).comfyAPI?.api?.api || getComfyApp()?.api;
@@ -9,6 +10,8 @@ async function api() {
     try { return (await import(/* @vite-ignore */ `${location.origin}/scripts/api.js`)).api; } catch { return current; }
 }
 export const PREFIX_MANAGER_EVENT = 'gallery-prefix-manager';
+/** Opens the prefix editor window as it is (no new seed). */
+export const PREFIX_EDITOR_EVENT = 'gallery-prefix-editor';
 export type PrefixSeed = { name?: string; positive?: string[]; negative?: string[]; hydrus?: string[]; node?: any; imageKeys?: string[]; imageRefs?: Record<string, PrefixImage>; onSaved?: (terms: string[], prefixId: string, negativeTerms: string[]) => void };
 export function openPrefixManager(seed: PrefixSeed = {}) { window.dispatchEvent(new CustomEvent(PREFIX_MANAGER_EVENT, { detail: seed })); }
 export type SharedLibrary = PrefixLibrary & { revision?: string };
@@ -61,6 +64,28 @@ export async function savePrefix(name: string, values: string[], revision?: stri
     changed();
     return 'Saved to shared Prompt Library';
 }
+/** Pair images with an existing prefix without changing its terms. */
+export async function associateImages(prefixId: string, imageKeys: string[], imageRefs: Record<string, PrefixImage> = {}, revision?: string) {
+    const result = await request({ action: 'associate', prefix_id: prefixId, image_keys: imageKeys, image_refs: imageRefs, revision: revision || (await loadPrefixes()).revision });
+    localStorage.setItem('comfy.prompt-library.v2', JSON.stringify(result.library));
+    changed();
+}
+/** Remove image pairings (the prefix itself is kept). */
+export async function dissociateImages(imageKeys: string[], revision?: string) {
+    const result = await request({ action: 'dissociate', image_keys: imageKeys, revision: revision || (await loadPrefixes()).revision });
+    localStorage.setItem('comfy.prompt-library.v2', JSON.stringify(result.library));
+    changed();
+}
+export type PrefixPolarity = 'all' | 'positive' | 'negative' | 'both';
+/** Which sides a prefix has terms on: positive only, negative only, or both. */
+export function prefixSides(prefix: { tags: string[]; negative_terms?: string[] }): Exclude<PrefixPolarity, 'all'> | 'empty' {
+    const positive = prefix.tags.length > 0, negative = !!prefix.negative_terms?.length;
+    return positive && negative ? 'both' : positive ? 'positive' : negative ? 'negative' : 'empty';
+}
+/** Spelled-out sides of a prefix, for lists ("Pose · positive only"). */
+export const sidesLabel = (prefix: { tags: string[]; negative_terms?: string[] }) => ({ positive: 'positive only', negative: 'negative only', both: 'positive + negative', empty: 'empty' } as const)[prefixSides(prefix)];
+export const matchesPolarity = (prefix: { tags: string[]; negative_terms?: string[] }, filter: PrefixPolarity) => filter === 'all' || prefixSides(prefix) === filter;
+export const POLARITY_OPTIONS: { value: PrefixPolarity; label: string }[] = [{ value: 'all', label: 'All prefixes' }, { value: 'positive', label: 'Positive only' }, { value: 'negative', label: 'Negative only' }, { value: 'both', label: 'Positive and negative' }];
 export async function deletePrefix(id: string, revision: string) {
     const result = await request({ action: 'delete', id, revision });
     localStorage.setItem('comfy.prompt-library.v2', JSON.stringify(result.library));
@@ -74,8 +99,11 @@ export function applyLibraryPrefix(node: any, library: PrefixLibrary, id: string
     node.graph.beforeChange?.();
     try {
         node.properties ||= {}; node.properties.prompt_library_selected_prefix = id;
+        const value = text ?? expandPrefix(library, '@' + prefix.name).join(', ');
+        // The encoder shows boxes; setting its text means replacing them with one box named after the prefix.
+        if (node.__galleryPromptBoxes) { node.__galleryPromptBoxes.insert(value, 'replace', prefix.name); return; }
         if (widget.inputEl) widget.inputEl.readOnly = false;
-        widget.value = text ?? expandPrefix(library, '@' + prefix.name).join(', ');
+        widget.value = value;
         if (widget.inputEl) widget.inputEl.value = widget.value;
         widget.callback?.(widget.value); node.setDirtyCanvas?.(true, true);
     } finally { node.graph.afterChange?.(); }
@@ -87,7 +115,7 @@ export function installPrefixWidgets(node: any) {
     setTimeout(() => {
         const prompt = node.widgets?.find((widget: any) => ['prefix', 'text'].includes(widget.name));
         if (prompt?.inputEl) { prompt.inputEl.readOnly = false; prompt.inputEl.disabled = false; }
-        installEffectivePrompt(node);
+        installPromptBoxes(node, { loadLibrary: loadPrefixes, expandPrefix });
         const existing = node.widgets?.find((widget: any) => widget.name === 'Open prompt library');
         const open = () => openPrefixManager({ node });
         if (existing) existing.callback = open;
@@ -103,43 +131,13 @@ export function writeLibraryNodeText(node: any, text: string) {
     const widget = node?.widgets?.find((value: any) => value.name === 'prefix' || value.name === 'text');
     if (!widget || !node.graph) throw new Error('The prompt node is no longer in the workflow.');
     node.graph.beforeChange?.();
-    try { widget.value = text; if (widget.inputEl) { widget.inputEl.value = text; widget.inputEl.readOnly = false; } widget.callback?.(text); node.setDirtyCanvas?.(true, true); }
+    try {
+        if (node.__galleryPromptBoxes) { node.__galleryPromptBoxes.insert(text, 'replace'); return; }
+        widget.value = text; if (widget.inputEl) { widget.inputEl.value = text; widget.inputEl.readOnly = false; } widget.callback?.(text); node.setDirtyCanvas?.(true, true);
+    }
     finally { node.graph.afterChange?.(); }
 }
 
 export function imagePrefixRefs(entry: { name?: string; hash?: string; local?: { url: string } }, root: string): Record<string, PrefixImage> {
     return Object.fromEntries(imagePrefixKeys(entry, root).map(key => [key, { name: entry.name || '', ...(entry.hash ? { hash: entry.hash } : {}), ...(entry.local ? { local_url: entry.local.url, root } : {}) }]));
-}
-
-export function effectiveSourceText(node: any): string | undefined {
-    const input = node.inputs?.find((input: any) => input.name === 'source_text');
-    if (input?.link == null) return undefined;
-    const graph = node.graph || getComfyApp()?.graph;
-    const link = graph?.links?.get?.(input.link) || graph?.links?.[input.link];
-    let source = graph?.getNodeById?.(link?.origin_id) || graph?._nodes?.find((value: any) => value.id === link?.origin_id);
-    if ((source?.comfyClass || source?.type) === 'GalleryImageSource' && [4, 5].includes(link?.origin_slot)) {
-        try { return sourcePrompt(JSON.parse(source.widgets.find((value: any) => value.name === 'sources').value), link.origin_slot === 4 ? 'positive' : 'negative'); } catch { return 'Source settings unavailable'; }
-    }
-    return node.__galleryRuntimeSource ?? 'Connected prompt will be shown after execution.';
-}
-function installEffectivePrompt(node: any) {
-    if ((node.comfyClass || node.type) !== 'GalleryPromptEncode' || node.__galleryEffectiveInstalled || !node.addDOMWidget) return;
-    node.__galleryEffectiveInstalled = true;
-    const box = document.createElement('div');
-    const label = document.createElement('div'); const text = document.createElement('textarea');
-    text.readOnly = true; text.setAttribute('aria-label', 'Effective encoder prompt');
-    text.style.cssText = 'width:100%;height:100px;box-sizing:border-box;resize:vertical;background:var(--comfy-input-bg,#222);color:var(--input-text,#ddd)';
-    box.append(label, text);
-    const refresh = () => { if (!node.inputs?.some((input: any) => input.name === 'source_text')) node.addInput?.('source_text', 'STRING'); if (!node.widgets?.some((widget: any) => widget.name === 'source_mode')) node.addWidget?.('combo', 'source_mode', 'after', () => { node.__galleryRuntimePrompt = undefined; refresh(); }, { values: ['after', 'before', 'replace'] }); const incoming = effectiveSourceText(node); const own = node.widgets?.find((value: any) => value.name === 'text')?.value || ''; const mode = node.widgets?.find((value: any) => value.name === 'source_mode')?.value || 'after'; label.textContent = incoming === undefined ? 'Effective prompt · own text' : 'Effective prompt · source ' + mode; text.value = node.__galleryRuntimePrompt ?? combineEncoderPrompt(own, incoming, mode); };
-    const dom = node.addDOMWidget('effective_prompt', 'effective_prompt', box, { serialize: false, getHeight: () => 125 }); if (dom) dom.serialize = false;
-    const widget = node.widgets?.find((value: any) => value.name === 'text'); const callback = widget?.callback;
-    if (widget) widget.callback = function (...args: any[]) { node.__galleryRuntimePrompt = undefined; const result = callback?.apply(this, args); refresh(); return result; };
-    for (const key of ['onConnectionsChange', 'onConfigure']) { const previous = node[key]; node[key] = function (...args: any[]) { node.__galleryRuntimePrompt = undefined; const result = previous?.apply(this, args); setTimeout(refresh, 0); return result; }; }
-    const executed = node.onExecuted; node.onExecuted = function (data: any) { const result = executed?.call(this, data); if (Array.isArray(data?.effective_prompt)) node.__galleryRuntimePrompt = data.effective_prompt[0]; refresh(); return result; };
-    const changed = () => { node.__galleryRuntimePrompt = undefined; refresh(); };
-    const modeWidget = node.widgets?.find((value: any) => value.name === 'source_mode'); const modeCallback = modeWidget?.callback;
-    if (modeWidget) modeWidget.callback = function (...args: any[]) { const result = modeCallback?.apply(this, args); changed(); return result; };
-    window.addEventListener('gallery-source-changed', changed);
-    const removed = node.onRemoved; node.onRemoved = function (...args: any[]) { window.removeEventListener('gallery-source-changed', changed); return removed?.apply(this, args); };
-    refresh(); node.setSize?.([Math.max(320, node.size?.[0] || 320), Math.max(node.size?.[1] || 0, node.computeSize?.()[1] || 280)]);
 }

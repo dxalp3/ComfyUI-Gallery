@@ -3,6 +3,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import tempfile
 import threading
 import uuid
@@ -110,6 +111,25 @@ def update(path, data):
                 for key in image_keys:
                     library.setdefault('associations', {})[key] = {'prefix_id': saved['id'], 'terms': list(dict.fromkeys(term.strip() for term in terms)), 'negative_terms': saved.get('negative_terms', []), **({'image': references[key]} if key in references else {})}
                 validate(library)
+        elif action in ('associate', 'dissociate'):
+            # Pair images with a saved prefix (or unpair them) without touching the prefix's terms.
+            image_keys = data.get('image_keys', [])
+            if not isinstance(image_keys, list) or not 1 <= len(image_keys) <= 256 or any(not isinstance(key, str) or not key or len(key) > 4096 for key in image_keys):
+                raise ValueError('Choose 1–256 images.')
+            associations = library.setdefault('associations', {})
+            if action == 'dissociate':
+                for key in image_keys: associations.pop(key, None)
+                if not associations: library.pop('associations', None)
+            else:
+                prefix = next((p for p in library['prefixes'] if p['id'] == data.get('prefix_id')), None)
+                if prefix is None: raise ValueError('That prefix no longer exists. Refresh the library.')
+                references = data.get('image_refs', {})
+                if not isinstance(references, dict) or len(references) > 256: raise ValueError('Invalid image references.')
+                texts = {t['id']: t['text'] for t in library['tags']}
+                terms = [texts[tag] for tag in prefix['tags'] if tag in texts]
+                for key in image_keys:
+                    associations[key] = {'prefix_id': prefix['id'], 'terms': terms, 'negative_terms': prefix.get('negative_terms', []), **({'image': references[key]} if isinstance(references.get(key), dict) else {})}
+            validate(library)
         else:
             raise ValueError('Invalid library action.')
         raw = json.dumps(library, ensure_ascii=False, indent=2).encode()
@@ -174,20 +194,84 @@ class GalleryPromptLibrary:
         return (prefix,)
 
 
+# The Gallery Prompt Encode node compiles its tag boxes into one string. The connected
+# `source_text` is its own box; its position is marked in that string and replaced here,
+# when the workflow runs and the source text is finally known.
+SOURCE_MARKER = '\u27e6source\u27e7'
+SOURCE_MODES = ('after', 'before', 'replace', 'boxes')
+# Saved images get a `gallery_prompts` text chunk: per encoder node, the prompt before and after
+# {a|b|c} choices were made. It travels into the Hydrus note with the rest of the metadata.
+RESOLVED_KEY = 'gallery_prompts'
+
+
+def compose_prompt(text, source_text=None, source_mode='after'):
+    if source_mode not in SOURCE_MODES: raise ValueError('Invalid source prompt order.')
+    if source_mode == 'boxes':
+        source = (source_text or '').strip().strip(',').strip()
+        joined = (text or '').replace(SOURCE_MARKER, source)
+        joined = re.sub(r'(?:\s*,\s*){2,}', ', ', joined)
+        return joined.strip().strip(',').strip()
+    return text if source_text is None else source_text if source_mode == 'replace' else ', '.join(part.strip() for part in ([source_text, text] if source_mode == 'before' else [text, source_text]) if part.strip())
+
+
+def resolve_dynamic(text, rng=None):
+    """Pick one option of every {a|b|c} group, innermost first, like ComfyUI's dynamic prompts.
+
+    ComfyUI resolves the encoder's own text in the browser when it queues a workflow, but text that
+    arrives through `source_text` (or from a node without dynamic prompts) would otherwise reach CLIP
+    with the braces still in it. Returns the resolved text and the choices that were made here.
+    """
+    import random
+    rng = rng or random
+    choices = []
+    prompt = text or ''
+    for _ in range(10000):
+        end = next((i for i, c in enumerate(prompt) if c == '}' and (i == 0 or prompt[i - 1] != '\\')), -1)
+        if end < 0: break
+        start = next((i for i in range(end - 1, -1, -1) if prompt[i] == '{' and (i == 0 or prompt[i - 1] != '\\')), -1)
+        if start < 0: break
+        options = prompt[start + 1:end].split('|')
+        chosen = rng.choice(options)
+        choices.append({'options': [option.strip() for option in options], 'chosen': chosen.strip()})
+        prompt = prompt[:start] + chosen + prompt[end + 1:]
+    prompt = re.sub(r'(?:\s*,\s*){2,}', ', ', prompt).strip().strip(',').strip()
+    return prompt, choices
+
+
 class GalleryPromptEncode:
-    """Editable prompt + shared library picker, compatible with standard CLIP conditioning."""
+    """Prompt boxes + shared library picker, compatible with standard CLIP conditioning."""
     @classmethod
     def INPUT_TYPES(cls):
-        return {'required': {'clip': ('CLIP',), 'text': ('STRING', {'multiline': True, 'dynamicPrompts': True, 'default': ''})}, 'optional': {'source_text': ('STRING', {'forceInput': True}), 'source_mode': (['after', 'before', 'replace'], {'default': 'after'})}}
+        return {'required': {'clip': ('CLIP',), 'text': ('STRING', {'multiline': True, 'dynamicPrompts': True, 'default': ''})},
+                'optional': {'source_text': ('STRING', {'forceInput': True}), 'source_mode': (list(SOURCE_MODES), {'default': 'after'})},
+                'hidden': {'extra_pnginfo': 'EXTRA_PNGINFO', 'unique_id': 'UNIQUE_ID'}}
 
     RETURN_TYPES = ('CONDITIONING', 'STRING')
     RETURN_NAMES = ('conditioning', 'text')
     FUNCTION = 'encode'
     CATEGORY = 'prompt/library'
 
-    def encode(self, clip, text, source_text=None, source_mode='after'):
+    @classmethod
+    def IS_CHANGED(cls, text='', source_text=None, source_mode='after', **kwargs):
+        # Unresolved {a|b} groups are picked here each run, so the result must not be cached.
+        return float('nan') if '{' in (text or '') + (source_text or '') else ''
+
+    def encode(self, clip, text, source_text=None, source_mode='after', extra_pnginfo=None, unique_id=None):
         if clip is None:
             raise ValueError('Connect a CLIP text encoder to Gallery Prompt Encode.')
-        if source_mode not in ('after', 'before', 'replace'): raise ValueError('Invalid source prompt order.')
-        effective = text if source_text is None else source_text if source_mode == 'replace' else ', '.join(part.strip() for part in ([source_text, text] if source_mode == 'before' else [text, source_text]) if part.strip())
-        return {'ui': {'effective_prompt': [effective]}, 'result': (clip.encode_from_tokens_scheduled(clip.tokenize(effective)), effective)}
+        composed = compose_prompt(text, source_text, source_mode)
+        effective, choices = resolve_dynamic(composed)
+        record_resolution(extra_pnginfo, unique_id, composed, effective, choices, source_text)
+        return {'ui': {'effective_prompt': [effective], 'source_text': [source_text or '']}, 'result': (clip.encode_from_tokens_scheduled(clip.tokenize(effective)), effective)}
+
+
+def record_resolution(extra_pnginfo, unique_id, composed, effective, choices, source_text=None):
+    """Store what this encoder actually encoded. SaveImage writes every extra_pnginfo key as a PNG text chunk."""
+    if not isinstance(extra_pnginfo, dict) or unique_id is None: return
+    try:
+        entry = {'text': composed, 'resolved': effective}
+        if choices: entry['choices'] = choices
+        if source_text: entry['source_text'] = source_text
+        extra_pnginfo.setdefault(RESOLVED_KEY, {})[str(unique_id)] = entry
+    except (TypeError, AttributeError):
+        pass

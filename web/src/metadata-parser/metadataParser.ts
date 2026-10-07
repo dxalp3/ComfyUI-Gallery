@@ -143,8 +143,10 @@ export function parseComfyMetadata(metadata: Metadata): Record<string, string> {
     }
     // Assign all fields to result
     result["Model"] = fields.model || '';
-    result["Positive Prompt"] = fields.positive || '';
-    result["Negative Prompt"] = fields.negative || '';
+    // Gallery Prompt Encode marks where its source box goes; the marker is not part of the prompt.
+    const unmark = (value: string) => value.includes('\u27e6source\u27e7') ? value.split('\u27e6source\u27e7').join('').replace(/(?:\s*,\s*){2,}/g, ', ').replace(/^[\s,]+|[\s,]+$/g, '') : value;
+    result["Positive Prompt"] = unmark(fields.positive || '');
+    result["Negative Prompt"] = unmark(fields.negative || '');
     result["Sampler"] = fields.sampler || '';
     result["Scheduler"] = fields.scheduler || '';
     result["Steps"] = fields.steps || '';

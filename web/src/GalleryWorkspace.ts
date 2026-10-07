@@ -28,11 +28,23 @@ export function installWorkspaceTab() {
     tab.id = 'comfy-gallery-workspace-tab'; tab.type = 'button'; tab.textContent = 'Gallery';
     tab.setAttribute('role', 'tab'); tab.setAttribute('aria-label', 'Gallery workspace');
     tab.setAttribute('aria-controls', 'comfy-gallery-workspace'); tab.setAttribute('aria-selected', 'false');
-    tab.style.cssText = 'flex:0 0 auto;align-self:stretch;min-width:100px;padding:0 18px;border:0;border-bottom:2px solid transparent;border-radius:6px 6px 0 0;background:transparent;color:#e8edf4;font:500 13px system-ui;cursor:pointer;line-height:normal;';
+    tab.style.cssText = 'display:inline-flex;align-items:center;flex:0 0 auto;align-self:stretch;height:auto;min-width:100px;padding:0 18px;border:0;border-bottom:2px solid transparent;border-radius:6px 6px 0 0;background:transparent;color:#e8edf4;font:500 13px system-ui;cursor:pointer;line-height:normal;';
     tab.addEventListener('click', openWorkspace);
     const attach = () => {
         const bar = Array.from(document.querySelectorAll<HTMLElement>('.workflow-tabs-container')).find(element => element.getBoundingClientRect().height > 0);
-        if (bar && tab && tab.parentElement !== bar) { bar.prepend(tab); if (tab.getAttribute('aria-selected') !== 'true') tab.style.color = 'var(--fg-color, #e8edf4)'; window.dispatchEvent(new Event('comfy-gallery:layout')); }
+        if (bar && tab) {
+            // Sit in the same row as the workflow tabs: next to the first real tab, not as an extra child of the
+            // container (with the newer top menu that pushed the button above the tab row).
+            let item: HTMLElement | null = bar.querySelector<HTMLElement>('[role="tab"]:not(#comfy-gallery-workspace-tab)');
+            while (item && item.parentElement && item.parentElement !== bar && item.parentElement.children.length < 2) item = item.parentElement;
+            const strip = item?.parentElement || bar;
+            const before = item && strip !== bar ? item : bar.firstElementChild;
+            if (tab.parentElement !== strip || tab.nextElementSibling !== before) {
+                strip.insertBefore(tab, before === tab ? tab.nextElementSibling : before);
+                if (tab.getAttribute('aria-selected') !== 'true') tab.style.color = 'var(--fg-color, #e8edf4)';
+                window.dispatchEvent(new Event('comfy-gallery:layout'));
+            }
+        }
         const next = !!bar;
         if (next !== available) { available = next; listeners.forEach(listener => listener()); window.dispatchEvent(new Event('comfy-gallery:layout')); }
     };

@@ -1,6 +1,8 @@
 import { appendLocalImages } from './ImageSourceBridge';
 import { Button, Checkbox, Dropdown, Image, Tag, Typography, message } from 'antd';
 import { useHydrus } from './HydrusContext';
+import { openImageInfo, openSourcePrefix } from './ImageInfo';
+import { openImageSearch } from './TagSearchPanel';
 import { hydrusStatus } from './HydrusApi';
 import type { HydrusItem } from './HydrusApi';
 import type { FileDetails } from './types';
@@ -168,7 +170,10 @@ const ImageCardView = memo(function ImageCardView({
             { key: 'source', label: `Append to Image Source (${targetCount})` },
             { key: 'export', label: `Export to Hydrus (${targetCount})` },
             { key: 'refresh', label: `Refresh Hydrus status (${targetCount})` },
-            { key: 'metadata', label: 'Hydrus metadata' },
+            { key: 'info', label: 'Metadata' },
+            { key: 'prefix', label: `Use for prefix… (${targetCount})` },
+            { key: 'imagesearch', label: 'Search by image' },
+            { key: 'imageadd', label: 'Add image to the open search' },
             { key: 'select', label: selected ? 'Deselect image' : 'Select image' },
         ], onClick: async ({ key, domEvent }) => {
             domEvent.stopPropagation();
@@ -178,7 +183,10 @@ const ImageCardView = memo(function ImageCardView({
                 try { message.success(await appendLocalImages(targets)); } catch (error) { message.error(error instanceof Error ? error.message : String(error)); } finally { done(); }
             }
             if (key === 'export') requestExport(targets);
-            if (key === 'metadata') setDetailsUrl(image.url);
+            if (key === 'info') openImageInfo({ url: image.url });
+            if (key === 'prefix') openSourcePrefix(targets);
+            if (key === 'imagesearch') openImageSearch({ chips: [{ kind: 'image', url: image.url, name: image.name }] });
+            if (key === 'imageadd') openImageSearch({ chips: [{ kind: 'image', url: image.url, name: image.name }], append: true });
             if (key === 'select') selectImage(image.url);
             if (key === 'refresh') {
                 try { const results = await refresh(targets); const failed = results.filter(item => item.error); if (failed.length) message.warning(failed[0].error); else message.success(`Refreshed ${results.length} image(s).`); }

@@ -1,3 +1,4 @@
+import { promptTags } from './PromptTags';
 import { FloatingPanel } from './FloatingPanel';
 import { PromptPalette } from './PromptPalette';
 import { useGalleryContext } from './GalleryContext';
@@ -34,7 +35,7 @@ export function AppendImagesModal({ entries, onClose }: { entries: GalleryEntry[
         const initial: Row[] = entries.map(entry => {
             const metadata = entry.local ? { ...entry.local.metadata, hydrus: hydrus.items[entry.local.url]?.metadata || (entry.local.metadata as any)?.hydrus } : { hydrus: entry.remote };
             const prompts = extractLocalPrompts(metadata);
-            return { entry, metadata, positive: prompts.positive.split(/[,\n]+/).map(value => value.trim()).filter(Boolean), negative: prompts.negative.split(/[,\n]+/).map(value => value.trim()).filter(Boolean), usePositive: false, useNegative: false, useTags: false, tags: extractHydrusTags(metadata), sync: false };
+            return { entry, metadata, positive: promptTags(prompts.positive, ''), negative: promptTags(prompts.negative, ''), usePositive: false, useNegative: false, useTags: false, tags: extractHydrusTags(metadata), sync: false };
         });
         setRows([]);
         void loadPrefixes().then(library => { if (live) setRows(initial.map(row => {

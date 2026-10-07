@@ -8,7 +8,8 @@ let target: any;
 let sourceConstructor: any;
 export const registerSourceConstructor = (value: any) => { sourceConstructor = value; };
 const children = new Set<Window>();
-const graphNow = () => getComfyApp()?.canvas?.graph || getComfyApp()?.graph;
+// Read app.graph only once the canvas exists: before that ComfyUI logs "graph accessed before initialization".
+const graphNow = () => { const app = getComfyApp(); return app?.canvas?.graph || (app?.canvas ? app.graph : undefined); };
 const isSource = (node: any) => [node?.comfyClass, node?.type, node?.constructor?.comfyClass].includes('GalleryImageSource');
 const nodes = () => (graphNow()?._nodes || []).filter(isSource);
 
@@ -124,10 +125,14 @@ function localCommand(command: string, payload: any): any {
         const widget = node?.widgets?.[index];
         if (!widget || typeof widget.value !== 'string' || typeof payload.text !== 'string' || payload.text.length > 1000000 || !['before', 'after'].includes(payload.position)) throw new Error('Choose a valid prompt target and insertion.');
         const graph = graphNow(); graph.beforeChange?.();
-        try { widget.value = mergePrompt(widget.value, payload.text, payload.position); if (widget.inputEl) widget.inputEl.value = widget.value; widget.callback?.(widget.value); node.setDirtyCanvas?.(true, true); return widget.value; }
+        try {
+            // The encoder shows boxes: an append becomes a new box, named after the prefix when one was used.
+            if (node.__galleryPromptBoxes && widget.name === 'text') return node.__galleryPromptBoxes.insert(payload.text, payload.position, typeof payload.name === 'string' ? payload.name.slice(0, 80) : undefined);
+            widget.value = mergePrompt(widget.value, payload.text, payload.position); if (widget.inputEl) widget.inputEl.value = widget.value; widget.callback?.(widget.value); node.setDirtyCanvas?.(true, true); return widget.value;
+        }
         finally { graph.afterChange?.(); }
     }
-    if (command === 'prompt_targets') return (graphNow()?._nodes || []).filter((node: any) => !isSource(node)).flatMap((node: any) => (node.widgets || []).flatMap((widget: any, index: number) => typeof widget.value === 'string' && /text|prompt|prefix|positive|negative/i.test(widget.name) ? [{ value: JSON.stringify([String(node.id), index]), label: `${node.title || node.type} #${node.id} · ${widget.name}` }] : []));
+    if (command === 'prompt_targets') return (graphNow()?._nodes || []).filter((node: any) => !isSource(node)).flatMap((node: any) => (node.widgets || []).flatMap((widget: any, index: number) => typeof widget.value === 'string' && widget.serialize !== false && /text|prompt|prefix|positive|negative/i.test(widget.name) ? [{ value: JSON.stringify([String(node.id), index]), label: `${node.title || node.type} #${node.id} · ${widget.name}` }] : []));
     if (command === 'targets') return targetInfo();
     if (command === 'target' && payload === 'new') { currentTarget(true, true); return targetInfo(); }
     if (command === 'target') { target = nodes().find((node: any) => String(node.id) === payload); if (!target) throw new Error('That target is no longer available.'); return targetInfo(); }
@@ -144,7 +149,8 @@ function localCommand(command: string, payload: any): any {
         const widget = node?.widgets?.[index];
         if (!widget || typeof widget.value !== 'string') throw new Error('The selected prompt target is no longer available.');
         if (!['replace', 'before', 'after'].includes(apply.mode)) throw new Error('Invalid prompt operation');
-        return [{ node, widget, value: mergePrompt(widget.value, payload.map((image: ImageSourceImage) => image.prompt?.[side] || '').filter(Boolean).join(', '), apply.mode) }];
+        const text = payload.map((image: ImageSourceImage) => image.prompt?.[side] || '').filter(Boolean).join(', ');
+        return [{ node, widget, text, mode: apply.mode, boxes: widget.name === 'text' ? node.__galleryPromptBoxes : undefined, value: mergePrompt(widget.value, text, apply.mode) }];
     });
     if (updates.length === 2 && updates[0].widget === updates[1].widget) throw new Error('Choose different positive and negative prompt targets.');
     const node = currentTarget(true);
@@ -154,7 +160,7 @@ function localCommand(command: string, payload: any): any {
     graph.beforeChange?.();
     try {
     saveSourceManifest(node, { ...manifest, images: [...manifest.images, ...payload.map(image => ({ input_name: image.input_name, title: String(image.title || image.input_name).slice(0, 512), metadata: image.metadata || {}, prompt: image.prompt }))] }, false);
-    for (const update of updates) { update.widget.value = update.value; update.widget.callback?.(update.value); update.node.setDirtyCanvas?.(true, true); }
+    for (const update of updates) { if (update.boxes) { update.boxes.insert(update.text, update.mode, undefined); continue; } update.widget.value = update.value; update.widget.callback?.(update.value); update.node.setDirtyCanvas?.(true, true); }
     } finally { graph.afterChange?.(); }
     target = node;
     window.dispatchEvent(new CustomEvent(SOURCE_EDITOR_EVENT, { detail: node }));
@@ -209,4 +215,4 @@ export function openGalleryTab() {
     for (const old of children) if (old.closed) children.delete(old);
 }
 
-export const writePromptTarget = (target: string, text: string, position: 'before' | 'after') => command<string>('write_prompt', { target, text, position });
+export const writePromptTarget = (target: string, text: string, position: 'before' | 'after', name?: string) => command<string>('write_prompt', { target, text, position, name });

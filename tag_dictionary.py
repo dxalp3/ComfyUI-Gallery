@@ -31,11 +31,22 @@ def dictionary():
     return values
 
 
+def strip_unresolved(text):
+    """Drop {a|b} groups that were never resolved: which option was used is unknown, so none become tags."""
+    if '{' not in text: return text
+    depth, out = 0, []
+    for char in text:
+        if char == '{': depth += 1; continue
+        if char == '}' and depth: depth -= 1; continue
+        if not depth: out.append(char)
+    return ''.join(out)
+
+
 def prompt_tags(text):
     if not isinstance(text, str) or len(text) > 1000000: raise ValueError('Prompt must be text under 1 million characters')
     lookup = dictionary()
     result = []
-    for part in re.split(r'[,\r\n]+', text):
+    for part in re.split(r'[,\r\n]+', strip_unresolved(text)):
         name = normalize(part)
         if name not in QUALITY and name in lookup and lookup[name] not in result: result.append(lookup[name])
     return result
@@ -75,15 +86,47 @@ def tag_groups():
 
 def browse_vocabulary(data):
     groups = tag_groups()
-    category = str(data.get('category', ''))
-    if category and category not in groups: raise ValueError('Unknown wiki category')
+    # `categories` (a list) replaces the single `category`; the old key still works.
+    categories = data.get('categories')
+    if categories is None:
+        legacy = str(data.get('category', ''))
+        categories = [legacy] if legacy else []
+    if not isinstance(categories, list) or len(categories) > 500 or any(not isinstance(value, str) for value in categories): raise ValueError('Invalid wiki categories')
+    if any(value not in groups for value in categories): raise ValueError('Unknown wiki category')
+    allowed = frozenset().union(*(groups[value]['tags'] for value in categories)) if categories else None
     query = normalize(str(data.get('query', ''))[:256])
     favorites = data.get('favorites')
     if favorites is not None and (not isinstance(favorites, list) or len(favorites) > 10000 or any(not isinstance(value, str) for value in favorites)):
         raise ValueError('Invalid favorite tags')
     favorites = set(favorites) if favorites is not None else None
-    rows = [row for row in vocabulary_rows() if (not category or row['name'] in groups[category]['tags']) and (favorites is None or row['name'] in favorites) and (not query or query in row['name'] or query in row['aliases'])]
+    rows = [row for row in vocabulary_rows() if (allowed is None or row['name'] in allowed) and (favorites is None or row['name'] in favorites) and (not query or query in row['name'] or query in row['aliases'])]
     rows.sort(key=(lambda row: row['name']) if data.get('sort') == 'alphabetical' else (lambda row: (-row['count'], row['name'])))
     offset = max(0, min(200000, int(data.get('offset', 0))))
     limit = max(1, min(10000 if data.get('selection') is True else 100, int(data.get('limit', 60))))
     return {'items': [{'name': row['name'], 'count': row['count']} for row in rows[offset:offset + limit]], 'total': len(rows), 'categories': [{'value': key, 'label': group['label'], 'count': len(group['tags']), 'source': group['source']} for key, group in sorted(groups.items()) if group['tags']]}
+
+
+@lru_cache(maxsize=1)
+def alias_groups():
+    """canonical name -> every spelling that means it (aliases included)."""
+    groups = {}
+    for spelling, canonical in dictionary().items():
+        groups.setdefault(canonical, set()).add(spelling)
+    return groups
+
+
+def term_aliases(terms):
+    """For each term: the spellings that count as the same tag (spaces and underscores, Danbooru aliases).
+
+    Unknown terms (custom text, LoRAs) only match themselves.
+    """
+    lookup, groups = dictionary(), alias_groups()
+    result = []
+    for term in terms:
+        canonical = lookup.get(normalize(term))
+        spellings = {term.strip().lower()}
+        if canonical:
+            for value in groups.get(canonical, {canonical}) | {canonical}:
+                spellings.update({value, value.replace('_', ' ')})
+        result.append(sorted(spellings))
+    return result

@@ -1,5 +1,7 @@
-/** Comma/newline phrases stay intact; prose is never split into individual words. */
+import { stripUnresolved } from './PromptResolution';
+
+/** Comma/newline phrases stay intact; prose is never split into individual words. {a|b} groups whose pick is unknown are left out. */
 export function promptTags(text: string, namespace: 'positive_prompt' | 'negative_prompt' | ''): string[] {
-    const phrases = text.split(/[,\r\n]+/).map(value => value.trim()).filter(Boolean);
+    const phrases = stripUnresolved(text).split(/[,\r\n]+/).map(value => value.trim()).filter(Boolean);
     return Array.from(new Set(phrases.map(value => namespace ? `${namespace}:${value}` : value)));
 }

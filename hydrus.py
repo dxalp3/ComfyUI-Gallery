@@ -1090,6 +1090,14 @@ def register_hydrus_routes(routes, get_root, storage_dir=None, get_input_root=No
                     except ValueError as error:
                         raise HydrusError(str(error)) from None
                     result = bridge.sync.status(settings)
+                elif action == "aliases":
+                    try:
+                        from .tag_dictionary import term_aliases
+                    except ImportError:
+                        from tag_dictionary import term_aliases
+                    terms = data.get('terms', [])
+                    if not isinstance(terms, list) or len(terms) > 2000 or any(not isinstance(term, str) or len(term) > 1024 for term in terms): raise HydrusError('Alias lookup accepts up to 2,000 terms.')
+                    result = {'aliases': await asyncio.to_thread(term_aliases, terms)}
                 elif action == "danbooru_tags":
                     try:
                         from .tag_dictionary import prompt_tags
@@ -1119,7 +1127,7 @@ def register_hydrus_routes(routes, get_root, storage_dir=None, get_input_root=No
 
     for method, path, action in (("post", "sync_status", "sync_status"), ("post", "sync_retry", "sync_retry"), ("post", "sync_resolve", "sync_resolve"), ("get", "settings", "get_settings"), ("post", "settings", "save_settings"),
                                  ("post", "test", "test"), ("post", "status", "status"),
-                                 ("post", "services", "services"), ("post", "dictionary", "dictionary"), ("post", "format_terms", "format_terms"), ("post", "tag_sync", "tag_sync"), ("post", "danbooru_tags", "danbooru_tags"), ("post", "save_output", "save_output"), ("post", "trash", "trash"),
+                                 ("post", "services", "services"), ("post", "dictionary", "dictionary"), ("post", "format_terms", "format_terms"), ("post", "tag_sync", "tag_sync"), ("post", "danbooru_tags", "danbooru_tags"), ("post", "aliases", "aliases"), ("post", "save_output", "save_output"), ("post", "trash", "trash"),
                                  ("post", "export", "export"), ("post", "refresh", "refresh"),
                                  ("post", "search", "search"), ("post", "pages", "pages"),
                                  ("post", "suggest", "suggest"), ("get", "download", "download"), ("get", "original", "original"),

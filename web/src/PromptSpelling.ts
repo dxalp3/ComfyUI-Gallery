@@ -1,9 +1,15 @@
 import { formatInsertion, type PromptInsertion } from './PromptInsertion';
 import { hydrusRequest } from './HydrusApi';
 import { useEffect, useState } from 'react';
-export const preferPromptSpaces = () => localStorage.getItem('gallery-prompt-spaces') !== 'false';
+const SETTINGS_KEY = 'comfy-ui-gallery-settings';
+/** Spelling is a gallery setting (Settings → Prompt tag spelling). The old browser-only checkbox is honoured until the setting is first saved. */
+export const preferPromptSpaces = () => {
+    try { const value = JSON.parse(localStorage.getItem(SETTINGS_KEY) || 'null')?.preferPromptSpaces; if (typeof value === 'boolean') return value; } catch { /* Fall back to the legacy preference. */ }
+    return localStorage.getItem('gallery-prompt-spaces') !== 'false';
+};
 export function setPromptSpaces(value: boolean) {
     localStorage.setItem('gallery-prompt-spaces', String(value));
+    try { const raw = localStorage.getItem(SETTINGS_KEY); const settings = raw ? JSON.parse(raw) : undefined; if (settings && typeof settings === 'object') localStorage.setItem(SETTINGS_KEY, JSON.stringify({ ...settings, preferPromptSpaces: value })); } catch { /* Settings storage is optional here. */ }
     window.dispatchEvent(new Event('gallery-prompt-spelling'));
 }
 export function usePromptSpelling() {
