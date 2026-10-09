@@ -19,6 +19,8 @@ export function stampOrigin(image: ImageSourceImage, origin = imageOrigin(image)
 export type ImageSourceManifest = {
     version: 1;
     active_index?: number;
+    /** Selected inputs for the separate batch IMAGE output; omitted means all. */
+    batch_indices?: number[];
     images: ImageSourceImage[];
     layout: 'single' | 'horizontal' | 'vertical' | 'grid';
     columns: number;
@@ -35,7 +37,8 @@ export function removeSourceImage(manifest: ImageSourceManifest, index: number):
     if (index < 0 || index >= manifest.images.length) return manifest;
     const images = manifest.images.filter((_, at) => at !== index);
     const active = manifest.active_index || 0;
-    return { ...manifest, images, active_index: Math.max(0, Math.min(active - (index < active ? 1 : 0), images.length - 1)) };
+    const batch = manifest.batch_indices?.filter(at => at !== index).map(at => at > index ? at - 1 : at);
+    return { ...manifest, images, batch_indices: batch?.length ? batch : undefined, active_index: Math.max(0, Math.min(active - (index < active ? 1 : 0), images.length - 1)) };
 }
 
 const finite = (value: number, fallback: number) => Number.isFinite(value) ? value : fallback;

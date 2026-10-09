@@ -1,3 +1,4 @@
+import { sourceImageUrl, type ImageSourceImage } from './ImageSourceGeometry';
 import { FloatingPanel } from './FloatingPanel';
 import { PreviewMedia, stopMedia } from './PreviewMedia';
 import { openImageInfo, openSourcePrefix } from './ImageInfo';
@@ -81,15 +82,23 @@ export function UnifiedGallery({ sortRequest, source, remote, selectedRemote, se
      * images, not through the main grid, and the main gallery's filter and scope stay as they are.
      */
     const [viewerUrls, setViewerUrls] = useState<string[]>();
+    const [sourceImages, setSourceImages] = useState<ImageSourceImage[]>();
     const viewerList = useMemo(() => {
-        if (!viewerUrls) return undefined;
+        if (!viewerUrls && !sourceImages) return undefined;
         const byUrl = new Map(Object.values(gallery.data?.folders || {}).flatMap(folder => Object.values(folder)).map(file => [file.url, file]));
-        return viewerUrls.flatMap(url => byUrl.get(url) ? [localEntry(byUrl.get(url)!)] : []);
-    }, [viewerUrls, gallery.data, hydrus.items]);
+        if (sourceImages) return sourceImages.map(image => {
+            const original = image.metadata?.gallery_url;
+            const file = original && byUrl.get(original);
+            if (file) return localEntry(file);
+            const url = sourceImageUrl(image.input_name);
+            return { id: 'local:' + url, source: 'node', name: image.title || image.input_name, local: { name: image.title || image.input_name, url, timestamp: 0, date: '', type: 'image', metadata: image.metadata || { fileinfo: {} } } } as GalleryEntry;
+        });
+        return viewerUrls!.flatMap(url => byUrl.get(url) ? [localEntry(byUrl.get(url)!)] : []);
+    }, [viewerUrls, sourceImages, gallery.data, hydrus.items]);
     const shown = viewerList || entries;
     const index = shown.findIndex(entry => entry.id === viewer);
     const current = shown[index];
-    const thumbnail = (entry: GalleryEntry) => entry.local ? `${BASE_PATH}/Gallery/thumbnail?url=${encodeURIComponent(entry.local.url)}&v=${entry.local.timestamp || 0}&root=${encodeURIComponent(gallery.settings.relativePath)}` : `${BASE_PATH}/Gallery/hydrus/thumbnail?hash=${entry.hash}&target=${encodeURIComponent(scope)}`;
+    const thumbnail = (entry: GalleryEntry) => entry.source === 'node' ? BASE_PATH + entry.local!.url : entry.local ? `${BASE_PATH}/Gallery/thumbnail?url=${encodeURIComponent(entry.local.url)}&v=${entry.local.timestamp || 0}&root=${encodeURIComponent(gallery.settings.relativePath)}` : `${BASE_PATH}/Gallery/hydrus/thumbnail?hash=${entry.hash}&target=${encodeURIComponent(scope)}`;
     const original = (entry: GalleryEntry) => entry.local ? `${BASE_PATH}${entry.local.url}` : `${BASE_PATH}/Gallery/hydrus/original?hash=${entry.hash}&target=${encodeURIComponent(scope)}`;
     useEffect(() => { setZoom(1); setFailedOriginal(undefined); setMediaError(false); }, [viewer]);
     useEffect(() => {
@@ -100,16 +109,24 @@ export function UnifiedGallery({ sortRequest, source, remote, selectedRemote, se
     useEffect(() => { setViewer(undefined); setTrashing([]); }, [scope]);
     // The image search window opens its results here ("Open in gallery view").
     useEffect(() => {
-        const show = (event: Event) => { const { url, urls } = (event as CustomEvent<{ url: string; urls?: string[] }>).detail || {}; if (url) { setViewerUrls(urls?.length ? urls : undefined); setViewer('local:' + url); } };
+        const show = (event: Event) => {
+            const { url, urls, sourceImages: images, sourceIndex = 0 } = (event as CustomEvent<{ url: string; urls?: string[]; sourceImages?: ImageSourceImage[]; sourceIndex?: number }>).detail || {};
+            if (images?.length) {
+                const image = images[sourceIndex] || images[0];
+                const original = image.metadata?.gallery_url;
+                const file = original && Object.values(gallery.data?.folders || {}).some(folder => Object.values(folder).some(file => file.url === original));
+                gallery.setOpen(true); setSourceImages(images); setViewerUrls(undefined); setViewer('local:' + (file ? original : sourceImageUrl(image.input_name)));
+            } else if (url) { setSourceImages(undefined); setViewerUrls(urls?.length ? urls : undefined); setViewer('local:' + url); }
+        };
         window.addEventListener(OPEN_VIEWER_EVENT, show);
         return () => window.removeEventListener(OPEN_VIEWER_EVENT, show);
-    }, []);
+    }, [gallery.data, gallery.setOpen]);
     const setSelection = (ids: Set<string>) => {
         gallery.setSelectedImages([...ids].filter(id => id.startsWith('local:')).map(id => id.slice(6)));
         setSelectedRemote([...ids].filter(id => id.startsWith('hydrus:')).map(id => id.slice(7)));
     };
     const toggle = (entry: GalleryEntry, range = false) => {
-        if (disabled) return;
+        if (disabled || entry.source === 'node') return;
         const next = new Set(selected);
         const start = entries.findIndex(item => item.id === anchor.current);
         const end = entries.findIndex(item => item.id === entry.id);
@@ -124,6 +141,7 @@ export function UnifiedGallery({ sortRequest, source, remote, selectedRemote, se
     };
     const targets = (entry?: GalleryEntry) => entry && !selected.has(entry.id) ? [entry] : shownSelected;
     const act = async (key: string, entry?: GalleryEntry) => {
+        if (entry?.source === 'node' && !['download'].includes(key)) return;
         const list = targets(entry);
         const local = list.flatMap(item => item.local?.type === 'image' ? [item.local.url] : []);
         const hashes = list.flatMap(item => item.remote && (key === 'download' || isImage(item)) ? [item.remote.hash] : []);
@@ -168,7 +186,7 @@ export function UnifiedGallery({ sortRequest, source, remote, selectedRemote, se
             }
         });
     };
-    const menu = (entry: GalleryEntry) => ({ items: [
+    const menu = (entry: GalleryEntry) => ({ items: entry.source === 'node' ? [{ key: 'download', label: 'Download original' }] : [
         { key: 'select', label: selected.has(entry.id) ? 'Deselect image' : 'Select image' },
         { key: 'source', disabled: !targets(entry).some(isImage), label: `Append to Image Source (${targets(entry).filter(item => isImage(item)).length})` },
         { key: 'info', label: 'Metadata' },
@@ -190,7 +208,7 @@ export function UnifiedGallery({ sortRequest, source, remote, selectedRemote, se
     useEffect(() => { if (viewer && index >= 0 && !viewerList) grid.current?.scrollToItem({ rowIndex: Math.floor(index / columns.current), columnIndex: index % columns.current }); }, [viewer, index]);
     const closeViewer = () => {
         stopMedia(viewerRef.current);
-        setViewer(undefined); setViewerUrls(undefined);
+        setViewer(undefined); setViewerUrls(undefined); setSourceImages(undefined);
         if (index >= 0 && !viewerList) grid.current?.scrollToItem({ rowIndex: Math.floor(index / columns.current), columnIndex: index % columns.current });
     };
     const renderCard = (rowIndex: number, columnIndex: number, count: number, style: React.CSSProperties) => {
@@ -270,7 +288,7 @@ export function UnifiedGallery({ sortRequest, source, remote, selectedRemote, se
             }}</AutoSizer>}
         </div>
         {/* The image takes all the height the window has: one compact toolbar row above, the filmstrip below. */}
-        <FloatingPanel panelKey="viewer" destroyOnHidden className="cg-viewer" title={current ? `Gallery viewer · ${index + 1} / ${shown.length}${viewerList ? ' (search results)' : ''} · ${current.name}` : 'Gallery viewer'} open={!!current && active} onCancel={closeViewer} width="96vw" zIndex={BASE_Z_INDEX + 10} footer={null}
+        <FloatingPanel panelKey="viewer" destroyOnHidden className="cg-viewer" title={current ? `Gallery viewer · ${index + 1} / ${shown.length}${viewerList ? sourceImages ? ' (node images)' : ' (search results)' : ''} · ${current.name}` : 'Gallery viewer'} open={!!current && active} onCancel={closeViewer} width="96vw" zIndex={BASE_Z_INDEX + 10} footer={null}
             initialSize={{ width: innerWidth * .96, height: innerHeight - 76 }} bodyStyle={{ padding: 8, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
             afterOpenChange={opened => { if (opened) viewerRef.current?.focus(); }}>
             {current && active && <div ref={viewerRef} tabIndex={-1} style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: 1, minHeight: 0, outline: 'none' }} onKeyDown={event => {
@@ -280,13 +298,13 @@ export function UnifiedGallery({ sortRequest, source, remote, selectedRemote, se
             }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', flex: 'none' }}>
                     <Space.Compact><Button size="small" disabled={index === 0} title="Previous image (←)" onClick={() => move(-1)}>◀</Button><Button size="small" disabled={index === shown.length - 1} title="Next image (→)" onClick={() => move(1)}>▶</Button></Space.Compact>
-                    <Checkbox className="cg-file-checkbox" checked={selected.has(current.id)} disabled={disabled} onClick={event => toggle(current, event.shiftKey)}>Selected</Checkbox>
+                    <Checkbox className="cg-file-checkbox" checked={selected.has(current.id)} disabled={disabled || current.source === 'node'} onClick={event => toggle(current, event.shiftKey)}>Selected</Checkbox>
                     <Space.Compact><Button size="small" title="Zoom out" onClick={() => setZoom(value => Math.max(.25, value / 1.5))}>−</Button><Button size="small" title="Fit to the window" onClick={() => setZoom(1)}>{Math.round(zoom * 100)}%</Button><Button size="small" title="Zoom in" onClick={() => setZoom(value => Math.min(8, value * 1.5))}>+</Button></Space.Compact>
-                    <Button size="small" onClick={() => openImageInfo({ url: current.local?.url, remote: current.local ? undefined : current.remote })}>Metadata</Button>
-                    <Button size="small" onClick={() => openSourcePrefix([current])}>Use for prefix…</Button>
-                    <Button size="small" disabled={disabled || !targets(current).some(isImage)} onClick={() => void act('source', current)}>Append for img2img</Button>
+                    <Button size="small" disabled={current.source === 'node'} onClick={() => openImageInfo({ url: current.local?.url, remote: current.local ? undefined : current.remote })}>Metadata</Button>
+                    <Button size="small" disabled={current.source === 'node'} onClick={() => openSourcePrefix([current])}>Use for prefix…</Button>
+                    <Button size="small" disabled={disabled || current.source === 'node' || !targets(current).some(isImage)} onClick={() => void act('source', current)}>Append for img2img</Button>
                     <Button size="small" onClick={closeViewer}>{viewerList ? 'Close' : 'Show in grid'}</Button>
-                    <Button size="small" danger disabled={disabled} onClick={() => void act(current.local ? 'delete' : 'trash', current)}>Delete</Button>
+                    <Button size="small" danger disabled={disabled || current.source === 'node'} onClick={() => void act(current.local ? 'delete' : 'trash', current)}>Delete</Button>
                     <Typography.Text type="secondary" style={{ marginLeft: 'auto', fontSize: 12 }}>← → browse · Space selects · right-click for actions</Typography.Text>
                 </div>
                 <Dropdown trigger={['contextMenu']} disabled={disabled} menu={menu(current)}>

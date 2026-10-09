@@ -1,11 +1,11 @@
+import { DeletePrefixButton } from './DeletePrefixButton';
 import { useMemo, useState } from 'react';
 import { splitTop } from './PromptBoxes';
-import { Button, Input, Modal, Select, Space, Typography, message } from 'antd';
+import { Button, Input, Select, Space, Typography, message } from 'antd';
 import { FloatingPanel } from './FloatingPanel';
 import { PrefixImages } from './PrefixImages';
 import { expandPrefix, expandSearchTerms, matchesPolarity, POLARITY_OPTIONS, type PrefixPolarity, type SharedLibrary } from './PrefixLibrary';
 import type { LocalSearchField } from './LocalImageSearch';
-import { BASE_Z_INDEX } from './ComfyAppApi';
 
 export type Phrase = { value: string; label: string; side: string; count: number };
 const fieldFor = (side: string): LocalSearchField => side === 'hydrus' ? 'hydrus' : side === 'negative' ? 'negative' : side === 'Library prefix' || side === 'Tag' ? 'all' : 'positive';
@@ -71,7 +71,7 @@ export function LibrarySearchPanel({ open, onClose, pool, shared, status, indexe
                     <Button title={prefix ? 'Paired images, their lineage and images with these tags' : undefined} onClick={() => onSearch(prefix ? expandPrefix(shared, '@' + item.label) : expandSearchTerms(shared, item.value), fieldFor(item.side), prefix?.id)}>Search</Button>
                     {prefix && canAppendToNode && <Button onClick={() => onAppendToNode(prefix.id)}>Append prefix to node</Button>}
                     {prefix && <Button onClick={() => onEditPrefix(prefix.name)}>Edit prefix</Button>}
-                    {prefix && <Button danger onClick={() => Modal.confirm({ title: 'Delete prefix ' + item.label + '?', content: 'Its vocabulary tags and existing workflow text are retained.', zIndex: BASE_Z_INDEX + 90, onOk: () => onDeletePrefix(prefix.id) })}>Delete prefix</Button>}
+                    {prefix && <DeletePrefixButton id={prefix.id} name={prefix.name} onDelete={onDeletePrefix} />}
                     {!prefix && <Button onClick={() => onAddToDraft(expandSearchTerms(shared, item.value), item.side === 'negative' ? 'negative' : 'positive')}>Add to draft</Button>}
                     <Button onClick={() => navigator.clipboard.writeText(item.value).then(() => message.success('Copied prompt text')).catch(error => message.error(String(error)))}>Copy</Button>
                 </Space>

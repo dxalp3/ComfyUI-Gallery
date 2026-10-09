@@ -1,3 +1,4 @@
+import { refreshSourcePrefix } from './SourcePrefixes';
 import { installPromptBoxes } from './EncoderNode';
 import { getComfyApp } from './ComfyAppApi';
 import { splitTop } from './PromptBoxes';
@@ -27,21 +28,42 @@ async function request(body?: unknown): Promise<{ library: PrefixLibrary; revisi
 let channel: BroadcastChannel | undefined;
 if (typeof BroadcastChannel !== 'undefined') {
     channel = new BroadcastChannel('gallery-prefix-library');
-    channel.onmessage = () => window.dispatchEvent(new Event('gallery-prefix-library-changed'));
+    channel.onmessage = () => { void loadPrefixes().then(() => window.dispatchEvent(new Event('gallery-prefix-library-changed'))).catch(() => {}); };
 }
-function changed() {
+function syncSources(library: PrefixLibrary) {
+    const app = getComfyApp(), graph = app?.canvas?.graph || (app?.canvas ? app.graph : undefined);
+    let changed = false;
+    for (const node of graph?._nodes || []) {
+        if ((node.comfyClass || node.type) !== 'GalleryImageSource') continue;
+        const widget = node.widgets?.find((item: any) => item.name === 'sources');
+        try {
+            const state = JSON.parse(widget.value);
+            state.images = state.images.map((image: any) => refreshSourcePrefix(image, library));
+            const value = JSON.stringify(state);
+            if (value !== widget.value) { widget.value = value; widget.callback?.(value); node.__galleryRefreshPreview?.(); node.setDirtyCanvas?.(true, true); changed = true; }
+            if (Array.isArray(node.properties?.gallery_source_history)) {
+                const history = node.properties.gallery_source_history.map((image: any) => refreshSourcePrefix(image, library));
+                if (JSON.stringify(history) !== JSON.stringify(node.properties.gallery_source_history)) { node.properties.gallery_source_history = history; changed = true; }
+            }
+        } catch { /* An invalid source manifest is handled by its own editor. */ }
+    }
+    if (changed) { graph?.change?.(); window.dispatchEvent(new Event('gallery-source-changed')); }
+}
+function changed(library?: PrefixLibrary) {
+    if (library) syncSources(library);
     window.dispatchEvent(new Event('gallery-prefix-library-changed'));
     channel?.postMessage('changed');
 }
 export async function loadPrefixes(): Promise<SharedLibrary> {
     const result = await request();
+    syncSources(result.library);
     return { ...result.library, revision: result.revision };
 }
 export async function migrateBrowserPrefixes(revision: string) {
     const raw = localStorage.getItem('comfy.prompt-library.v2') || localStorage.getItem('comfy.tag-prefix-library.v1');
     if (!raw) throw new Error('No legacy browser library found.');
-    await request({ action: 'migrate', revision, library: JSON.parse(raw) });
-    changed();
+    const result = await request({ action: 'migrate', revision, library: JSON.parse(raw) });
+    changed(result.library);
 }
 /** Prefix terms in a text: comma or line separated, but a comma inside a group stays (`{(a, b)|}` is one term). */
 const termsOfText = (text: string) => text.split(/\n+/).flatMap(line => splitTop(line, ','));
@@ -64,20 +86,20 @@ export function expandSearchTerms(library: PrefixLibrary, value: string): string
 export async function savePrefix(name: string, values: string[], revision?: string, imageKeys?: string[], negativeTerms?: string[], imageRefs?: Record<string, PrefixImage>) {
     const result = await request({ action: 'save', name, terms: values, image_keys: imageKeys || [], negative_terms: negativeTerms, image_refs: imageRefs || {}, revision: revision || (await loadPrefixes()).revision });
     localStorage.setItem('comfy.prompt-library.v2', JSON.stringify(result.library));
-    changed();
+    changed(result.library);
     return 'Saved to shared Prompt Library';
 }
 /** Pair images with an existing prefix without changing its terms. */
 export async function associateImages(prefixId: string, imageKeys: string[], imageRefs: Record<string, PrefixImage> = {}, revision?: string) {
     const result = await request({ action: 'associate', prefix_id: prefixId, image_keys: imageKeys, image_refs: imageRefs, revision: revision || (await loadPrefixes()).revision });
     localStorage.setItem('comfy.prompt-library.v2', JSON.stringify(result.library));
-    changed();
+    changed(result.library);
 }
 /** Remove image pairings (the prefix itself is kept). */
 export async function dissociateImages(imageKeys: string[], revision?: string) {
     const result = await request({ action: 'dissociate', image_keys: imageKeys, revision: revision || (await loadPrefixes()).revision });
     localStorage.setItem('comfy.prompt-library.v2', JSON.stringify(result.library));
-    changed();
+    changed(result.library);
 }
 export type PrefixPolarity = 'all' | 'positive' | 'negative' | 'both';
 /** Which sides a prefix has terms on: positive only, negative only, or both. */
@@ -92,7 +114,7 @@ export const POLARITY_OPTIONS: { value: PrefixPolarity; label: string }[] = [{ v
 export async function deletePrefix(id: string, revision: string) {
     const result = await request({ action: 'delete', id, revision });
     localStorage.setItem('comfy.prompt-library.v2', JSON.stringify(result.library));
-    changed();
+    changed(result.library);
 }
 const isPrefixNode = (node: any) => ['TagPrefixPromptLibrary', 'GalleryPromptLibrary', 'GalleryPromptEncode'].includes(node?.comfyClass || node?.type || node?.constructor?.comfyClass);
 export function applyLibraryPrefix(node: any, library: PrefixLibrary, id: string, text?: string) {

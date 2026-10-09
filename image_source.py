@@ -77,6 +77,11 @@ def parse_manifest(value):
               "background": value.get("background", "#ffffff")}
     if not isinstance(result["background"], str) or not re.fullmatch(r"#[0-9a-fA-F]{6}", result["background"]):
         raise ImageSourceError("Background must be a color in #rrggbb format.")
+    if 'batch_indices' in value:
+        indices = value['batch_indices']
+        if not isinstance(indices, list) or not indices or len(indices) > len(images):
+            raise ImageSourceError('Select at least one image for the batch output.')
+        result['batch_indices'] = list(dict.fromkeys(_integer(index, 'Batch image', 0, len(images) - 1) for index in indices))
     for raw in images:
         if not isinstance(raw, dict):
             raise ImageSourceError("Each source must identify an input image.")
@@ -238,13 +243,14 @@ def preview_composition(manifest, input_root):
 
 
 def render_batch(manifest, input_root):
-    """Every image of the source as one batch (crops applied, whatever the layout), for nodes that take several
+    """Selected images of the source as one batch (crops applied, whatever the layout), for nodes that take several
     images at once such as IPAdapter. A batch needs one size: each image is scaled to cover the first one's size
     and centre-cropped, so nothing is stretched."""
     manifest = parse_manifest(manifest)
     frames, size = [], None
     try:
-        for item in manifest["images"]:
+        selected = [manifest['images'][index] for index in manifest.get('batch_indices', range(len(manifest['images'])))]
+        for item in selected:
             path = resolve_input(input_root, item["input_name"])
             box = crop_box(inspect_image(path), item.get("crop"))
             with Image.open(path) as image:
@@ -260,7 +266,7 @@ def render_batch(manifest, input_root):
                     oriented.close()
             if size is None:
                 size = frame.size
-                if size[0] * size[1] * len(manifest["images"]) > MAX_PIXELS:
+                if size[0] * size[1] * len(selected) > MAX_PIXELS:
                     frame.close()
                     raise ImageSourceError("The batch exceeds 64 megapixels. Crop the first image or use fewer sources.")
             elif frame.size != size:
@@ -285,7 +291,7 @@ class GalleryImageSource:
     RETURN_TYPES = ("IMAGE", "MASK", "INT", "INT", "STRING", "STRING", "STRING", "IMAGE")
     RETURN_NAMES = ("image", "mask", "width", "height", "positive", "negative", "source_metadata", "batch")
     FUNCTION = "compose"
-    DESCRIPTION = "Choose local or Hydrus images in Gallery, crop them, and join them without rescaling. `batch` holds every image at the first one's size (for IPAdapter and similar)."
+    DESCRIPTION = "Choose local or Hydrus images in Gallery, crop them, and join them without rescaling. `batch` holds the images selected in Pick images (all by default), sized to the first selected image."
 
     @classmethod
     def INPUT_TYPES(cls):

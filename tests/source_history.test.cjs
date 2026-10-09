@@ -1,7 +1,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { load } = require('./ts_loader.cjs');
-const { mergeSourceHistory, filterSourceHistory, sourceStripRange, sourcePickerPlacement, SOURCE_HISTORY_LIMIT } = load('SourceHistory');
+const { mergeSourceHistory, filterSourceHistory, sourcePickerPlacement, SOURCE_HISTORY_LIMIT } = load('SourceHistory');
 const image = (name, origin) => ({ input_name: name, metadata: { gallery_origin: origin } });
 
 test('history preserves removed images and metadata across workflow serialization without duplicates', () => {
@@ -29,14 +29,6 @@ test('All, Imported and Generated search only the supplied node history', () => 
     assert.deepEqual(filterSourceHistory(history, 'generated', 'SUN', true).map(item => item.input_name), ['gallery_sources/sun.png']);
     assert.deepEqual(filterSourceHistory(history, 'all', 'not-in-this-node', true), []);
     assert.equal(history[0].input_name, 'gallery_sources/sun.png');
-});
-
-test('strip always includes focused image and mounts no more than five thumbnails', () => {
-    for (let count = 1; count <= 32; count++) for (let focus = 0; focus < count; focus++) {
-        const { start, end } = sourceStripRange(count, focus);
-        assert.ok(start >= 0 && end <= count && end - start <= 5);
-        assert.ok(start <= focus && end > focus);
-    }
 });
 
 test('dropdown anchors below, flips above and stays within viewport horizontally', () => {

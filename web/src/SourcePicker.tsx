@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 import { getComfyApp } from './ComfyAppApi';
-import { imageOrigin, ORIGIN_STYLE, removeSourceImage, type ImageSourceImage } from './ImageSourceGeometry';
+import { removeSourceImage, type ImageSourceImage } from './ImageSourceGeometry';
 import { filterSourceHistory, sourcePickerPlacement, type HistoryTab } from './SourceHistory';
 import { addToNode, readSourceHistory, readSourceManifest, saveSourceManifest, SOURCE_PICKER_EVENT, uploadImages, type SourcePickerRequest } from './ImageSourceBridge';
 
@@ -52,6 +52,8 @@ export function SourcePicker() {
     const [newest, setNewest] = useState(true);
     const [grid, setGrid] = useState(true);
     const [error, setError] = useState('');
+    const [batch, setBatch] = useState(false);
+    const [selection, setSelection] = useState<string[]>([]);
     const [busy, setBusy] = useState(false);
     const [revision, setRevision] = useState(0);
     const root = useRef<HTMLDivElement>(null), search = useRef<HTMLInputElement>(null), file = useRef<HTMLInputElement>(null);
@@ -69,6 +71,9 @@ export function SourcePicker() {
             const detail = (event as CustomEvent<SourcePickerRequest>).detail;
             if (!detail?.node || typeof detail.anchor !== 'function') return;
             if (current.current?.node === detail.node) { close(); return; }
+            setBatch(!!detail.batch);
+            const state = readSourceManifest(detail.node);
+            setSelection((state.batch_indices || []).map(index => state.images[index]?.input_name).filter(Boolean));
             setPlacement(undefined); setError(''); setQuery(''); setTab('all'); setRequest(detail);
         };
         const changed = () => setRevision(value => value + 1);
@@ -114,6 +119,7 @@ export function SourcePicker() {
     const node = request.node;
     const pick = (image: ImageSourceImage) => {
         setError('');
+        if (batch) { setSelection(old => old.includes(image.input_name) ? old.filter(name => name !== image.input_name) : [...old, image.input_name]); return; }
         try {
             let state = readSourceManifest(node);
             let index = state.images.findIndex(item => item.input_name === image.input_name);
@@ -126,6 +132,16 @@ export function SourcePicker() {
             if (state.layout !== 'single') node.__galleryFocusImage?.(index);
             if (current.current?.node === node) close(true);
         } catch (reason) { setError(String(reason instanceof Error ? reason.message : reason)); }
+    };
+    const applyBatch = () => {
+        try {
+            const state = readSourceManifest(node), images = [...state.images];
+            for (const name of selection) if (!images.some(image => image.input_name === name)) { const image = history.find(image => image.input_name === name); if (image) images.push(image); }
+            if (images.length > 32) throw new Error('A node can hold at most 32 images. Remove some images first.');
+            const indices = selection.map(name => images.findIndex(image => image.input_name === name)).filter(index => index >= 0);
+            if (!indices.length) throw new Error('Select at least one image.');
+            saveSourceManifest(node, { ...state, images, batch_indices: indices }); close(true);
+        } catch (reason) { setError(String(reason)); }
     };
     const upload = async (files: File[]) => {
         if (!files.length) return;
@@ -141,26 +157,28 @@ export function SourcePicker() {
         <span className="sp-arrow" style={{ left: placement.arrow - 5, ...(placement.side === 'below' ? { top: -6, borderLeft: '1px solid var(--sp-border)', borderTop: '1px solid var(--sp-border)' } : { bottom: -6, borderRight: '1px solid var(--sp-border)', borderBottom: '1px solid var(--sp-border)' }) }} />
         <header><strong>Image history{node.id != null ? ` · #${node.id}` : ''}</strong><button aria-label="Close image picker" onClick={() => close(true)}>×</button></header>
         <div className="sp-tabs" role="tablist" aria-label="History source">
-            {(['all', 'imported', 'generated'] as const).map(key => <button key={key} role="tab" aria-selected={key === tab} onClick={() => setTab(key)}>{key === 'all' ? 'All' : key === 'imported' ? 'Imported' : 'Generated'} <small>{counts[key]}</small></button>)}
+            {(['all', 'imported', 'generated'] as const).map(key => <button key={key} role="tab" aria-selected={key === tab} onClick={() => setTab(key)}>{key === 'all' ? 'In this node' : key === 'imported' ? 'Imported' : 'Generated'} <small>{counts[key]}</small></button>)}
         </div>
         <div className="sp-tools">
             <input ref={search} type="search" placeholder="Search this node…" aria-label="Search this node's history" value={query} onChange={event => setQuery(event.target.value)} />
             <button title={newest ? 'Newest first' : 'Oldest first'} aria-label={newest ? 'Newest first' : 'Oldest first'} onClick={() => setNewest(value => !value)}>{newest ? '↓' : '↑'}</button>
             <button title={grid ? 'Show list' : 'Show grid'} aria-label={grid ? 'Show list' : 'Show grid'} onClick={() => setGrid(value => !value)}>{grid ? '☰' : '▦'}</button>
         </div>
+        <div className="sp-tools"><button aria-pressed={batch} onClick={() => setBatch(value => !value)}>{batch ? 'Cancel batch selection' : 'Select batch images'}</button>
+            {batch && <><button onClick={() => setSelection(items.map(image => image.input_name))}>Select shown</button><button onClick={() => setSelection([])}>Clear</button></>}
+        </div>
         {error && <div className="sp-error" role="alert">{error}</div>}
         <div className="sp-scroll">
             {!items.length ? <div className="sp-empty">{query ? 'No matching images in this node.' : history.length ? 'No images of this type in this node.' : 'Images added to this node will appear here.'}</div> :
                 <div className={grid ? 'sp-grid' : 'sp-list'}>{items.map(image => {
                     const index = manifest.images.findIndex(item => item.input_name === image.input_name);
-                    const selected = index >= 0 && index === (manifest.layout === 'single' ? manifest.active_index || 0 : node.__galleryViewIndex || 0);
-                    const origin = imageOrigin(image), look = ORIGIN_STYLE[origin], name = image.title || image.input_name.split('/').pop()!;
+                    const selected = batch ? selection.includes(image.input_name) : index >= 0 && index === (manifest.layout === 'single' ? manifest.active_index || 0 : node.__galleryViewIndex || 0);
+                    const name = image.title || image.input_name.split('/').pop()!;
                     return <div className="sp-tile" key={image.input_name}>
                         <button className="sp-image" disabled={busy} aria-label={(index < 0 ? 'Restore ' : 'Select ') + name} aria-pressed={selected}
-                            title={(index < 0 ? 'Restore from history: ' : 'Select image: ') + image.input_name} onClick={() => void pick(image)} style={{ borderColor: look.color, borderWidth: origin === 'external' ? 3 : 2 }}>
+                            title={(index < 0 ? 'Restore from history: ' : 'Select image: ') + image.input_name} onClick={() => void pick(image)}>
                             <img loading="lazy" src={'/Gallery/source/thumbnail?url=' + encodeURIComponent('/static_gallery/' + image.input_name)} alt="" />
-                            <span className="sp-badge" style={{ background: look.color }}>{look.label}</span>
-                            {index >= 0 && <span className="sp-check">{selected ? '✓' : '•'}</span>}
+                            {(index >= 0 || selected) && <span className="sp-check">{selected ? '✓' : '•'}</span>}
                         </button>
                         <span className="sp-name" title={name}>{name}</span>
                         {index >= 0 && <button className="sp-remove" disabled={busy} title="Remove from node (keep in history)" aria-label={'Remove ' + name + ' from node'} onClick={() => {
@@ -170,7 +188,7 @@ export function SourcePicker() {
                     </div>;
                 })}</div>}
         </div>
-        <footer><span>{manifest.images.length} in node · {history.length} in history</span><button disabled={busy} onClick={() => file.current?.click()}>{busy ? 'Adding…' : 'Upload'}</button>
+        <footer><span>{batch ? `${selection.length} selected for batch output` : `${manifest.images.length} in node · ${history.length} in history`}</span>{batch && <button disabled={busy || !selection.length} onClick={applyBatch}>Use batch</button>}<button disabled={busy} onClick={() => file.current?.click()}>{busy ? 'Adding…' : 'Upload'}</button>
             <input ref={file} type="file" accept="image/*" multiple hidden onChange={event => { const files = [...(event.target.files || [])]; event.target.value = ''; void upload(files); }} />
         </footer>
     </div>, document.body);

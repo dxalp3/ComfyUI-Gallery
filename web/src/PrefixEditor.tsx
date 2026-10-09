@@ -1,11 +1,11 @@
+import { DeletePrefixButton } from './DeletePrefixButton';
 import type { PrefixDraft } from './UnsavedPrefix';
 import { useState, type Dispatch, type SetStateAction } from 'react';
-import { Button, Input, Modal, Select, Space, Tabs, Typography } from 'antd';
+import { Button, Input, Select, Space, Tabs, Typography } from 'antd';
 import { TermsEditor } from './PromptBoxEditor';
 import { makeSuggest } from './PromptSuggest';
 import { PrefixImageGrid, PrefixImages, seedImages } from './PrefixImages';
 import { expandPrefix, loadPrefixes, matchesPolarity, POLARITY_OPTIONS, sidesLabel, type PrefixImage, type PrefixPolarity, type PrefixSeed, type SharedLibrary } from './PrefixLibrary';
-import { BASE_Z_INDEX } from './ComfyAppApi';
 
 /**
  * One place to pick, create, edit and save a prefix. Positive and negative terms get their own tab,
@@ -46,7 +46,7 @@ export function PrefixEditor({ onLoad, shared, seed, active, name, setName, posi
             <Input aria-label="Prefix name" placeholder="Prefix name (an existing name updates it)" value={name} onChange={event => setName(event.target.value)} style={{ width: 280 }} />
             <Button type="primary" loading={saving} disabled={!name.trim() || (!positive.length && !negative.length)} onClick={onSave}>Save prefix</Button>
             {existing && onAppendToNode && <Button onClick={() => onAppendToNode(existing.id)}>Append to node</Button>}
-            {existing && <Button danger onClick={() => Modal.confirm({ title: 'Delete prefix ' + existing.name + '?', content: 'Its vocabulary tags and existing workflow text are retained.', zIndex: BASE_Z_INDEX + 90, onOk: () => onDelete(existing.id) })}>Delete prefix</Button>}
+            {existing && <DeletePrefixButton id={existing.id} name={existing.name} onDelete={onDelete} />}
             <Button type="link" onClick={onOpenLibrarySearch}>Library search…</Button>
             {onOpenPrompts && <Button type="link" onClick={onOpenPrompts}>Prompts & palette…</Button>}
         </Space>

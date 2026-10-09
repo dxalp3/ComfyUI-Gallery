@@ -109,7 +109,10 @@ export function LocalPromptSearch({ onLocalSearch, managerOnly = false }: { onLo
         } catch (error) { message.error(String(error)); return false; } finally { setSaving(false); }
     };
     const removePrefix = async (id: string) => {
-        try { await deletePrefix(id, shared.revision!); await load(); } catch (error) { message.error(String(error)); }
+        await deletePrefix(id, shared.revision!); await load();
+        if (shared.prefixes.find(item => item.id === id)?.name.toLowerCase() === prefixName.trim().toLowerCase()) {
+            setPrefixName(''); setPrefixTags([]); setNegativeTags([]); drafts.markSaved({ name: '', positive: [], negative: [] });
+        }
     };
     const appendPrefixToNode = async (id: string) => {
         const prefix = shared.prefixes.find(value => value.id === id);

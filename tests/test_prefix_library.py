@@ -42,6 +42,19 @@ class LibraryTests(unittest.TestCase):
             update(self.path, {'action': 'save', 'revision': read(self.path)[1], 'name': 'Bad', 'terms': ['sitting'], 'image_keys': [123]})
         self.assertEqual(self.path.read_bytes(), before)
 
+    def test_prefix_edit_refreshes_all_pairs_and_delete_removes_them(self):
+        result = update(self.path, {'action': 'save', 'revision': read(self.path)[1], 'name': 'Pose', 'terms': ['old'], 'image_keys': ['sha256:a', 'local:./:a'], 'image_refs': {'sha256:a': {'hash': 'a'}}})
+        prefix_id = result['library']['prefixes'][0]['id']
+        result = update(self.path, {'action': 'save', 'revision': result['revision'], 'name': 'Pose', 'terms': ['new'], 'negative_terms': ['negative']})
+        for item in result['library']['associations'].values():
+            self.assertEqual(item['terms'], ['new'])
+            self.assertEqual(item['negative_terms'], ['negative'])
+        self.assertEqual(result['library']['associations']['sha256:a']['image'], {'hash': 'a'})
+        result = update(self.path, {'action': 'delete', 'id': prefix_id, 'revision': result['revision']})
+        self.assertEqual(result['library']['prefixes'], [])
+        self.assertFalse(result['library']['associations'])
+        self.assertTrue(result['library']['tags'])
+
     def test_encoder_uses_editable_text_and_scheduled_clip_api(self):
         class Clip:
             def tokenize(self, text):

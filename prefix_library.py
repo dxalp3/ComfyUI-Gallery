@@ -75,6 +75,8 @@ def update(path, data):
             library = validate(data.get('library'))
         elif action == 'delete':
             library['prefixes'] = [prefix for prefix in library['prefixes'] if prefix['id'] != data.get('id')]
+            library['associations'] = {key: item for key, item in library.get('associations', {}).items()
+                                       if item['prefix_id'] != data.get('id')}
         elif action == 'save':
             name, terms = data.get('name'), data.get('terms')
             if not isinstance(name, str) or not name.strip() or len(name) > 200:
@@ -101,6 +103,11 @@ def update(path, data):
                 library['prefixes'].append({'id': str(uuid.uuid4()), 'name': name, 'tags': ids})
             saved = next(p for p in library['prefixes'] if p['name'].casefold() == name.casefold())
             if negatives is not None: saved['negative_terms'] = list(dict.fromkeys(term.strip() for term in negatives))
+            # Existing image pairings follow edits, including edits made without an image seed.
+            for item in library.get('associations', {}).values():
+                if item['prefix_id'] == saved['id']:
+                    item['terms'] = list(dict.fromkeys(term.strip() for term in terms))
+                    item['negative_terms'] = saved.get('negative_terms', [])
             references = data.get('image_refs', {})
             if not isinstance(references, dict) or len(references) > 64: raise ValueError('Invalid image references.')
             image_keys = data.get('image_keys', [])

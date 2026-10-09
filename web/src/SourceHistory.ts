@@ -1,7 +1,6 @@
 import { imageOrigin, stampOrigin, type ImageSourceImage } from './ImageSourceGeometry';
 
 export const SOURCE_HISTORY_LIMIT = 128;
-export const SOURCE_STRIP_LIMIT = 5;
 export type HistoryTab = 'all' | 'imported' | 'generated';
 
 /** Oldest first, unique by input path. Selection/crop edits do not reorder history. */
@@ -20,11 +19,6 @@ export function filterSourceHistory(images: ImageSourceImage[], tab: HistoryTab,
         (tab === 'all' || (imageOrigin(image) === 'gallery' ? 'generated' : 'imported') === tab) &&
         (!needle || `${image.title || ''} ${image.input_name}`.toLocaleLowerCase().includes(needle)));
     return newest ? filtered.reverse() : filtered;
-}
-
-export function sourceStripRange(count: number, focused: number) {
-    const start = Math.max(0, Math.min(focused - Math.floor(SOURCE_STRIP_LIMIT / 2), count - SOURCE_STRIP_LIMIT));
-    return { start, end: Math.min(count, start + SOURCE_STRIP_LIMIT) };
 }
 
 export type PickerRect = { left: number; top: number; right: number; bottom: number; width: number; height: number };

@@ -58,7 +58,7 @@ export function AppendImagesModal({ entries, onClose }: { entries: GalleryEntry[
                     if (!response.ok) throw new Error(copied.error || 'Local image copy failed');
                 } else copied = await hydrusRequest('import', { hash: row.entry.hash });
                 if (copied.warning) throw new Error(copied.warning + ' Retry after checking Hydrus permissions; workflow was not changed.');
-                const metadata = { ...row.metadata, ...copied.metadata, gallery_prefix: row.prefixId ? { id: row.prefixId, positive: row.positive, negative: row.negative, tags: row.tags } : undefined, hydrus: copied.metadata?.hydrus || row.metadata.hydrus };
+                const metadata = { ...row.metadata, ...copied.metadata, gallery_prefix: row.prefixId ? { id: row.prefixId, positive: row.positive, negative: row.negative, tags: row.tags, positive_enabled: row.usePositive, negative_enabled: row.useNegative } : undefined, hydrus: copied.metadata?.hydrus || row.metadata.hydrus };
                 images.push({ input_name: copied.input_name, title: row.entry.name, metadata, prompt: { positive: (await formatPromptTerms(Array.from(new Set([...(row.usePositive ? row.positive : []), ...(row.useTags ? row.tags : [])])), spaces)).join(', '), negative: row.useNegative ? (await formatPromptTerms(row.negative, spaces)).join(', ') : '', tags: row.tags } });
             }
             // Append first so a missing workflow target cannot silently become a copy-only action.

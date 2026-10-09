@@ -45,6 +45,22 @@ class CompositionTests(unittest.TestCase):
         self.assertEqual([frame.mode for frame in frames], ['RGB', 'RGB'])
         self.assertEqual(frames[1].getpixel((1, 1)), (0, 0, 255))
 
+    def test_batch_selection_survives_serialization_and_controls_pixels_and_order(self):
+        value = manifest('red.png', 'blue.png')
+        value['batch_indices'] = [1, 0]
+        frames = render_batch(json.dumps(value), self.root)
+        self.addCleanup(lambda: [frame.close() for frame in frames])
+        self.assertEqual([frame.size for frame in frames], [(2, 5), (2, 5)])
+        self.assertEqual(frames[0].getpixel((0, 0)), (0, 0, 255))
+        value['batch_indices'] = [1]
+        selected = render_batch(value, self.root)
+        self.addCleanup(lambda: [frame.close() for frame in selected])
+        self.assertEqual(len(selected), 1)
+        self.assertEqual(self.render(value).size, (4, 3))
+        for invalid in ([], [2], [-1], [True], 'all'):
+            with self.assertRaises(ImageSourceError):
+                parse_manifest({**value, 'batch_indices': invalid})
+
     def test_input_folder_listing_skips_gallery_copies_and_reports_sizes(self):
         (self.root / 'gallery_sources').mkdir()
         Image.new('RGB', (3, 3), 'red').save(self.root / 'gallery_sources' / 'copy.png')
