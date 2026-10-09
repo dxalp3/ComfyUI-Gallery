@@ -142,7 +142,18 @@ export function LocalPromptSearch({ onLocalSearch, managerOnly = false }: { onLo
             }
         }}><Select mode="tags" aria-label="Filter local files" value={gallery.localTerms} searchValue={gallery.searchFileName}
             onSearch={value => { gallery.setSearchFileName(value); onLocalSearch(); }}
-            onChange={values => { gallery.setLocalTerms(Array.from(new Set(values.flatMap(value => expandSearchTerms(shared, value))))); gallery.setSearchFileName(''); onLocalSearch(); }}
+            onChange={values => {
+                gallery.setSearchFileName('');
+                // A saved @prefix searches its lineage (paired images and what was generated from them), not just its exact tags.
+                const prefixOf = (value: string) => value.startsWith('@') ? shared.prefixes.find(prefix => prefix.name.toLowerCase() === value.slice(1).trim().toLowerCase()) : undefined;
+                const prefixes = values.flatMap(value => prefixOf(value) ? [prefixOf(value)!] : []);
+                if (prefixes.length) {
+                    const rest = values.filter(value => !prefixOf(value)).flatMap(value => expandSearchTerms(shared, value));
+                    openImageSearch({ field: gallery.localSearchField, chips: [...prefixes.map(prefix => ({ kind: 'prefix' as const, id: prefix.id, name: prefix.name })), ...rest.map(text => ({ kind: 'tag' as const, text }))] });
+                    return;
+                }
+                gallery.setLocalTerms(Array.from(new Set(values.flatMap(value => expandSearchTerms(shared, value))))); onLocalSearch();
+            }}
             style={{ width: '100%' }} popupMatchSelectWidth={480} filterOption={false} optionLabelProp="value" allowClear
             options={options.filter(item => !gallery.localTerms.includes(item.value)).map((item, i) => ({ key: item.side + i, value: item.side === 'Library prefix' ? '@' + item.label : item.value, label: <span>{item.label} <small>· {item.side}{item.count ? ' · ' + item.count + ' local files' : ''}</small></span> }))}
             placeholder="Local search · Enter stacks a term (AND)" /></div>
@@ -183,11 +194,11 @@ export function LocalPromptSearch({ onLocalSearch, managerOnly = false }: { onLo
         <FloatingPanel panelKey="prefix-editor" title={'Prefix editor · ' + draftLabel} open={editorOpen} onCancel={() => setEditorOpen(false)} footer={null} width={900}>
             <PrefixEditor shared={shared} seed={seed} active={editorOpen} name={prefixName} setName={setPrefixName} positive={prefixTags} setPositive={setPrefixTags} negative={negativeTags} setNegative={setNegativeTags}
                 saving={saving} onSave={() => void save()} onDelete={removePrefix} onAppendToNode={seed.node ? id => void appendPrefixToNode(id) : undefined}
-                onSearchImages={(terms, prefix) => openTagSearch(terms, 'all', prefix)} onOpenLibrarySearch={() => setLibraryOpen(true)} onOpenPrompts={() => setOpen(true)}
+                onOpenLibrarySearch={() => setLibraryOpen(true)} onOpenPrompts={() => setOpen(true)}
                 onUnpair={image => void unpair(image.keys || [])} />
         </FloatingPanel>
         <LibrarySearchPanel open={libraryOpen} onClose={() => setLibraryOpen(false)} pool={libraryPool} shared={shared} status={status} indexedCount={indexed.length} canAppendToNode={!!seed.node}
-            onRefresh={() => void load()} onSearch={(terms, field) => openTagSearch(terms, field)} onAddToDraft={addToDraft} onEditPrefix={editPrefix} onDeletePrefix={removePrefix} onAppendToNode={id => void appendPrefixToNode(id)} />
+            onRefresh={() => void load()} onSearch={(terms, field, prefixId) => { const prefix = shared.prefixes.find(item => item.id === prefixId); openTagSearch(terms, field, prefix ? { id: prefix.id, name: prefix.name, terms } : undefined); }} onAddToDraft={addToDraft} onEditPrefix={editPrefix} onDeletePrefix={removePrefix} onAppendToNode={id => void appendPrefixToNode(id)} />
 
     </>;
 }

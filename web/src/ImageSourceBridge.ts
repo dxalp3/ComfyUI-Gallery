@@ -77,40 +77,160 @@ export function installSourceWidgets(node: any) {
     if (edit) edit.serialize = false;
     if (browse) browse.serialize = false;
     if (typeof document !== 'undefined' && node.addDOMWidget) {
+        // A fixed-size slider (like Load Image's picker): one large image, arrows, and a scrolling strip of
+        // thumbnails. However many images are added, the node keeps its size.
         const preview = document.createElement('div');
         preview.className = 'gallery-source-node-preview';
-        preview.style.cssText = 'display:flex;flex-direction:column;gap:6px;width:100%;height:220px;overflow:auto;color:var(--input-text,#ddd);background:var(--comfy-input-bg,#222);padding:6px;box-sizing:border-box;font:12px system-ui';
+        preview.style.cssText = 'display:flex;flex-direction:column;gap:4px;width:100%;height:230px;overflow:hidden;color:var(--input-text,#ddd);background:var(--comfy-input-bg,#222);padding:4px;box-sizing:border-box;font:11px system-ui';
+        let view = 0, note = '';
+        const thumb = (image: ImageSourceImage) => '/Gallery/source/thumbnail?url=' + encodeURIComponent('/static_gallery/' + image.input_name);
+        const button = (text: string, label: string, onClick: () => void, css = '') => { const item = document.createElement('button'); item.type = 'button'; item.textContent = text; item.title = label; item.setAttribute('aria-label', label); item.onclick = event => { event.stopPropagation(); onClick(); }; item.style.cssText = 'border:0;border-radius:4px;background:#000a;color:#fff;cursor:pointer;' + css; return item; };
         const refresh = () => {
             preview.replaceChildren();
             try {
-                const manifest = readSourceManifest(node);
-                const label = document.createElement('div');
-                label.textContent = `${manifest.images.length} image(s) · ${manifest.layout}${manifest.layout === 'single' && manifest.images.length > 1 ? ` · output image ${(manifest.active_index || 0) + 1} (click to choose)` : ''}`;
-                preview.append(label);
-                if (!manifest.images.length) { label.textContent = 'No images yet — append from Gallery.'; return; }
-                const grid = document.createElement('div');
-                grid.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap';
-                for (const [index, image] of manifest.images.entries()) {
-                    const tile = document.createElement('button'); tile.type = 'button'; tile.setAttribute('aria-label', `Use image ${index + 1}: ${image.title || image.input_name}`); tile.setAttribute('aria-pressed', String(index === (manifest.active_index || 0))); tile.onclick = () => saveSourceManifest(node, { ...manifest, active_index: index }); tile.style.cssText = `width:${manifest.images.length === 1 ? '100%' : 'calc(50% - 4px)'};min-width:80px;border:2px solid ${index === (manifest.active_index || 0) ? '#1677ff' : 'transparent'};background:transparent;color:inherit;cursor:pointer`;
-                    const img = document.createElement('img');
-                    img.src = '/Gallery/source/thumbnail?url=' + encodeURIComponent('/static_gallery/' + image.input_name);
-                    img.alt = image.title || image.input_name; img.style.cssText = `width:100%;height:${manifest.images.length === 1 ? 165 : 75}px;object-fit:contain`;
-                    const caption = document.createElement('div'); caption.style.cssText = 'font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
-                    caption.textContent = image.title || image.input_name;
-                    img.onerror = () => { caption.textContent = 'Preview unavailable: ' + (image.title || image.input_name); };
-                    tile.append(img, caption); grid.append(tile);
+                const manifest = readSourceManifest(node), images = manifest.images, single = manifest.layout === 'single';
+                const active = manifest.active_index || 0;
+                if (!images.length) {
+                    const empty = document.createElement('div');
+                    empty.style.cssText = 'flex:1;display:flex;align-items:center;justify-content:center;text-align:center;border:1px dashed #8886;border-radius:6px;padding:8px;opacity:.75';
+                    empty.textContent = note || 'No images yet. Append from Gallery, drop image files here, or drop a Load Image node onto this node.';
+                    preview.append(empty); return;
                 }
-                preview.append(grid);
+                // In the single layout the slider picks the output image; otherwise it only browses.
+                view = single ? active : Math.min(view, images.length - 1);
+                const go = (index: number) => { const next = (index + images.length) % images.length; if (single) saveSourceManifest(node, { ...manifest, active_index: next }); else { view = next; refresh(); } };
+                const stage = document.createElement('div');
+                stage.style.cssText = 'position:relative;flex:1;min-height:0;display:flex;align-items:center;justify-content:center;background:#0006;border-radius:4px;overflow:hidden';
+                const img = document.createElement('img');
+                img.src = thumb(images[view]); img.alt = images[view].title || images[view].input_name;
+                img.style.cssText = 'max-width:100%;max-height:100%;object-fit:contain';
+                img.onerror = () => { img.replaceWith(Object.assign(document.createElement('span'), { textContent: 'Preview unavailable: ' + (images[view].title || images[view].input_name) })); };
+                stage.append(img);
+                if (images.length > 1) {
+                    stage.append(button('‹', 'Previous image', () => go(view - 1), 'position:absolute;left:3px;top:50%;transform:translateY(-50%);width:22px;height:34px;font-size:18px'));
+                    stage.append(button('›', 'Next image', () => go(view + 1), 'position:absolute;right:3px;top:50%;transform:translateY(-50%);width:22px;height:34px;font-size:18px'));
+                }
+                const caption = document.createElement('div');
+                caption.style.cssText = 'position:absolute;left:0;right:0;bottom:0;padding:2px 6px;background:#000a;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
+                caption.textContent = `${view + 1} / ${images.length} · ${manifest.layout}${single ? ' · output image' : ''} · ${images[view].title || images[view].input_name}${note ? ' · ' + note : ''}`;
+                stage.append(caption);
+                preview.append(stage);
+                if (images.length > 1) {
+                    const strip = document.createElement('div');
+                    strip.setAttribute('aria-label', 'Source images');
+                    strip.style.cssText = 'flex:none;display:flex;gap:3px;overflow-x:auto;overflow-y:hidden;height:46px;padding-bottom:2px';
+                    strip.onwheel = event => { event.stopPropagation(); if (!event.shiftKey && Math.abs(event.deltaY) > Math.abs(event.deltaX)) { event.preventDefault(); strip.scrollLeft += event.deltaY; } };
+                    for (const [index, image] of images.entries()) {
+                        const tile = button('', `${single ? 'Use' : 'Show'} image ${index + 1}: ${image.title || image.input_name}`, () => go(index), `flex:0 0 auto;width:52px;height:42px;padding:0;background:transparent;outline:2px solid ${index === view ? '#1677ff' : 'transparent'};outline-offset:-2px;opacity:${index === view ? 1 : .7}`);
+                        tile.setAttribute('aria-pressed', String(index === view));
+                        const small = document.createElement('img'); small.src = thumb(image); small.alt = ''; small.style.cssText = 'width:100%;height:100%;object-fit:cover;border-radius:3px';
+                        tile.append(small); strip.append(tile);
+                    }
+                    preview.append(strip);
+                    requestAnimationFrame(() => (strip.children[view] as HTMLElement | undefined)?.scrollIntoView({ block: 'nearest', inline: 'nearest' }));
+                }
             } catch (error) { preview.textContent = String(error); }
         };
         node.__galleryRefreshPreview = refresh;
-        const dom = node.addDOMWidget('gallery_source_preview', 'gallery_source_preview', preview, { serialize: false, hideOnZoom: false, getHeight: () => 220 });
-        if (dom) { dom.serialize = false; dom.computeSize = () => [320, 220]; }
+        node.__galleryNotify = (text: string) => { note = text; refresh(); window.setTimeout(() => { if (note === text) { note = ''; refresh(); } }, 4000); };
+        // Files and gallery images dropped on the preview (or on the node) are added to this node.
+        const drop = async (transfer: DataTransfer) => {
+            note = 'adding…'; refresh();
+            try { const count = await appendDropped(node, transfer); note = count ? `added ${count}` : 'nothing to add'; }
+            catch (error) { note = String(error instanceof Error ? error.message : error); }
+            refresh(); window.setTimeout(() => { note = ''; refresh(); }, 4000);
+        };
+        const accepts = (transfer: DataTransfer | null) => !!transfer && [...transfer.types].some(type => type === 'Files' || type === 'custom' || type === 'application/x-gallery-image');
+        preview.addEventListener('dragover', event => { if (accepts(event.dataTransfer)) { event.preventDefault(); event.stopPropagation(); preview.style.outline = '2px dashed #1677ff'; } });
+        preview.addEventListener('dragleave', () => { preview.style.outline = ''; });
+        preview.addEventListener('drop', event => { preview.style.outline = ''; if (!accepts(event.dataTransfer)) return; event.preventDefault(); event.stopPropagation(); void drop(event.dataTransfer!); });
+        node.onDragOver = (event: DragEvent) => accepts(event.dataTransfer);
+        node.onDragDrop = (event: DragEvent) => { if (!accepts(event.dataTransfer)) return false; void drop(event.dataTransfer!); return true; };
+        const dom = node.addDOMWidget('gallery_source_preview', 'gallery_source_preview', preview, { serialize: false, hideOnZoom: false, getHeight: () => 230, getMinHeight: () => 230, getMaxHeight: () => 230 });
+        if (dom) { dom.serialize = false; dom.computeSize = () => [320, 230]; }
         const configure = node.onConfigure;
         node.onConfigure = function (...args: any[]) { const result = configure?.apply(this, args); refresh(); return result; };
         refresh();
     }
     node.setSize?.([320, Math.max(180, node.computeSize?.()[1] || 180)]);
+}
+
+const comfyFetch = (path: string, options?: RequestInit): Promise<Response> => {
+    const api = (window as any).comfyAPI?.api?.api || getComfyApp()?.api;
+    return api?.fetchApi ? api.fetchApi(path, options) : fetch(path, options);
+};
+async function sourceRequest(path: string, body: unknown): Promise<ImageSourceImage> {
+    const response = await comfyFetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'Could not add that image.');
+    return { input_name: data.input_name, title: data.title, metadata: data.metadata || {} };
+}
+/** An image from ComfyUI's input folder (a Load Image node's image, an uploaded file) as a source entry. */
+const sourceFromInput = (name: string) => sourceRequest('/Gallery/source/input', { name });
+
+/** Add images to one Gallery Image Source node. In the single layout the first new image becomes the output. */
+async function addToNode(node: any, images: ImageSourceImage[], urls?: (string | undefined)[]): Promise<number> {
+    if (!images.length) return 0;
+    const stamped = await withPairedPrefix(images, urls);
+    const manifest = readSourceManifest(node);
+    const room = 32 - manifest.images.length;
+    if (room <= 0) throw new Error('This node already holds 32 images.');
+    saveSourceManifest(node, { ...manifest, images: [...manifest.images, ...stamped.slice(0, room)], active_index: manifest.layout === 'single' ? manifest.images.length : manifest.active_index });
+    return Math.min(room, stamped.length);
+}
+
+/**
+ * Something dropped on a Gallery Image Source node: a gallery image (dragged from the grid) or image files.
+ * Files are uploaded to ComfyUI's input folder first, the way Load Image does it.
+ */
+export async function appendDropped(node: any, transfer: DataTransfer): Promise<number> {
+    // Read everything from the drop synchronously; the transfer is emptied once the event is over.
+    let galleryUrl: string | undefined;
+    try { const value = JSON.parse(transfer.getData('application/x-gallery-image') || transfer.getData('custom') || 'null'); if (value?.url?.startsWith('/static_gallery/')) galleryUrl = value.url; } catch { /* not a gallery image */ }
+    const files = [...transfer.files].filter(file => file.type.startsWith('image/'));
+    if (galleryUrl) return addToNode(node, [await sourceRequest('/Gallery/source/local', { url: galleryUrl })], [galleryUrl]);
+    const images: ImageSourceImage[] = [];
+    for (const file of files) {
+        const form = new FormData(); form.append('image', file);
+        const response = await comfyFetch('/upload/image', { method: 'POST', body: form });
+        if (!response.ok) throw new Error('ComfyUI did not accept ' + file.name);
+        const data = await response.json();
+        images.push({ ...await sourceFromInput((data.subfolder ? data.subfolder + '/' : '') + data.name), title: file.name });
+    }
+    return addToNode(node, images);
+}
+
+let loadImageDrop = false;
+const isLoadImage = (node: any) => [node?.comfyClass, node?.type].includes('LoadImage');
+/**
+ * Dropping a Load Image node onto a Gallery Image Source node adds its image there. Dropping an image file on the
+ * canvas makes a Load Image node, so this is also how outside images get in. The Load Image node is removed
+ * afterwards unless something is connected to it.
+ */
+export function installLoadImageDrop() {
+    if (loadImageDrop || STANDALONE || typeof document === 'undefined') return;
+    loadImageDrop = true;
+    let start = new Map<any, [number, number]>();
+    document.addEventListener('pointerdown', () => { start = new Map((graphNow()?._nodes || []).filter(isLoadImage).map((node: any) => [node, [node.pos[0], node.pos[1]]])); }, true);
+    document.addEventListener('pointerup', () => window.setTimeout(() => {
+        const graph = graphNow();
+        for (const [node, [x, y]] of start) {
+            if (node.pos[0] === x && node.pos[1] === y || !graph?._nodes?.includes(node)) continue;
+            const cx = node.pos[0] + node.size[0] / 2, cy = node.pos[1] + node.size[1] / 2;
+            const title = (window as any).LiteGraph?.NODE_TITLE_HEIGHT ?? 30;
+            const target = nodes().find((source: any) => cx >= source.pos[0] && cx <= source.pos[0] + source.size[0] && cy >= source.pos[1] - title && cy <= source.pos[1] + source.size[1]);
+            const name = node.widgets?.find((widget: any) => widget.name === 'image')?.value;
+            if (!target || typeof name !== 'string' || !name) continue;
+            const notify = (text: string) => target.__galleryNotify?.(text);
+            notify('adding…');
+            void sourceFromInput(name).then(image => addToNode(target, [{ ...image, title: name.split('/').pop() }])).then(() => {
+                if (node.outputs?.some((output: any) => output.links?.length)) { node.pos = [x, y]; notify('added (Load Image kept: it is connected)'); }
+                else { graph.beforeChange?.(); try { graph.remove(node); } finally { graph.afterChange?.(); } notify('added from Load Image'); }
+                getComfyApp()?.canvas?.setDirty?.(true, true);
+            }).catch(error => notify(String(error instanceof Error ? error.message : error)));
+        }
+        start = new Map();
+    }, 0), true);
 }
 
 type TargetInfo = { options: { value: string; label: string }[]; selected?: string };

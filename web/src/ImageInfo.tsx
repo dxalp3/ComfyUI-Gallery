@@ -6,7 +6,7 @@
  * Both          → the two as tabs of the same window
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Button, Collapse, Descriptions, Empty, Input, Select, Space, Tabs, Tag, Typography, message } from 'antd';
+import { Alert, Button, Collapse, Descriptions, Empty, Select, Space, Tabs, Tag, Typography, message } from 'antd';
 import { FloatingPanel } from './FloatingPanel';
 import { BASE_PATH, BASE_Z_INDEX } from './ComfyAppApi';
 import { useHydrus } from './HydrusContext';
@@ -17,7 +17,8 @@ import { AppendImagesModal } from './AppendImagesModal';
 import { associateImages, dissociateImages, expandPrefix, imagePrefixKeys, imagePrefixRefs, loadPrefixes, openPrefixManager, savePrefix, sidesLabel, type PrefixImage, type SharedLibrary } from './PrefixLibrary';
 import { PrefixImages } from './PrefixImages';
 import { formatPromptTerms } from './PromptSpelling';
-import { HydrusTagSelect } from './HydrusTagSelect';
+import { TermsEditor } from './PromptBoxEditor';
+import { makeSuggest } from './PromptSuggest';
 import { extractHydrusTags, extractLocalPrompts } from './LocalImageSearch';
 import { chosenTags, promptResolutions } from './PromptResolution';
 import { GROUPING_LABELS } from './PromptBoxes';
@@ -163,6 +164,8 @@ export const HydrusDetailsModal = ImageInfoPanel;
  * of chips (they cannot be deleted, only taken into the prefix and back out); the prefix's tags are edited
  * next to them, with its paired images below. Saving pairs the image(s); "Pair only" pairs without changes.
  */
+const suggestTerms = makeSuggest({ loadLibrary: loadPrefixes, expandPrefix });
+
 export function SourcePrefixPanel() {
     const gallery = useGalleryContext();
     const hydrus = useHydrus();
@@ -171,6 +174,10 @@ export function SourcePrefixPanel() {
     const [library, setLibrary] = useState<SharedLibrary>({ version: 2, tags: [], prefixes: [] });
     const [prefixId, setPrefixId] = useState<string>();
     const [name, setName] = useState('');
+    /** What is typed in the prefix box right now; a name that matches no prefix becomes the new prefix's name. */
+    const [typed, setTyped] = useState('');
+    const typedName = typed.trim();
+    const matchOf = (value: string) => value ? library.prefixes.find(item => item.name.toLowerCase() === value.toLowerCase()) : undefined;
     const [positive, setPositive] = useState<string[]>([]);
     const [negative, setNegative] = useState<string[]>([]);
     const [side, setSide] = useState<'positive' | 'negative'>('positive');
@@ -183,7 +190,7 @@ export function SourcePrefixPanel() {
             const detail = (event as CustomEvent<GalleryEntry[] | string[]>).detail || [];
             const files = hydrusRef.current.imageFiles, items = hydrusRef.current.items;
             setEntries(detail.flatMap(value => typeof value !== 'string' ? [value] : files[value] ? [localEntry(files[value], items[value]?.hash)] : []));
-            setPrefixId(undefined); setName(''); setSide('positive'); void reload();
+            setPrefixId(undefined); setName(''); setTyped(''); setSide('positive'); void reload();
         };
         window.addEventListener(SOURCE_PREFIX_EVENT, open);
         window.addEventListener('gallery-prefix-library-changed', reload);
@@ -244,15 +251,21 @@ export function SourcePrefixPanel() {
                 <Button onClick={() => { setAppending(entries); close(); }}>Append images and prompts…</Button>
                 <Button disabled={!prefix || busy} onClick={() => void pair()} title="Pair the image(s) with this prefix without changing its tags">Pair only</Button>
                 <Button type="link" onClick={() => { openPrefixManager({ name: prefix?.name || name, positive, negative, imageKeys: keys, imageRefs: refs }); close(); }}>Full prefix editor…</Button>
-                <Button type="primary" loading={busy} disabled={!total || !(prefix || name.trim())} onClick={() => void save()}>{prefix ? `Save “${prefix.name}” and pair` : `Create prefix with ${total} tag(s)`}</Button>
+                <Button type="primary" loading={busy} disabled={!total || !(prefix || name.trim())} onClick={() => void save()}>{prefix ? `Save “${prefix.name}” and pair` : name ? `Create “${name}” with ${total} tag(s)` : `Create prefix with ${total} tag(s)`}</Button>
             </Space>}>
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 8 }}>{entries.slice(0, 8).map(entry => <img key={entry.id} src={thumb(entry)} alt={entry.name} style={{ width: 84, height: 84, objectFit: 'contain', background: '#8882', borderRadius: 4 }} />)}{entries.length > 8 && <Typography.Text type="secondary">+{entries.length - 8}</Typography.Text>}</div>
             {!!pairedWith.length && <div style={{ marginBottom: 8 }}><Typography.Text>Paired with: </Typography.Text>{pairedWith.map(id => <Tag key={id} closable onClose={event => { event.preventDefault(); void unpair(id); }}>{library.prefixes.find(item => item.id === id)?.name || 'deleted prefix'}</Tag>)}</div>}
-            <Space.Compact style={{ width: '100%' }}>
-                <Select showSearch allowClear optionFilterProp="label" aria-label="Prefix for these images" placeholder="New prefix (or pick an existing one)" value={prefixId} onChange={setPrefixId} style={{ flex: 1 }}
-                    options={library.prefixes.map(item => ({ value: item.id, label: item.name + ' · ' + sidesLabel(item) }))} />
-                {!prefix && <Input aria-label="New prefix name" placeholder="Name of the new prefix" value={name} onChange={event => setName(event.target.value)} style={{ flex: 1 }} />}
-            </Space.Compact>
+            {/* One box: pick an existing prefix, or type a new name — it is kept (and shown) until the prefix is created. */}
+            <Select showSearch allowClear aria-label="Prefix for these images" placeholder="Type a new prefix name, or pick an existing prefix" style={{ width: '100%' }}
+                value={prefix ? prefix.id : name ? 'new:' + name : undefined} searchValue={typed} onSearch={setTyped} autoClearSearchValue
+                filterOption={(input, option) => String(option?.value).startsWith('new:') || String(option?.label).toLowerCase().includes(input.trim().toLowerCase())}
+                onChange={(value?: string) => { setTyped(''); if (!value) { setPrefixId(undefined); setName(''); } else if (value.startsWith('new:')) { setPrefixId(undefined); setName(value.slice(4)); } else setPrefixId(value); }}
+                onBlur={() => { const match = matchOf(typedName); if (match) setPrefixId(match.id); else if (typedName) { setPrefixId(undefined); setName(typedName); } setTyped(''); }}
+                options={[
+                    ...(typedName && !matchOf(typedName) ? [{ value: 'new:' + typedName, label: 'Create new prefix “' + typedName + '”' }] : []),
+                    ...(!prefix && name && name !== typedName ? [{ value: 'new:' + name, label: 'New prefix “' + name + '” (created when you save)' }] : []),
+                    ...library.prefixes.map(item => ({ value: item.id, label: item.name + ' · ' + sidesLabel(item) })),
+                ]} />
             <Typography.Paragraph type="secondary" style={{ margin: '6px 0 4px' }}>{prefix ? 'Editing “' + prefix.name + '”: its tags are on the right. Saving changes them and pairs the image(s); “Pair only” pairs without changing anything.' : 'A new prefix starts with the image’s positive prompt. Saving creates it and pairs the image(s).'} Tag spelling follows Settings.</Typography.Paragraph>
             <Tabs size="small" activeKey={side} onChange={key => setSide(key as 'positive' | 'negative')} items={(['positive', 'negative'] as const).map(key => ({ key, label: `${key === 'positive' ? 'Positive' : 'Negative'} (${(key === 'positive' ? positive : negative).length})` }))} />
             <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'flex-start' }}>
@@ -263,7 +276,7 @@ export function SourcePrefixPanel() {
                 </div>
                 <div style={{ flex: '1 1 340px', minWidth: 0 }}>
                     <Space style={{ width: '100%', justifyContent: 'space-between' }}><Typography.Title level={5} style={{ margin: 0 }}>Prefix {side} tags</Typography.Title><Button size="small" disabled={!value.length} onClick={() => setValue([])}>Clear</Button></Space>
-                    <HydrusTagSelect label={'Prefix ' + side + ' tags'} value={value} onChange={setValue} active={entries.length > 0} placeholder="Any other tag: Danbooru, Hydrus, your library, or @prefix" style={{ width: '100%', marginTop: 6 }} />
+                    <div style={{ marginTop: 6 }}><TermsEditor key={side} value={value} onChange={terms => setValue(terms)} suggest={suggestTerms} placeholder="Terms: tags, {a|} or a OPT, a OR b, (tag:0.5), @prefix" /></div>
                     {prefix && <PrefixImages library={library} prefixId={prefix.id} onRemove={image => void unpairImage(image)} />}
                 </div>
             </div>

@@ -54,6 +54,8 @@ export interface SettingsState {
     hydrusSearchAliases: boolean;
     /** How floating tool windows are shown: movable windows, or covering the page as before. */
     panelMode: 'floating' | 'cover';
+    /** Experimental: choosing a tag turns off the tags that exclude it (short hair / long hair). */
+    exclusiveTags?: boolean;
     /** Recognized Danbooru tags are written with spaces (true) or canonical underscores (false). */
     preferPromptSpaces: boolean;
 }

@@ -38,12 +38,28 @@ Every edit is compiled into one prompt string, so the node still works as a norm
 - **Add as** next to the input: Tags, Alternatives, Optional alternatives, Optional group, or **Optional tags (each)**, which makes
   every typed tag optional on its own (`{a|}, {b|}`; also a palette insertion format). In the grouped modes, commas and picked
   suggestions collect tags into a draft chip; Enter adds it.
-- Shift/Ctrl-click several chips to combine them into one grouped chip; a grouped chip's editor can change its kind or split it.
+- Grouped chips are edited in place: the kind menu in the coloured header switches between Alternatives, Optional
+  alternatives, Optional group and **Optional** (every tag optional on its own — a chip with several tags splits into
+  one `{a|}` chip per tag), × on a part removes it, + adds parts (with suggestions; `a | b` or `a OR b` adds several options).
+  Clicking a chip opens its remaining settings (weight, on/off, split, move). Plain tags get the same kinds in that editor.
+  Switching kinds keeps the tags: a chip never turns into one comma-separated option.
+- **Exclusive tags** (experimental gallery setting): adding or switching on a single tag turns off the single tags that
+  exclude it (long hair turns off short hair, 1girl turns off 2girls), with a note under the boxes. The sets are a small
+  curated list (`TagConflicts.ts`); Danbooru's wiki groups only list related tags, not exclusive ones.
+- Shift/Ctrl-click several chips to combine them into one grouped chip.
 - The input at the bottom creates a new box.
 - Click a chip to edit its text, weight, brackets, "or nothing" and on/off state.
 - **Drag** a chip to reorder it or to move it into another box (drop on a chip to land before or after it, on a box to land at the end).
   Drag a box by its grip (⠿) to reorder boxes. The ▲ ▼ ◀ ▶ buttons do the same from the keyboard.
 - "Prompt sent to the encoder" at the bottom shows exactly what is encoded, with the source text filled in when it is known.
+
+## Prefix terms
+
+The prefix editor (and "Use for prefix") edits a prefix's terms with the same chips and typing helpers, so a prefix
+can carry structure, e.g. a LoRA prefix `activator tag, {tag1|}, {(tag2, tag3)|}, (tag4:0.5)`. Each chip is one
+saved term; commas inside a group never split it. When a prefix is searched, its terms are read as conditions: plain
+tags are required (weights ignored), `{a|b}` needs one of its options, optional parts are not required — next to
+the paired images and their lineage.
 
 ## Library appends
 

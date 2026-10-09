@@ -13,8 +13,8 @@ from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from image_source import (GalleryImageSource, ImageSourceError, parse_manifest,
-                          plan_composition, render_composition, resolve_input, source_prompts)
-from image_source_api import import_local_image, register_source_routes
+                          plan_composition, render_batch, render_composition, resolve_input, source_prompts)
+from image_source_api import import_input_image, import_local_image, register_source_routes
 from gallery_app import register_gallery_app_routes
 
 
@@ -35,6 +35,25 @@ class CompositionTests(unittest.TestCase):
         image = render_composition(plan_composition(value, self.root))
         self.addCleanup(image.close)
         return image
+
+    def test_batch_holds_every_image_at_the_first_images_size(self):
+        value = manifest('red.png', 'blue.png')  # layout "single" still batches both
+        value['images'][0]['crop'] = dict(x=.25, y=0, width=.5, height=1)
+        frames = render_batch(value, self.root)
+        self.addCleanup(lambda: [frame.close() for frame in frames])
+        self.assertEqual([frame.size for frame in frames], [(2, 3), (2, 3)])
+        self.assertEqual([frame.mode for frame in frames], ['RGB', 'RGB'])
+        self.assertEqual(frames[1].getpixel((1, 1)), (0, 0, 255))
+
+    def test_input_folder_images_become_sources_and_cannot_escape_it(self):
+        (self.root / 'sub').mkdir()
+        Image.new('RGB', (3, 3), 'red').save(self.root / 'sub' / 'dropped.png')
+        result = import_input_image(self.root, 'sub/dropped.png [input]')
+        self.assertTrue(result['input_name'].startswith('gallery_sources/'))
+        self.assertEqual((result['width'], result['height']), (3, 3))
+        self.assertEqual(import_input_image(self.root, 'sub/dropped.png')['hash'], result['hash'])
+        for bad in ('../outside.png', 'missing.png', ''):
+            with self.assertRaises(ImageSourceError): import_input_image(self.root, bad)
 
     def test_single_preserves_alpha_and_actual_crop(self):
         value = manifest('red.png', 'blue.png')

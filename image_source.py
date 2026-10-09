@@ -237,6 +237,43 @@ def preview_composition(manifest, input_root):
         image.close()
 
 
+def render_batch(manifest, input_root):
+    """Every image of the source as one batch (crops applied, whatever the layout), for nodes that take several
+    images at once such as IPAdapter. A batch needs one size: each image is scaled to cover the first one's size
+    and centre-cropped, so nothing is stretched."""
+    manifest = parse_manifest(manifest)
+    frames, size = [], None
+    try:
+        for item in manifest["images"]:
+            path = resolve_input(input_root, item["input_name"])
+            box = crop_box(inspect_image(path), item.get("crop"))
+            with Image.open(path) as image:
+                image.seek(0)
+                oriented = ImageOps.exif_transpose(image)
+                try:
+                    cropped = oriented.crop(box)
+                    try:
+                        frame = cropped.convert("RGB")
+                    finally:
+                        cropped.close()
+                finally:
+                    oriented.close()
+            if size is None:
+                size = frame.size
+                if size[0] * size[1] * len(manifest["images"]) > MAX_PIXELS:
+                    frame.close()
+                    raise ImageSourceError("The batch exceeds 64 megapixels. Crop the first image or use fewer sources.")
+            elif frame.size != size:
+                fitted = ImageOps.fit(frame, size, Image.Resampling.LANCZOS)
+                frame.close()
+                frame = fitted
+            frames.append(frame)
+        return frames
+    except Exception:
+        for frame in frames: frame.close()
+        raise
+
+
 def source_prompts(manifest):
     images = manifest['images'][manifest['active_index']:manifest['active_index'] + 1] if manifest['layout'] == 'single' else manifest['images']
     return tuple(', '.join(str(item.get('prompt', {}).get(side, '')) for item in images if item.get('prompt', {}).get(side)) for side in ('positive', 'negative'))
@@ -244,10 +281,11 @@ def source_prompts(manifest):
 
 class GalleryImageSource:
     CATEGORY = "image/gallery"
-    RETURN_TYPES = ("IMAGE", "MASK", "INT", "INT", "STRING", "STRING", "STRING")
-    RETURN_NAMES = ("image", "mask", "width", "height", "positive", "negative", "source_metadata")
+    # `batch` is last so links to the older outputs keep their slots.
+    RETURN_TYPES = ("IMAGE", "MASK", "INT", "INT", "STRING", "STRING", "STRING", "IMAGE")
+    RETURN_NAMES = ("image", "mask", "width", "height", "positive", "negative", "source_metadata", "batch")
     FUNCTION = "compose"
-    DESCRIPTION = "Choose local or Hydrus images in Gallery, crop them, and join them without rescaling."
+    DESCRIPTION = "Choose local or Hydrus images in Gallery, crop them, and join them without rescaling. `batch` holds every image at the first one's size (for IPAdapter and similar)."
 
     @classmethod
     def INPUT_TYPES(cls):
@@ -289,6 +327,11 @@ class GalleryImageSource:
             mask = torch.from_numpy(1.0 - pixels[:, :, 3]).unsqueeze(0)
             manifest = parse_manifest(sources)
             positive, negative = source_prompts(manifest)
-            return rgb, mask, plan.width, plan.height, positive, negative, json.dumps(manifest['images'], ensure_ascii=False)
+            frames = render_batch(manifest, self._input_root())
+            try:
+                batch = torch.from_numpy(np.stack([np.asarray(frame, dtype=np.float32) / 255.0 for frame in frames]))
+            finally:
+                for frame in frames: frame.close()
+            return rgb, mask, plan.width, plan.height, positive, negative, json.dumps(manifest['images'], ensure_ascii=False), batch
         finally:
             image.close()

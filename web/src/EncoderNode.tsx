@@ -1,10 +1,10 @@
 import { createRoot } from 'react-dom/client';
-import { PromptBoxEditor, type SourceInfo, type Suggestion } from './PromptBoxEditor';
-import { compileBoxes, composeWithSource, insertText, parseState, reconcileText, stateFromText, type BoxState } from './PromptBoxes';
+import { PromptBoxEditor, type SourceInfo } from './PromptBoxEditor';
+import { makeSuggest, type SuggestDeps } from './PromptSuggest';
+import { compileBoxes, composeWithSource, disableConflicts, insertText, parseState, reconcileText, stateFromText, type BoxState } from './PromptBoxes';
+import { conflicts, exclusiveTagsEnabled } from './TagConflicts';
 import { getComfyApp } from './ComfyAppApi';
 import { sourcePrompt } from './ImageSourceGeometry';
-import { hydrusRequest } from './HydrusApi';
-import { preferPromptSpaces } from './PromptSpelling';
 import type { SharedLibrary } from './PrefixLibrary';
 
 /** What the connected `source_text` provides: known at edit time for Gallery Image Source, otherwise after a run. */
@@ -26,7 +26,7 @@ export function effectiveSourceText(node: any): string | undefined {
     return info.connected ? info.text ?? info.note : undefined;
 }
 
-type Deps = { loadLibrary: () => Promise<SharedLibrary>; expandPrefix: (library: SharedLibrary, name: string) => string[] };
+type Deps = SuggestDeps;
 
 /** Same approach as the image source node: keep the STRING widget (it is what gets serialized) but present our own editor. */
 function hideWidget(widget: any) {
@@ -53,41 +53,24 @@ export function installPromptBoxes(node: any, deps: Deps) {
     const saved = parseState(node.properties?.prompt_boxes);
     let state: BoxState = saved ?? stateFromText(String(widget('text')?.value ?? ''), String(widget('source_mode')?.value ?? 'after'), hasSource());
 
-    let cached: { at: number; library?: SharedLibrary } = { at: 0 };
-    const library = async () => {
-        if (Date.now() - cached.at > 5000) {
-            cached = { at: Date.now(), library: cached.library };
-            try { cached.library = await deps.loadLibrary(); } catch { /* suggestions fall back to Danbooru tags */ }
-        }
-        return cached.library;
-    };
-    const suggest = async (query: string): Promise<Suggestion[]> => {
-        const needle = query.replace(/^@/, '').trim().toLowerCase();
-        const found: Suggestion[] = [], seen = new Set<string>();
-        const add = (item: Suggestion) => { const key = item.kind + ':' + item.label.toLowerCase(); if (!seen.has(key) && found.length < 10) { seen.add(key); found.push(item); } };
-        const shared = await library();
-        for (const prefix of shared?.prefixes || []) { if (found.length >= 10) break; if (prefix.name.toLowerCase().includes(needle)) add({ label: prefix.name, kind: 'prefix', terms: deps.expandPrefix(shared!, '@' + prefix.name) }); }
-        if (!query.startsWith('@')) {
-            // Library entries that are whole {a|b} groups or long tag lists (saved from grouped appends) are not single tags.
-            for (const tag of shared?.tags || []) { if (found.length >= 10) break; if (/[{}|]/.test(tag.text) || tag.text.includes(',')) continue; if (tag.text.toLowerCase().includes(needle)) add({ label: tag.text, kind: 'tag' }); }
-            if (needle.length >= 2 && found.length < 10) {
-                try {
-                    const data = await hydrusRequest<{ items: { name: string }[] }>('dictionary', { browse: true, query: needle, categories: [], sort: 'popular', offset: 0, limit: 8 });
-                    for (const item of data.items) add({ label: preferPromptSpaces() ? item.name.replace(/_/g, ' ') : item.name, kind: 'tag' });
-                } catch { /* the Danbooru dictionary is optional */ }
-            }
-        }
-        return found;
-    };
+    const suggest = makeSuggest(deps);
 
     const host = document.createElement('div');
     host.style.cssText = 'width:100%;height:100%;overflow:auto;box-sizing:border-box;background:var(--comfy-input-bg,#222);border-radius:6px';
     const root = createRoot(host);
     const render = () => {
         const source = sourcePromptInfo(node);
-        root.render(<PromptBoxEditor state={state} source={source} preview={composeWithSource(compileBoxes(state), source.text)} suggest={suggest} onChange={commit} />);
+        root.render(<PromptBoxEditor state={state} source={source} preview={composeWithSource(compileBoxes(state), source.text)} suggest={suggest} onChange={commit} notice={notice} />);
     };
+    /** Shown under the boxes after an edit, e.g. which tags "Exclusive tags" turned off. */
+    let notice = '';
     function commit(next: BoxState) {
+        notice = '';
+        if (exclusiveTagsEnabled()) {
+            const result = disableConflicts(state, next, conflicts);
+            next = result.state;
+            if (result.disabled.length) notice = 'Exclusive tags turned off: ' + result.disabled.join(', ');
+        }
         state = next;
         node.properties ||= {}; node.properties.prompt_boxes = state;
         const compiled = compileBoxes(state), text = widget('text'), mode = widget('source_mode');

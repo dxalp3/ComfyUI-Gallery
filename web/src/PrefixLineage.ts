@@ -12,7 +12,7 @@ import { collectPrefixImages } from './PrefixAssociations';
 import { metadataSources } from './PromptResolution';
 import { extractHydrusTags, extractLocalPrompts } from './LocalImageSearch';
 import { stripUnresolved } from './PromptResolution';
-import { splitTop } from './PromptBoxes';
+import { compileChip, parsePrompt, splitTop } from './PromptBoxes';
 
 const HASH = /([a-f0-9]{64})/i;
 function object(value: unknown): Record<string, any> {
@@ -262,6 +262,19 @@ export function hasAllTerms(tags: Set<string>, aliasGroups: string[][]): boolean
     return aliasGroups.every(group => !group.length || group.some(spelling => tags.has(normalize(spelling))));
 }
 
+/**
+ * What an image must have to match a prefix's terms, as AND of ORs: a plain tag is required (its weight and brackets
+ * do not matter), `{a|b}` needs one of its options, and optional parts (`{a|}`, `{a|b|}`) are not required.
+ */
+export function prefixConditions(terms: string[]): string[][] {
+    return terms.flatMap(term => parsePrompt(term)).flatMap(chip => {
+        if (chip.kind === 'tag') return [[chip.text]];
+        if (chip.optional) return [];
+        return [chip.options.flatMap(option => parsePrompt(option).map(part => part.kind === 'tag' ? part.text : compileChip(part)))];
+    }).filter(options => options.length);
+}
+
+/** The tags a prefix requires outright (conditions with a single option). */
 export function requiredTerms(terms: string[]): string[] {
-    return terms.flatMap(term => term.includes('{') ? [] : splitTop(term, ',')).map(term => term.trim()).filter(Boolean);
+    return prefixConditions(terms).flatMap(options => options.length === 1 ? options : []);
 }

@@ -7,7 +7,7 @@ import { BASE_PATH } from './ComfyAppApi';
 import { hydrusRequest } from './HydrusApi';
 import { appendLocalImages } from './ImageSourceBridge';
 import { extractLocalPrompts, matchesLocalImage, type LocalPrompts, type LocalSearchField } from './LocalImageSearch';
-import { ancestorLevels, hashLookup, hasAllTerms, imagePrefixIds, imageTagSet, lineageTree, madeFrom, pairedHashIndex, pairedImages, requiredTerms, type LineageTree } from './PrefixLineage';
+import { ancestorLevels, hashLookup, hasAllTerms, imagePrefixIds, imageTagSet, lineageTree, madeFrom, pairedHashIndex, pairedImages, prefixConditions, requiredTerms, type LineageTree } from './PrefixLineage';
 import { associateImages, expandPrefix, imagePrefixKeys, imagePrefixRefs, loadPrefixes, type SharedLibrary } from './PrefixLibrary';
 import { openImageInfo, openSourcePrefix, localEntry } from './ImageInfo';
 import { useSearchPool } from './SearchPool';
@@ -44,6 +44,8 @@ export function droppedImage(event: DragEvent): { url: string; name: string } | 
 }
 
 const PAGE = 120;
+/** Tile borders that tell result kinds apart (the same colours as their labels). */
+const BORDER: Record<string, string> = { gold: '#d4b106', green: '#52c41a', blue: '#1677ff', purple: '#9254de', cyan: '#13c2c2', magenta: '#eb2f96' };
 const encode = (chip: QueryChip) => chip.kind === 'tag' ? chip.text : chip.kind === 'prefix' ? 'prefix::' + chip.id : 'image::' + chip.url;
 
 export async function fetchLocalHashes(urls: string[]): Promise<Record<string, string>> {
@@ -151,6 +153,18 @@ export function ImageSearchPanel() {
                     tabFor('generated', 'Generated', 'Everything made from the sources through Gallery Image Source (any number of generations, whatever the prompt), grouped by the image it was made from.')
                         .sections.push(...bySource(tree, new Set(), 'Appended under @' + chip.name).map(section => ({ ...section, title: tag + section.title })));
                     paired.urls.forEach(url => listed.add(url)); tree.nodes.forEach((_, url) => listed.add(url));
+                    // Everything about the prefix in one view, told apart by border: paired (gold), used as a source later
+                    // (green), generated from those (blue), and images that only carry the prefix's tags (dashed purple).
+                    // A prefix like `activator, {a|}, {b|c}, (d:0.5)` matches images with activator, d, and b or c.
+                    const conditions = prefixConditions(expandPrefix(shared, '@' + chip.name));
+                    const lineageUrls = new Set([...paired.urls, ...tree.nodes.keys()]);
+                    const has = (file: FileDetails, term: string) => matchesLocalImage(file, term, 'all', gallery.localHydrusTags[file.url] || [], promptsOf(file));
+                    const tagged = conditions.length ? files.filter(file => !lineageUrls.has(file.url) && conditions.every(options => options.some(term => has(file, term)))).sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0)) : [];
+                    const everything = tabFor('prefix-all', 'Everything', "The prefix's paired images (gold border), generated images later used as a source (green), everything generated from them (blue), and other images whose prompt has all of the prefix's tags (dashed purple).");
+                    everything.sections.push(
+                        { title: tag + 'Paired', hits: [...paired.urls].flatMap(url => hit(url, 'paired', 'gold')) },
+                        { title: tag + 'Generated from the lineage', hits: [...tree.nodes.keys()].flatMap(url => hit(url, tree.usedAsSource.has(url) ? 'used as source' : 'generation ' + tree.nodes.get(url)!.depth, tree.usedAsSource.has(url) ? 'green' : 'blue')).sort((a, b) => (b.file.timestamp || 0) - (a.file.timestamp || 0)) },
+                        { title: tag + 'Has the prefix tags (not in the lineage)', hits: tagged.map(file => ({ file, note: 'tags', color: 'purple' })) });
                 }
                 // --- image chips ---
                 for (const chip of images) {
@@ -193,10 +207,10 @@ export function ImageSearchPanel() {
                 const spellings = strict && terms.length ? (await hydrusRequest<{ aliases: string[][] }>('aliases', { terms }).catch(() => ({ aliases: terms.map(term => [term]) }))).aliases : undefined;
                 if (!live) return;
                 // Tabs that add nothing (no images) are hidden; Lineage always shows.
-                const order = ['lineage', 'sources', 'generated', 'source', 'prefix'];
-                const list = order.flatMap(key => result.get(key) ? [result.get(key)!] : []).filter(item => item.key === 'lineage' || item.key === 'sources' || item.sections.some(section => section.hits.length));
+                const order = ['prefix-all', 'lineage', 'sources', 'generated', 'source', 'prefix'];
+                const list = order.flatMap(key => result.get(key) ? [result.get(key)!] : []).filter(item => item.key === 'lineage' || item.key === 'prefix-all' || item.key === 'sources' || item.sections.some(section => section.hits.length));
                 setLibrary(shared); setAliases(spellings); setTabs(list);
-                setTab(current => list.some(item => item.key === current) ? current : (list.find(item => item.key === 'generated') || list.find(item => item.key === 'source') || list[0])?.key || '');
+                setTab(current => list.some(item => item.key === current) ? current : (list.find(item => item.key === 'prefix-all') || list.find(item => item.key === 'generated') || list.find(item => item.key === 'source') || list[0])?.key || '');
             } catch (reason) { if (live) setError(String(reason)); }
             finally { if (live) setBusy(false); }
         })();
@@ -281,7 +295,7 @@ export function ImageSearchPanel() {
         <div role="group" aria-label={file.name} draggable title={file.name + ' · click: open in gallery view · Ctrl/Shift-click: select · drag into the search bar to add it'}
             onDragStart={event => { event.dataTransfer.setData(IMAGE_DRAG_TYPE, JSON.stringify({ url: file.url, name: file.name })); event.dataTransfer.setData('text/uri-list', BASE_PATH + file.url); }}
             onClick={event => { if (event.ctrlKey || event.metaKey || event.shiftKey) toggle(file.url); else openInViewer(file.url); }}
-            style={{ minWidth: 0, position: 'relative', cursor: 'pointer', outline: selected.has(file.url) ? '2px solid #1677ff' : undefined, borderRadius: 4 }}>
+            style={{ minWidth: 0, position: 'relative', cursor: 'pointer', outline: selected.has(file.url) ? '2px solid #1677ff' : undefined, outlineOffset: 2, borderRadius: 6, padding: 2, border: color ? `2px ${color === 'purple' ? 'dashed' : 'solid'} ${BORDER[color] || '#8886'}` : '2px solid transparent' }}>
             <img loading="lazy" decoding="async" alt={file.name} draggable={false} src={`${BASE_PATH}/Gallery/thumbnail?url=${encodeURIComponent(file.url)}&v=${file.timestamp || 0}&root=${encodeURIComponent(root)}`} style={{ width: '100%', height: 130, objectFit: 'contain', background: '#8882', borderRadius: 4 }} />
             <Checkbox aria-label={'Select ' + file.name} checked={selected.has(file.url)} onClick={event => event.stopPropagation()} onChange={() => toggle(file.url)} style={{ position: 'absolute', top: 4, right: 6 }} />
             {note && <Tag color={color} style={{ position: 'absolute', top: 4, left: 4, margin: 0, maxWidth: 'calc(100% - 34px)', overflow: 'hidden', textOverflow: 'ellipsis' }}>{note}</Tag>}

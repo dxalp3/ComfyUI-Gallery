@@ -311,7 +311,8 @@ export const optionTags = (option: string): string[] => splitTop(option, ',').ma
 
 /** Every plain tag a chip can contribute, used to convert between grouping kinds. */
 export function chipTerms(chip: Chip): string[] {
-    if (chip.kind === 'tag') return [chip.text];
+    // A tag chip can hold `a, b` (typed, or converted from a group): those are two tags, not one option.
+    if (chip.kind === 'tag') return optionTags(chip.emphasis === 'round' ? `(${chip.text})` : chip.emphasis === 'square' ? `[${chip.text}]` : chip.text);
     return chip.options.flatMap(optionTags);
 }
 
@@ -327,6 +328,62 @@ export function setGroupingKind(chip: Chip, kind: GroupingKind): Chip {
     const options = chip.kind === 'or' && groupingKind(chip) !== 'group' ? chip.options : chipTerms(chip);
     if (kind === 'group') return { ...base, kind: 'or', options: [chipTerms(chip).join(', ')], optional: true };
     return { ...base, kind: 'or', options, optional: kind === 'optional' && options.length > 0 ? true : false };
+}
+
+/** The "Add as" mode a chip shows as: a single optional tag (`{a|}`) is `each`, otherwise its grouping kind. */
+export const addModeOf = (chip: Chip): AddMode => chip.kind === 'or' && chip.optional && chip.options.length === 1 && optionTags(chip.options[0]).length === 1 ? 'each' : groupingKind(chip);
+
+/**
+ * Change what a chip is, in place. Turning several tags into plain tags (or into `each`, every tag optional
+ * on its own) splits the chip, because one chip can only stand for one tag or one group.
+ */
+export function convertChip(state: BoxState, boxId: string, chipId: string, mode: AddMode): BoxState {
+    return editChips(state, boxId, chips => chips.flatMap(chip => {
+        if (chip.id !== chipId || addModeOf(chip) === mode) return [chip];
+        const terms = chipTerms(chip);
+        if (mode === 'each') return terms.map((tag, index) => ({ id: index ? newId() : chip.id, kind: 'or' as const, options: [tag], optional: true, enabled: chip.enabled, weight: chip.weight }));
+        if (mode === 'tag' && terms.length > 1) return terms.map((tag, index) => ({ ...parseChip(tag), id: index ? newId() : chip.id, enabled: chip.enabled }));
+        if (mode === 'tag') return [{ ...parseChip(terms[0] || ''), id: chip.id, enabled: chip.enabled, weight: chip.weight ?? parseChip(terms[0] || '').weight }];
+        return [setGroupingKind(chip, mode)];
+    }));
+}
+
+/** What a grouped chip shows as its parts: its options, or the tags of an optional group. */
+export const chipItems = (chip: Chip): string[] => chip.kind === 'tag' ? [] : groupingKind(chip) === 'group' ? optionTags(chip.options[0] || '') : chip.options;
+/** The same chip with other parts (undefined when no part is left, so the caller removes it). */
+export function withItems(chip: Chip, items: string[]): Chip | undefined {
+    const clean = items.map(item => item.trim()).filter(Boolean);
+    if (chip.kind !== 'or' || !clean.length) return chip.kind === 'or' ? undefined : chip;
+    return groupingKind(chip) === 'group' ? { ...chip, options: [clean.join(', ')] } : { ...chip, options: clean };
+}
+
+/** The single tag a chip stands for when it is a plain tag or one optional tag (`{a|}`); otherwise undefined. */
+export function singleTag(chip: Chip): string | undefined {
+    const terms = chipTerms(chip);
+    return terms.length === 1 && (chip.kind === 'tag' || addModeOf(chip) === 'each') ? terms[0] : undefined;
+}
+
+/**
+ * Exclusive tags: every single-tag chip that became used in `next` (added, switched on or retyped) turns off the
+ * other single-tag chips it conflicts with. Returns `next` unchanged when nothing conflicts, and the tags turned off.
+ */
+export function disableConflicts(previous: BoxState, next: BoxState, conflicts: (a: string, b: string) => boolean): { state: BoxState; disabled: string[] } {
+    const before = new Map<string, string | undefined>();
+    for (const box of previous.boxes) if (box.kind === 'group' && box.enabled) for (const chip of box.chips) if (chip.enabled) before.set(chip.id, singleTag(chip));
+    const fresh: { id: string; tag: string }[] = [];
+    for (const box of next.boxes) if (box.kind === 'group' && box.enabled) for (const chip of box.chips) {
+        const tag = chip.enabled ? singleTag(chip) : undefined;
+        if (tag && before.get(chip.id) !== tag) fresh.push({ id: chip.id, tag });
+    }
+    if (!fresh.length) return { state: next, disabled: [] };
+    const disabled: string[] = [];
+    const boxes = next.boxes.map(box => box.kind !== 'group' ? box : { ...box, chips: box.chips.map(chip => {
+        const tag = chip.enabled ? singleTag(chip) : undefined;
+        if (!tag || fresh.some(item => item.id === chip.id) || !fresh.some(item => conflicts(item.tag, tag))) return chip;
+        disabled.push(tag);
+        return { ...chip, enabled: false };
+    }) });
+    return disabled.length ? { state: { ...next, boxes }, disabled } : { state: next, disabled };
 }
 
 /** Replace one chip with plain tag chips (one per tag it holds). */

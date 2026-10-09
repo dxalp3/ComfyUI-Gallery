@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type DragEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { addBox, addBoxWithChip, addChips, ADD_MODES, balanced, chipTerms, closesChip, compileChip, editChips, expandKeywords, closeBraces, groupChips, groupingKind, groupingName, GROUPING_LABELS, mergeChips, moveBox, moveBoxTo, moveChipTo, moveItem, optionTags, parsePrompt, parseTyped, pendingKeyword, removeBox, setGroupingKind, sourceKey, splitChip, splitTop, typingToken, updateBox, type AddMode, type BoxState, type Chip, type GroupBox, type GroupingKind, type OrChip, type SourceBox } from './PromptBoxes';
+import { addBox, addBoxWithChip, addChips, addModeOf, ADD_MODES, chipItems, convertChip, withItems, balanced, chipTerms, closesChip, compileChip, editChips, expandKeywords, closeBraces, groupChips, groupingKind, groupingName, GROUPING_LABELS, mergeChips, moveBox, moveBoxTo, moveChipTo, moveItem, parsePrompt, parseTyped, pendingKeyword, removeBox, sourceKey, splitChip, splitTop, typingToken, updateBox, type AddMode, type BoxState, type Chip, type GroupBox, type GroupingKind, type OrChip, type SourceBox } from './PromptBoxes';
 
 export type Suggestion = { label: string; kind: 'tag' | 'prefix'; terms?: string[] };
 /** What the node's `source_text` input currently provides. `text` is known for Gallery Image Source and after a run. */
@@ -41,26 +41,86 @@ function Btn({ label, onClick, disabled, children }: { label: string; onClick: (
 
 const KIND_COLORS: Record<GroupingKind, string> = { tag: border, alternatives: '#4096ff', optional: '#d89614', group: '#49aa19' };
 
-/** The options of a grouped chip with the separator its kind uses: | between alternatives, , inside a group. */
-function ChipOptions({ chip }: { chip: OrChip }) {
+/** Colour of a chip's kind; single optional tags (`each`) share the optional group's green. */
+const modeColor = (mode: AddMode) => KIND_COLORS[mode === 'each' ? 'group' : mode];
+
+/**
+ * The parts of a grouped chip with the separator its kind uses: | between alternatives, , inside a group.
+ * With `onItems` the parts are editable in place: × removes one, + adds more (with suggestions).
+ */
+function ChipParts({ chip, suggest, onItems }: { chip: OrChip; suggest?: (query: string) => Promise<Suggestion[]>; onItems?: (items: string[]) => void }) {
+    const [adding, setAdding] = useState(false);
     const kind = groupingKind(chip), color = KIND_COLORS[kind];
-    const parts = kind === 'group' ? optionTags(chip.options[0] || '') : chip.options;
+    const parts = chipItems(chip);
     const separator = kind === 'group' ? ',' : '|';
-    return <>{parts.map((part, index) => <span key={index}>{index > 0 && <span aria-hidden style={{ color, fontWeight: 700, padding: kind === 'group' ? '0 4px 0 0' : '0 5px' }}>{separator}</span>}{part}</span>)}</>;
+    return <span style={{ display: 'inline-flex', flexWrap: 'wrap', alignItems: 'center', gap: 2, padding: '2px 4px' }}>
+        {parts.map((part, index) => <span key={index + part} style={{ display: 'inline-flex', alignItems: 'center' }}>
+            {index > 0 && <span aria-hidden style={{ color, fontWeight: 700, padding: kind === 'group' ? '0 4px 0 0' : '0 4px' }}>{separator}</span>}
+            <span style={onItems ? { display: 'inline-flex', alignItems: 'center', borderRadius: 4, background: '#ffffff12', padding: '0 0 0 4px' } : undefined}>
+                {part}
+                {onItems && <button type="button" aria-label={'Remove ' + part} title={'Remove “' + part + '” from this chip'} onClick={event => { event.stopPropagation(); onItems(parts.filter((_, at) => at !== index)); }} style={{ ...S.x, fontSize: 12, opacity: .7 }}>×</button>}
+            </span>
+        </span>)}
+        {onItems && suggest && (adding
+            ? <PartInput chip={chip} suggest={suggest} onAdd={items => onItems([...parts, ...items])} onClose={() => setAdding(false)} />
+            : <button type="button" aria-label={kind === 'group' ? 'Add a tag to this group' : 'Add an option'} title={kind === 'group' ? 'Add a tag to this group' : 'Add an option'} onClick={event => { event.stopPropagation(); setAdding(true); }}
+                style={{ ...S.x, color, fontWeight: 700, padding: '0 4px' }}>+</button>)}
+    </span>;
 }
 
-/** Chips in group boxes can be dragged (`onDrop` given): drop on another chip to put it before/after that chip. */
-function ChipView({ chip, selected, picked, onSelect, onPick, onRemove, onDrop }: { chip: Chip; selected: boolean; picked?: boolean; onSelect: () => void; onPick?: () => void; onRemove?: () => void; onDrop?: (chipId: string, after: boolean) => void }) {
+/** Inline input in a grouped chip: Enter adds what was typed as more options (`a | b`, `a OR b`) or more group tags. */
+function PartInput({ chip, suggest, onAdd, onClose }: { chip: OrChip; suggest: (query: string) => Promise<Suggestion[]>; onAdd: (items: string[]) => void; onClose: () => void }) {
+    const [value, setValue] = useState('');
+    const [items, setItems] = useState<Suggestion[]>([]);
+    const [active, setActive] = useState(-1);
+    const input = useRef<HTMLInputElement>(null);
+    const request = useRef(0);
+    const group = groupingKind(chip) === 'group';
+    useEffect(() => { input.current?.focus(); }, []);
+    useEffect(() => {
+        const { token: query } = typingToken(value);
+        if (query.replace(/^@/, '').length < (query.startsWith('@') ? 0 : 2)) { setItems([]); return; }
+        const id = ++request.current;
+        const timer = window.setTimeout(() => { suggest(query).then(found => { if (id === request.current) { setItems(found); setActive(-1); } }).catch(() => undefined); }, 150);
+        return () => window.clearTimeout(timer);
+    }, [value]);
+    // Group: every tag typed joins the group. Alternatives: `|` or OR separate options; commas stay inside one option.
+    const partsOf = (text: string) => group ? parsePrompt(expandKeywords(text)).flatMap(chipTerms) : text.replace(/^[\s{]+|[\s}]+$/g, '').split(/\s+OR\s+|\|/).map(part => part.replace(/^\s*,|,\s*$/g, '').trim()).filter(Boolean);
+    const add = (text: string) => { const parts = partsOf(text); if (parts.length) onAdd(parts); setValue(''); setItems([]); requestAnimationFrame(() => input.current?.focus()); };
+    const pick = (item: Suggestion) => {
+        const before = value.slice(0, typingToken(value).start);
+        if (item.kind === 'prefix') { onAdd([...partsOf(before), ...(group ? item.terms || [] : [(item.terms || []).join(', ')])]); setValue(''); setItems([]); return; }
+        add(before + item.label);
+    };
+    return <span onClick={event => event.stopPropagation()} style={{ display: 'inline-flex' }}>
+        <input ref={input} autoComplete="off" spellCheck={false} aria-label={group ? 'Add a tag to this group' : 'Add an option'} placeholder={group ? 'tag' : 'option'} value={value}
+            onChange={event => setValue(event.target.value)} onBlur={() => { if (value.trim()) add(value); onClose(); }}
+            onKeyDown={event => {
+                if (event.key === 'ArrowDown' && items.length) { event.preventDefault(); setActive(index => (index + 1) % items.length); }
+                else if (event.key === 'ArrowUp' && items.length) { event.preventDefault(); setActive(index => (index <= 0 ? items.length : index) - 1); }
+                else if (event.key === 'Enter') { event.preventDefault(); if (items[active]) pick(items[active]); else if (value.trim()) add(value); else onClose(); }
+                else if (event.key === 'Escape') { event.preventDefault(); onClose(); }
+            }} style={{ ...S.input, width: 110, padding: '0 4px', fontSize: 11 }} />
+        <SuggestionMenu anchor={input.current} items={items} active={active} onPick={pick} />
+    </span>;
+}
+
+/**
+ * One chip. A grouped chip is edited in place: its header picks the kind (and shows the weight), its parts
+ * keep their separators and can be removed or added to. Clicking the chip opens the small editor for the rest.
+ * Chips in group boxes can be dragged (`onDrop` given): drop on another chip to put it before/after that chip.
+ */
+function ChipView({ chip, selected, picked, onSelect, onPick, onRemove, onDrop, onKind, onItems, suggest }: { chip: Chip; selected: boolean; picked?: boolean; onSelect: () => void; onPick?: () => void; onRemove?: () => void; onDrop?: (chipId: string, after: boolean) => void; onKind?: (mode: AddMode) => void; onItems?: (items: string[]) => void; suggest?: (query: string) => Promise<Suggestion[]> }) {
     const [mark, setMark] = useState<'before' | 'after'>();
     const weighted = chip.weight !== undefined && chip.weight !== 1;
-    const kind = groupingKind(chip), color = KIND_COLORS[kind];
+    const mode = addModeOf(chip), color = modeColor(mode);
     const grouped = chip.kind === 'or';
-    const remove = onRemove && <button type="button" aria-label="Remove tag" title="Remove" onClick={onRemove} style={{ ...S.x, color: grouped ? '#fff' : 'inherit' }}>×</button>;
-    const label = <span role="button" tabIndex={0} aria-label={'Edit ' + compileChip({ ...chip, enabled: true })}
-        onClick={event => { if ((event.shiftKey || event.ctrlKey || event.metaKey) && onPick) onPick(); else onSelect(); }}
-        onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onSelect(); } }} style={{ cursor: 'pointer', padding: grouped ? '2px 6px' : undefined }}>
+    const remove = onRemove && <button type="button" aria-label="Remove tag" title="Remove" onClick={event => { event.stopPropagation(); onRemove(); }} style={{ ...S.x, color: grouped ? '#fff' : 'inherit' }}>×</button>;
+    const select = (event: { shiftKey: boolean; ctrlKey: boolean; metaKey: boolean }) => { if ((event.shiftKey || event.ctrlKey || event.metaKey) && onPick) onPick(); else onSelect(); };
+    const label = <span role="button" tabIndex={0} aria-label={'Edit ' + compileChip({ ...chip, enabled: true })} onClick={select}
+        onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onSelect(); } }} style={{ cursor: 'pointer' }}>
         {grouped
-            ? <ChipOptions chip={chip} />
+            ? <ChipParts chip={chip} suggest={suggest} onItems={onItems} />
             : <>{chip.emphasis === 'round' && '('}{chip.emphasis === 'square' && '['}{chip.text}{chip.emphasis === 'round' && ')'}{chip.emphasis === 'square' && ']'}</>}
         {weighted && !grouped && <small style={{ opacity: .7 }}> ×{chip.weight}</small>}
     </span>;
@@ -70,12 +130,19 @@ function ChipView({ chip, selected, picked, onSelect, onPick, onRemove, onDrop }
         onDragOver={event => { if (!onDrop || dragging?.kind !== 'chip' || dragging.id === chip.id) return; event.preventDefault(); event.stopPropagation(); setMark(right(event) ? 'after' : 'before'); }}
         onDragLeave={() => setMark(undefined)}
         onDrop={event => { if (!onDrop || dragging?.kind !== 'chip') return; event.preventDefault(); event.stopPropagation(); const after = right(event), id = dragging.id; setMark(undefined); if (id !== chip.id) onDrop(id, after); }}
-        style={{ ...S.chip, ...(grouped ? { flexDirection: 'column', alignItems: 'stretch', gap: 0, padding: 0, borderRadius: 6, borderColor: color, overflow: 'hidden' } : {}), ...(selected ? S.selected : {}), ...(picked ? { outline: `2px dashed ${accent}` } : {}), opacity: chip.enabled ? 1 : .45, textDecoration: chip.enabled ? 'none' : 'line-through', cursor: onDrop ? 'grab' : 'default', boxShadow: mark === 'before' ? `inset 3px 0 0 ${accent}` : mark === 'after' ? `inset -3px 0 0 ${accent}` : undefined }}>
+        style={{ ...S.chip, ...(grouped ? { flexDirection: 'column', alignItems: 'stretch', gap: 0, padding: 0, borderRadius: 6, borderColor: color, overflow: 'visible' } : {}), ...(selected ? S.selected : {}), ...(picked ? { outline: `2px dashed ${accent}` } : {}), opacity: chip.enabled ? 1 : .45, textDecoration: chip.enabled ? 'none' : 'line-through', cursor: onDrop ? 'grab' : 'default', boxShadow: mark === 'before' ? `inset 3px 0 0 ${accent}` : mark === 'after' ? `inset -3px 0 0 ${accent}` : undefined }}>
         {grouped
             ? <>
-                {/* The header spells out the grouping, so the body only needs its separators. */}
-                <span title={GROUPING_LABELS[kind].hint} style={{ display: 'flex', alignItems: 'center', gap: 6, background: color, color: '#fff', fontSize: 10, lineHeight: '15px', padding: '0 2px 0 6px', textTransform: 'uppercase', letterSpacing: .3 }}>
-                    <span style={{ flex: 1 }}>{groupingName(chip)}{weighted ? ' ×' + chip.weight : ''}</span>{remove}
+                {/* The header names the grouping (and changes it); the body keeps the separators. */}
+                <span title={ADD_MODES.find(item => item.value === mode)?.hint} style={{ display: 'flex', alignItems: 'center', gap: 4, background: color, color: '#fff', fontSize: 10, lineHeight: '15px', padding: '0 2px 0 4px', textTransform: 'uppercase', letterSpacing: .3, borderRadius: '5px 5px 0 0' }}>
+                    {onKind
+                        ? <select aria-label="Chip kind" value={mode} onClick={event => event.stopPropagation()} onChange={event => onKind(event.target.value as AddMode)}
+                            style={{ flex: 1, minWidth: 0, background: 'transparent', color: '#fff', border: 0, font: 'inherit', textTransform: 'uppercase', letterSpacing: .3, cursor: 'pointer', padding: 0 }}>
+                            {ADD_MODES.map(item => <option key={item.value} value={item.value} style={{ color: '#000', textTransform: 'none' }}>{item.value === 'each' ? 'Optional' : item.name}</option>)}
+                        </select>
+                        : <span style={{ flex: 1 }}>{groupingName(chip)}</span>}
+                    {weighted && <span>×{chip.weight}</span>}
+                    {remove}
                 </span>
                 {label}
             </>
@@ -83,18 +150,18 @@ function ChipView({ chip, selected, picked, onSelect, onPick, onRemove, onDrop }
     </span>;
 }
 
-/** Pick how a chip groups its tags. The same four names as the palette's insertion formats. */
-function KindPicker({ value, onChange }: { value: GroupingKind; onChange: (kind: GroupingKind) => void }) {
+/** Pick what a chip is: the "Add as" kinds (Optional = each tag optional on its own). */
+function KindPicker({ value, onChange }: { value: AddMode; onChange: (mode: AddMode) => void }) {
     return <span role="radiogroup" aria-label="Grouping" style={{ display: 'inline-flex', flexWrap: 'wrap', gap: 2 }}>
-        {(Object.keys(GROUPING_LABELS) as GroupingKind[]).map(kind => <button key={kind} type="button" role="radio" aria-checked={kind === value} title={GROUPING_LABELS[kind].hint} onClick={() => onChange(kind)}
-            style={{ ...S.btn, borderColor: kind === value ? KIND_COLORS[kind] : border, background: kind === value ? KIND_COLORS[kind] : 'transparent', color: kind === value && kind !== 'tag' ? '#fff' : 'inherit' }}>{GROUPING_LABELS[kind].name}</button>)}
+        {ADD_MODES.map(item => <button key={item.value} type="button" role="radio" aria-checked={item.value === value} title={item.hint} onClick={() => onChange(item.value)}
+            style={{ ...S.btn, borderColor: item.value === value ? modeColor(item.value) : border, background: item.value === value ? modeColor(item.value) : 'transparent', color: item.value === value && item.value !== 'tag' ? '#fff' : 'inherit' }}>{item.value === 'each' ? 'Optional' : item.name}</button>)}
     </span>;
 }
 
-function ChipEditor({ chip, suggest, onChange, onRemove, onSplit, onMove, onClose }: { chip: Chip; suggest: (query: string) => Promise<Suggestion[]>; onChange: (chip: Chip) => void; onRemove: () => void; onSplit: () => void; onMove: (delta: -1 | 1) => void; onClose: () => void }) {
+/** The rest of a chip's settings. Grouped chips edit their kind and parts in the chip itself, so only these remain. */
+function ChipEditor({ chip, onChange, onKind, onRemove, onSplit, onMove, onClose }: { chip: Chip; onChange: (chip: Chip) => void; onKind: (mode: AddMode) => void; onRemove: () => void; onSplit: () => void; onMove: (delta: -1 | 1) => void; onClose: () => void }) {
     const [draft, setDraft] = useState(chip.kind === 'tag' ? chip.text : '');
-    useEffect(() => setDraft(chip.kind === 'tag' ? chip.text : ''), [chip.id, chip.kind]);
-    const kind = groupingKind(chip);
+    useEffect(() => setDraft(chip.kind === 'tag' ? chip.text : ''), [chip.id, chip.kind, chip.kind === 'tag' ? chip.text : '']);
     const commit = () => {
         if (chip.kind !== 'tag' || !draft.trim() || draft.trim() === chip.text) return;
         // Typing {a|b}, {a|b|}, {a, b|} or `a OR b OPT` into a tag turns it into that grouping.
@@ -102,32 +169,13 @@ function ChipEditor({ chip, suggest, onChange, onRemove, onSplit, onMove, onClos
         if (parsed.length === 1) onChange({ ...parsed[0], id: chip.id, enabled: chip.enabled, weight: parsed[0].weight ?? chip.weight });
         else onChange({ ...chip, text: draft.trim() });
     };
-    /** Options (alternatives) or tags (optional group) as removable pills, plus an input with suggestions to add more. */
-    const items = chip.kind === 'tag' ? [] : kind === 'group' ? optionTags(chip.options[0] || '') : chip.options;
-    const setItems = (next: string[]) => {
-        if (chip.kind !== 'or') return;
-        const clean = next.map(item => item.trim()).filter(Boolean);
-        if (!clean.length) { onRemove(); return; }
-        onChange(kind === 'group' ? { ...chip, options: [clean.join(', ')] } : { ...chip, options: clean });
-    };
     return <div style={{ ...S.editor, flexDirection: 'column', alignItems: 'stretch' }}>
-        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6 }}>
-            <KindPicker value={kind} onChange={next => onChange(setGroupingKind(chip, next))} />
-            <small style={{ opacity: .65 }}>{GROUPING_LABELS[kind].hint}</small>
-        </div>
-        {chip.kind === 'tag'
-            ? <input autoComplete="off" aria-label="Tag text" value={draft} onChange={event => setDraft(event.target.value)} onBlur={commit} onKeyDown={event => { if (event.key === 'Enter') commit(); if (event.key === 'Escape') onClose(); }} style={{ ...S.input, minWidth: 120 }} />
-            : <>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }} aria-label={kind === 'group' ? 'Tags in this group' : 'Options'}>
-                    {items.map((item, index) => <span key={index + item} style={{ ...S.chip, borderColor: KIND_COLORS[kind] }}>
-                        <span>{item}</span>
-                        <button type="button" aria-label={'Remove ' + item} title="Remove" onClick={() => setItems(items.filter((_, at) => at !== index))} style={S.x}>×</button>
-                    </span>)}
-                </div>
-                <AddInput placeholder={kind === 'group' ? 'Add a tag to this group' : 'Add an alternative (an @prefix becomes one option)'} suggest={suggest}
-                    onText={text => setItems([...items, ...(kind === 'group' ? parsePrompt(text).flatMap(chipTerms) : splitTop(text.replace(/^[\s{]+|[\s}]+$/g, ''), '|').map(option => option.replace(/^\s*,|,\s*$/g, '').trim()))])}
-                    onPrefix={(item, head) => setItems([...items, ...(head ? [head] : []), ...(kind === 'group' ? item.terms || [] : [(item.terms || []).join(', ')])])} />
-            </>}
+        {chip.kind === 'tag' && <>
+            <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6 }}>
+                <KindPicker value={addModeOf(chip)} onChange={onKind} />
+            </div>
+            <input autoComplete="off" aria-label="Tag text" value={draft} onChange={event => setDraft(event.target.value)} onBlur={commit} onKeyDown={event => { if (event.key === 'Enter') commit(); if (event.key === 'Escape') onClose(); }} style={{ ...S.input, minWidth: 120 }} />
+        </>}
         <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6 }}>
             <label>weight <input type="number" step={0.05} min={0} max={3} aria-label="Weight" placeholder="1" value={chip.weight ?? ''} onChange={event => onChange({ ...chip, weight: event.target.value === '' ? undefined : Number(event.target.value) })} style={{ ...S.input, width: 58 }} /></label>
             {chip.kind === 'tag' && <select aria-label="Brackets" value={chip.emphasis ?? ''} onChange={event => onChange({ ...chip, emphasis: event.target.value === 'round' || event.target.value === 'square' ? event.target.value : undefined })} style={S.input}><option value="">no brackets</option><option value="round">( )</option><option value="square">[ ]</option></select>}
@@ -260,7 +308,8 @@ function BoxGrip({ id, name, boxRef, onEnd }: { id: string; name: string; boxRef
         onDragEnd={() => { dragging = undefined; onEnd(); }}>⠿</span>;
 }
 
-function GroupView({ box, index, count, state, onChange, suggest }: Common & { box: GroupBox; suggest: (query: string) => Promise<Suggestion[]> }) {
+/** One box of chips. `bare` leaves out the box header (name, on/off, ordering) for plain chip lists such as a prefix's terms. */
+function GroupView({ box, index, count, state, onChange, suggest, bare, placeholder = 'Add tags (Enter)' }: Common & { box: GroupBox; suggest: (query: string) => Promise<Suggestion[]>; bare?: boolean; placeholder?: string }) {
     const [selected, setSelected] = useState<string>();
     const [picked, setPicked] = useState<string[]>([]);
     const [renaming, setRenaming] = useState<string>();
@@ -279,8 +328,8 @@ function GroupView({ box, index, count, state, onChange, suggest }: Common & { b
             if (current.kind === 'box') { if (current.id !== box.id) onChange(moveBoxTo(state, current.id, { boxId: box.id, after: lower(event) })); }
             else onChange(moveChipTo(state, current.id, box.id));
         }}
-        style={{ ...S.box, opacity: box.enabled ? 1 : .6, boxShadow: mark === 'before' ? `0 -3px 0 ${accent}` : mark === 'after' ? `0 3px 0 ${accent}` : undefined }}>
-        <div style={S.header}>
+        style={{ ...S.box, ...(bare ? { paddingTop: 6 } : {}), opacity: box.enabled ? 1 : .6, boxShadow: mark === 'before' ? `0 -3px 0 ${accent}` : mark === 'after' ? `0 3px 0 ${accent}` : undefined }}>
+        {!bare && <div style={S.header}>
             <BoxGrip id={box.id} name={box.name || 'untitled'} boxRef={ref} onEnd={() => setMark(undefined)} />
             <Btn label={box.collapsed ? 'Expand box' : 'Collapse box'} onClick={() => patch({ collapsed: !box.collapsed })}>{box.collapsed ? '▸' : '▾'}</Btn>
             <input type="checkbox" aria-label={'Use box ' + box.name} title="Use this box" checked={box.enabled} onChange={event => patch({ enabled: event.target.checked })} />
@@ -292,18 +341,20 @@ function GroupView({ box, index, count, state, onChange, suggest }: Common & { b
             <Btn label="Move box up" disabled={index === 0} onClick={() => onChange(moveBox(state, box.id, -1))}>▲</Btn>
             <Btn label="Move box down" disabled={index === count - 1} onClick={() => onChange(moveBox(state, box.id, 1))}>▼</Btn>
             <Btn label="Delete box" onClick={() => onChange(removeBox(state, box.id))}>×</Btn>
-        </div>
+        </div>}
         {box.collapsed
             ? !!preview && <div style={S.preview} title={preview}>{box.chips.filter(item => item.enabled).map((item, index) => <span key={item.id}>{index > 0 && ', '}<span style={item.kind === 'or' ? { color: KIND_COLORS[groupingKind(item)], fontWeight: 600 } : undefined}>{compileChip(item)}</span></span>)}</div>
             : <div style={S.body}>
                 <div style={S.chips}>{box.chips.map(item => <ChipView key={item.id} chip={item} selected={item.id === selected} picked={picked.includes(item.id)} onSelect={() => setSelected(selected === item.id ? undefined : item.id)} onRemove={() => remove(item.id)}
                     onPick={() => setPicked(old => old.includes(item.id) ? old.filter(id => id !== item.id) : [...old, item.id])}
-                    onDrop={(sourceId, after) => onChange(moveChipTo(state, sourceId, box.id, { chipId: item.id, after }))} />)}</div>
+                    onDrop={(sourceId, after) => onChange(moveChipTo(state, sourceId, box.id, { chipId: item.id, after }))}
+                    onKind={mode => onChange(convertChip(state, box.id, item.id, mode))} suggest={suggest}
+                    onItems={items => { const next = withItems(item, items); onChange(editChips(state, box.id, chips => next ? chips.map(other => other.id === item.id ? next : other) : chips.filter(other => other.id !== item.id))); }} />)}</div>
                 {picked.length > 1 && <MergeBar count={picked.length} onClear={() => setPicked([])} onMerge={kind => { onChange(mergeChips(state, box.id, picked, kind)); setPicked([]); }} />}
-                {chip && <ChipEditor chip={chip} suggest={suggest} onClose={() => setSelected(undefined)} onRemove={() => remove(chip.id)} onSplit={() => { setSelected(undefined); onChange(splitChip(state, box.id, chip.id)); }}
+                {chip && <ChipEditor chip={chip} onKind={mode => { if (mode !== 'alternatives' && mode !== 'optional' && mode !== 'group') setSelected(undefined); onChange(convertChip(state, box.id, chip.id, mode)); }} onClose={() => setSelected(undefined)} onRemove={() => remove(chip.id)} onSplit={() => { setSelected(undefined); onChange(splitChip(state, box.id, chip.id)); }}
                     onChange={next => onChange(editChips(state, box.id, chips => chips.map(item => item.id === next.id ? next : item)))}
                     onMove={delta => onChange(editChips(state, box.id, chips => moveItem(chips, chip.id, delta)))} />}
-                <AddInput placeholder="Add tags (Enter)" suggest={suggest} onText={text => onChange(addChips(state, box.id, text))}
+                <AddInput placeholder={placeholder} suggest={suggest} onText={text => onChange(addChips(state, box.id, text))}
                     onGroup={(mode, tags) => { const made = groupChips(mode, tags); if (made.length) onChange(editChips(state, box.id, chips => [...chips, ...made])); }}
                     onPrefix={(item, head) => onChange(addChips(state, box.id, [head, (item.terms || []).join(', ')].filter(Boolean).join(', ')))} />
             </div>}
@@ -356,7 +407,7 @@ function SourceView({ box, index, count, state, onChange, source }: Common & { b
     </div>;
 }
 
-export function PromptBoxEditor({ state, source, preview, suggest, onChange }: { state: BoxState; source: SourceInfo; preview: string; suggest: (query: string) => Promise<Suggestion[]>; onChange: (state: BoxState) => void }) {
+export function PromptBoxEditor({ state, source, preview, suggest, onChange, notice }: { state: BoxState; source: SourceInfo; preview: string; suggest: (query: string) => Promise<Suggestion[]>; onChange: (state: BoxState) => void; notice?: string }) {
     return <div style={S.root} onWheel={event => event.stopPropagation()}>
         {state.boxes.map((box, index) => box.kind === 'source'
             ? <SourceView key={box.id} box={box} index={index} count={state.boxes.length} state={state} onChange={onChange} source={source} />
@@ -364,9 +415,29 @@ export function PromptBoxEditor({ state, source, preview, suggest, onChange }: {
         <AddInput placeholder="New box: type tags and press Enter" suggest={suggest} onText={text => onChange(addBox(state, undefined, text))}
             onGroup={(mode, tags) => { const made = groupChips(mode, tags); if (made.length) onChange(addBoxWithChip(state, made)); }}
             onPrefix={(item, head) => onChange(addBox(head ? addBox(state, undefined, head) : state, item.label, (item.terms || []).join(', ')))} />
+        {notice && <div role="status" style={{ opacity: .8, color: '#d89614' }}>{notice}</div>}
         <details>
             <summary style={{ cursor: 'pointer', opacity: .8 }}>Prompt sent to the encoder</summary>
             <div style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', padding: '4px 0', opacity: .85 }}>{preview || '—'}</div>
         </details>
+    </div>;
+}
+
+const termsBox = (terms: string[]): BoxState => ({ version: 1, boxes: [{ id: 'terms', kind: 'group', name: '', chips: terms.flatMap(parsePrompt), enabled: true, collapsed: false }] });
+const termsOf = (state: BoxState): string[] => state.boxes.flatMap(box => box.kind === 'group' ? box.chips.map(compileChip).filter(Boolean) : []);
+
+/**
+ * A list of prompt terms (a prefix's tags) edited with the encoder's chips: typed brackets, AND / OR / OPT,
+ * "Add as", grouped chips edited in place, weights. Each chip is one term, for example `activator tag`,
+ * `{tag1|}`, `{(tag2, tag3)|}` or `(tag4:0.5)`.
+ */
+export function TermsEditor({ value, onChange, suggest, placeholder }: { value: string[]; onChange: (terms: string[]) => void; suggest: (query: string) => Promise<Suggestion[]>; placeholder?: string }) {
+    const [state, setState] = useState<BoxState>(() => termsBox(value));
+    // Follow changes made outside (loading another prefix, "add all"), but keep chip identity while editing here.
+    useEffect(() => { if (JSON.stringify(termsOf(state)) !== JSON.stringify(value)) setState(termsBox(value)); }, [JSON.stringify(value)]);
+    const change = (next: BoxState) => { setState(next); onChange(termsOf(next)); };
+    const box = state.boxes[0] as GroupBox;
+    return <div style={{ ...S.root, padding: 0, minHeight: 0 }} onWheel={event => event.stopPropagation()}>
+        <GroupView bare box={box} index={0} count={1} state={state} onChange={change} suggest={suggest} placeholder={placeholder} />
     </div>;
 }

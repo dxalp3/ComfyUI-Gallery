@@ -25,7 +25,27 @@ except ImportError:  # Standalone unit tests.
 
 
 def import_local_image(gallery_root, input_root, url):
-    source = resolve_image(gallery_root, url)
+    return import_file(resolve_image(gallery_root, url), input_root)
+
+
+def import_input_image(input_root, name):
+    """An image already in ComfyUI's input folder (a Load Image node's image, or a file dropped on the node)."""
+    if not isinstance(name, str) or not name or len(name) > 2048:
+        raise ImageSourceError("Name an image from ComfyUI's input folder.")
+    # Load Image values look like "sub/name.png" or "name.png [input]".
+    clean = name.replace("\\", "/").rsplit(" [", 1)[0] if name.endswith("]") else name.replace("\\", "/")
+    base = Path(input_root).resolve(strict=True)
+    try:
+        source = (base / clean).resolve(strict=True)
+        source.relative_to(base)
+    except (OSError, ValueError):
+        raise ImageSourceError("That image is not in ComfyUI's input folder.") from None
+    if not source.is_file():
+        raise ImageSourceError("That image is not in ComfyUI's input folder.")
+    return import_file(source, input_root)
+
+
+def import_file(source, input_root):
     before = file_fingerprint(source)
     if before[0] > MAX_SOURCE_BYTES:
         raise ImageSourceError("The source image exceeds the 256 MiB file limit.")
@@ -134,6 +154,8 @@ def register_source_routes(routes, get_gallery_root, get_input_root):
             async with workers:
                 if action == "hashes":
                     return web.json_response(await asyncio.to_thread(local_hashes, get_gallery_root(), data.get("urls")))
+                if action == "input":
+                    return web.json_response(await asyncio.to_thread(import_input_image, get_input_root(), data.get("name")))
                 if action == "local":
                     result = await asyncio.to_thread(import_local_image, get_gallery_root(), get_input_root(), data.get("url"))
                     if isinstance(data.get('metadata'), dict):
@@ -152,6 +174,10 @@ def register_source_routes(routes, get_gallery_root, get_input_root):
     @routes.post("/Gallery/source/local")
     async def import_local(request):
         return await handle(request, "local")
+
+    @routes.post("/Gallery/source/input")
+    async def import_input(request):
+        return await handle(request, "input")
 
     @routes.post("/Gallery/source/hashes")
     async def hashes(request):

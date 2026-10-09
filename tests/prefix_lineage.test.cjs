@@ -64,3 +64,9 @@ test('the lineage tree knows what each image was made from and which generations
     const levels = L.ancestorLevels(source(h('2'), { metadata: source(h('1')) }));
     assert.deepEqual(levels.map(level => [level.hash, level.original]), [[h('2'), false], [h('1'), true]]);
 });
+
+test('prefix conditions: plain tags are required, {a|b} needs one option, optional parts are not required', () => {
+    const L2 = require('./ts_loader.cjs').load('PrefixLineage.ts');
+    assert.deepEqual(L2.prefixConditions(['activator tag', '{tag1|}', '{(tag2, tag3)|}', '(tag4:0.5)', '{red hair|blue hair}']), [['activator tag'], ['tag4'], ['red hair', 'blue hair']]);
+    assert.deepEqual(L2.requiredTerms(['a, b', '{c|d}', '{e|}']), ['a', 'b']);
+});

@@ -1,5 +1,6 @@
 import { installPromptBoxes } from './EncoderNode';
 import { getComfyApp } from './ComfyAppApi';
+import { splitTop } from './PromptBoxes';
 // The encoder's source-prompt lookup moved next to the box editor; keep the old import path working.
 export { effectiveSourceText } from './EncoderNode';
 export type PrefixImage = { name?: string; local_url?: string; root?: string; hash?: string; /** Association keys this image is stored under (filled in when listing). */ keys?: string[] };
@@ -42,11 +43,13 @@ export async function migrateBrowserPrefixes(revision: string) {
     await request({ action: 'migrate', revision, library: JSON.parse(raw) });
     changed();
 }
+/** Prefix terms in a text: comma or line separated, but a comma inside a group stays (`{(a, b)|}` is one term). */
+const termsOfText = (text: string) => text.split(/\n+/).flatMap(line => splitTop(line, ','));
 export function expandPrefix(library: PrefixLibrary, name: string): string[] {
     const excluded = name.startsWith('-@');
     const clean = name.replace(/^-?@/, '');
     const prefix = library.prefixes.find(item => item.name.toLowerCase() === clean.toLowerCase());
-    return prefix ? prefix.tags.flatMap(id => (library.tags.find(tag => tag.id === id)?.text || '').split(/[,\n]+/)).map(value => (excluded ? '-' : '') + value.trim()).filter(value => value && value !== '-') : [name];
+    return prefix ? prefix.tags.flatMap(id => termsOfText(library.tags.find(tag => tag.id === id)?.text || '')).map(value => (excluded ? '-' : '') + value.trim()).filter(value => value && value !== '-') : [name];
 }
 /** Expand saved compound vocabulary and copied prefix text without splitting literal Hydrus predicates. */
 export function expandSearchTerms(library: PrefixLibrary, value: string): string[] {
@@ -56,7 +59,7 @@ export function expandSearchTerms(library: PrefixLibrary, value: string): string
     const text = (excluded ? value.slice(1) : value).trim();
     const compound = library.tags.some(tag => tag.text.trim() === text) || library.prefixes.some(prefix =>
         prefix.tags.map(id => library.tags.find(tag => tag.id === id)?.text).filter(Boolean).join(', ') === text);
-    return compound ? Array.from(new Set(text.split(/[,\n]+/).map(term => term.trim()).filter(Boolean).map(term => (excluded ? '-' : '') + term))) : [value];
+    return compound ? Array.from(new Set(termsOfText(text).map(term => term.trim()).filter(Boolean).map(term => (excluded ? '-' : '') + term))) : [value];
 }
 export async function savePrefix(name: string, values: string[], revision?: string, imageKeys?: string[], negativeTerms?: string[], imageRefs?: Record<string, PrefixImage>) {
     const result = await request({ action: 'save', name, terms: values, image_keys: imageKeys || [], negative_terms: negativeTerms, image_refs: imageRefs || {}, revision: revision || (await loadPrefixes()).revision });

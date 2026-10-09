@@ -200,3 +200,42 @@ test('source tags can be left out; the list rides in the marker', () => {
     assert.deepEqual(B.parseState(JSON.parse(JSON.stringify(state))).boxes.find(box => box.kind === 'source').excluded, ['Blue_Eyes', 'x{y|z}']);
     assert.equal(B.composeWithSource('a, ' + M, 'b'), 'a, b');
 });
+
+test('switching a chip between kinds never collapses it into one comma-separated option', () => {
+    let state = B.stateFromText('{a|b}');
+    const box = state.boxes.find(item => item.kind === 'group');
+    const id = () => state.boxes.find(item => item.id === box.id).chips[0].id;
+    const compiled = () => B.compileBoxes(state).replace(/, ⟦source⟧$/, '');
+    for (const mode of ['optional', 'group', 'alternatives', 'optional', 'alternatives']) state = B.convertChip(state, box.id, id(), mode);
+    assert.equal(compiled(), '{a|b}');
+    state = B.convertChip(state, box.id, id(), 'tag');
+    assert.equal(compiled(), 'a, b', 'several tags become separate tag chips');
+    assert.equal(state.boxes.find(item => item.id === box.id).chips.length, 2);
+    // A tag chip that holds "a, b" (old state) converts back into two options, not one.
+    const old = { id: 'x', kind: 'tag', text: 'a, b', enabled: true };
+    assert.deepEqual(B.setGroupingKind(old, 'alternatives').options, ['a', 'b']);
+    state = B.stateFromText('a, b');
+    const first = state.boxes.find(item => item.kind === 'group');
+    state = B.convertChip(state, first.id, first.chips[0].id, 'each');
+    assert.equal(compiled(), '{a|}, b');
+    assert.equal(B.addModeOf(state.boxes.find(item => item.id === first.id).chips[0]), 'each');
+});
+
+test('grouped chips are edited part by part', () => {
+    const chip = B.parsePrompt('{a, b|}')[0];
+    assert.deepEqual(B.chipItems(chip), ['a', 'b']);
+    assert.equal(B.compileChip(B.withItems(chip, ['a', 'b', 'c'])), '{a, b, c|}');
+    assert.equal(B.compileChip(B.withItems(B.parsePrompt('{x|y}')[0], ['x', 'y', 'z'])), '{x|y|z}');
+    assert.equal(B.withItems(chip, []), undefined);
+});
+
+test('exclusive tags turn off the conflicting single-tag chips', () => {
+    const clash = (a, b) => [a, b].sort().join() === 'long hair,short hair';
+    const before = B.stateFromText('short hair, {smile|}, red eyes');
+    const box = before.boxes.find(item => item.kind === 'group');
+    const after = B.addChips(before, box.id, 'long hair');
+    const result = B.disableConflicts(before, after, clash);
+    assert.deepEqual(result.disabled, ['short hair']);
+    assert.equal(B.compileBoxes(result.state).replace(/, ⟦source⟧$/, ''), '{smile|}, red eyes, long hair');
+    assert.equal(B.disableConflicts(after, after, clash).state, after, 'nothing new, nothing changes');
+});

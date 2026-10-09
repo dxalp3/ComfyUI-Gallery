@@ -122,6 +122,8 @@ app.on_cleanup.append(bridge.sync.cleanup)
 thumb_module.register_thumbnail_routes(routes, lambda: str(MEDIA))
 from gallery_qa.prefix_library import register_prefix_routes
 register_prefix_routes(routes, lambda request: MEMORY / "prompt-library.json")
+from gallery_qa.exclusive_tags import register_exclusive_routes
+register_exclusive_routes(routes, lambda request: MEMORY / "gallery-exclusive-tags.json")
 from gallery_qa.image_source_api import register_source_routes
 from gallery_qa.gallery_app import register_gallery_app_routes
 register_source_routes(routes, lambda: MEDIA, lambda: INPUT)

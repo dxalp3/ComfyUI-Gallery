@@ -1,7 +1,8 @@
 import { installPrefixWidgets } from './PrefixLibrary';
 import { installWorkspaceTab, openWorkspace, closeWorkspace } from './GalleryWorkspace';
 import { getComfyApp } from './ComfyAppApi';
-import { installSourceWidgets, registerSourceConstructor } from './ImageSourceBridge';
+import { exclusiveTagsEnabled } from './TagConflicts';
+import { installLoadImageDrop, installSourceWidgets, registerSourceConstructor } from './ImageSourceBridge';
 import { createRoot } from 'react-dom/client'
 import Gallery from './Gallery.tsx'
 import App from 'antd/es/app/App';
@@ -19,6 +20,8 @@ if (STANDALONE) {
     name: "Gallery",
     async setup() {
         installWorkspaceTab();
+        installLoadImageDrop();
+        exclusiveTagsEnabled(); // loads the exclusive tag list when the setting is on
         getComfyApp()?.extensionManager?.registerSidebarTab?.({
             id: 'comfy-gallery', icon: 'pi pi-images', title: 'Gallery', tooltip: 'Local and Hydrus gallery', type: 'custom',
             render: (element: HTMLElement) => {

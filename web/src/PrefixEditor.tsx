@@ -1,9 +1,9 @@
 import { useState, type Dispatch, type SetStateAction } from 'react';
 import { Button, Input, Modal, Select, Space, Tabs, Typography } from 'antd';
-import { HydrusTagSelect } from './HydrusTagSelect';
+import { TermsEditor } from './PromptBoxEditor';
+import { makeSuggest } from './PromptSuggest';
 import { PrefixImageGrid, PrefixImages, seedImages } from './PrefixImages';
-import { expandPrefix, matchesPolarity, POLARITY_OPTIONS, sidesLabel, type PrefixImage, type PrefixPolarity, type PrefixSeed, type SharedLibrary } from './PrefixLibrary';
-import type { SearchPrefix } from './TagSearchPanel';
+import { expandPrefix, loadPrefixes, matchesPolarity, POLARITY_OPTIONS, sidesLabel, type PrefixImage, type PrefixPolarity, type PrefixSeed, type SharedLibrary } from './PrefixLibrary';
 import { BASE_Z_INDEX } from './ComfyAppApi';
 
 /**
@@ -11,13 +11,16 @@ import { BASE_Z_INDEX } from './ComfyAppApi';
  * clearing is per side, and the image the prefix is being made from stays visible beside the terms.
  * Spelling (spaces vs underscores) is a gallery setting applied on save, not a checkbox here.
  */
-export function PrefixEditor({ shared, seed, active, name, setName, positive, setPositive, negative, setNegative, saving, onSave, onDelete, onAppendToNode, onSearchImages, onOpenLibrarySearch, onOpenPrompts, onUnpair }: {
+/** Suggestions for the term editors: saved prefixes, library tags and the Danbooru dictionary. */
+const suggest = makeSuggest({ loadLibrary: loadPrefixes, expandPrefix });
+
+export function PrefixEditor({ shared, seed, active, name, setName, positive, setPositive, negative, setNegative, saving, onSave, onDelete, onAppendToNode, onOpenLibrarySearch, onOpenPrompts, onUnpair }: {
     shared: SharedLibrary; seed: PrefixSeed; active: boolean;
     name: string; setName: (value: string) => void;
     positive: string[]; setPositive: Dispatch<SetStateAction<string[]>>;
     negative: string[]; setNegative: Dispatch<SetStateAction<string[]>>;
     saving: boolean; onSave: () => void; onDelete: (id: string) => Promise<void>;
-    onAppendToNode?: (id: string) => void; onSearchImages: (terms: string[], prefix?: SearchPrefix) => void; onOpenLibrarySearch: () => void;
+    onAppendToNode?: (id: string) => void; onOpenLibrarySearch: () => void;
     onOpenPrompts?: () => void; onUnpair?: (image: PrefixImage) => void;
 }) {
     const existing = shared.prefixes.find(prefix => prefix.name.toLowerCase() === name.trim().toLowerCase());
@@ -41,8 +44,6 @@ export function PrefixEditor({ shared, seed, active, name, setName, positive, se
             <Button type="primary" loading={saving} disabled={!name.trim() || (!positive.length && !negative.length)} onClick={onSave}>Save prefix</Button>
             {existing && onAppendToNode && <Button onClick={() => onAppendToNode(existing.id)}>Append to node</Button>}
             {existing && <Button danger onClick={() => Modal.confirm({ title: 'Delete prefix ' + existing.name + '?', content: 'Its vocabulary tags and existing workflow text are retained.', zIndex: BASE_Z_INDEX + 90, onOk: () => onDelete(existing.id) })}>Delete prefix</Button>}
-            <Button disabled={!positive.length && !existing} title={existing ? 'Images paired with this prefix and everything generated from them' : 'Images whose prompt contains these tags'}
-                onClick={() => onSearchImages(positive, { id: existing?.id, name: existing?.name || name.trim() || 'draft', terms: existing ? expandPrefix(shared, '@' + existing.name) : positive })}>Find images</Button>
             <Button type="link" onClick={onOpenLibrarySearch}>Library search…</Button>
             {onOpenPrompts && <Button type="link" onClick={onOpenPrompts}>Prompts & palette…</Button>}
         </Space>
@@ -52,12 +53,12 @@ export function PrefixEditor({ shared, seed, active, name, setName, positive, se
                 <Tabs size="small" items={[
                     { key: 'positive', label: 'Positive terms (' + positive.length + ')', children: <Space direction="vertical" style={{ width: '100%' }}>
                         {(!!seed.positive || !!seed.hydrus) && <Space wrap>{(['positive', 'hydrus'] as const).map(side => <Button key={side} disabled={!seed[side]?.length} onClick={() => add(side)}>Add image {side} ({seed[side]?.length || 0})</Button>)}</Space>}
-                        <HydrusTagSelect label="Prefix tags" value={positive} onChange={setPositive} active={active} placeholder="Search Danbooru tags, Hydrus tags, or type @prefix" />
+                        <TermsEditor value={positive} onChange={terms => setPositive(terms)} suggest={suggest} placeholder="Terms: tags, {a|} or a OPT, a OR b, (tag:0.5), @prefix" />
                         <Button size="small" disabled={!positive.length} onClick={() => setPositive([])}>Clear positive terms</Button>
                     </Space> },
                     { key: 'negative', label: 'Negative terms (' + negative.length + ')', children: <Space direction="vertical" style={{ width: '100%' }}>
                         {!!seed.negative && <Button disabled={!seed.negative.length} onClick={() => add('negative')}>Add image negative ({seed.negative.length})</Button>}
-                        <HydrusTagSelect label="Negative prefix tags" value={negative} onChange={setNegative} active={active} placeholder="Negative terms are kept separate from positive tags" />
+                        <TermsEditor value={negative} onChange={terms => setNegative(terms)} suggest={suggest} placeholder="Negative terms (kept separate from the positive ones)" />
                         <Button size="small" disabled={!negative.length} onClick={() => setNegative([])}>Clear negative terms</Button>
                     </Space> },
                 ]} />

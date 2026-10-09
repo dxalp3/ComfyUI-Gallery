@@ -3,6 +3,7 @@ import { PrefixImages } from './PrefixImages';
 import { useEffect, useState } from 'react';
 import { Alert, Button, Checkbox, Input, InputNumber, Select, Space, Tabs, Typography } from 'antd';
 import { hydrusRequest } from './HydrusApi';
+import { conflicts, exclusiveTagsEnabled } from './TagConflicts';
 import { expandPrefix, loadPrefixes, matchesPolarity, POLARITY_OPTIONS, type PrefixPolarity, type SharedLibrary } from './PrefixLibrary';
 
 type Vocabulary = { items: { name: string; count: number }[]; total: number; categories: { value: string; label: string; count: number; source: string }[] };
@@ -81,7 +82,13 @@ export function PromptPalette({ onChoose, onSearch, onAppend, onEdit, chooseSear
         </Space><div><Typography.Text type="secondary">Selection spans pages. Pick one or more wiki categories, then “Select all matching” takes their combined tags (the tag search and favorites filter still apply). Each prefix is one alternative. Optional alternatives add an empty choice (one tag/prefix or nothing). An optional group keeps the selected tags together as one optional unit {'{a, b, c|}'}; append several selections one after another to give each its own weight. Braces use your workflow's dynamic-prompt handling.</Typography.Text></div></>}
         <div style={{ maxHeight: 235, overflowY: 'auto', marginTop: 8 }} aria-busy={busy}>
             {rows.map(row => <div key={row.key} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0' }}>
-                {onAppend && <><Checkbox aria-label={'Pick ' + row.label} checked={!!selected[row.key]} disabled={busy || inserting} onChange={event => setSelected(old => { const next = { ...old }; if (event.target.checked) next[row.key] = row; else delete next[row.key]; return next; })} /><Button size="small" disabled={busy || inserting} aria-label={'Append ' + row.label} onClick={() => void append([row])}>Append</Button></>}
+                {onAppend && <><Checkbox aria-label={'Pick ' + row.label} checked={!!selected[row.key]} disabled={busy || inserting} onChange={event => setSelected(old => {
+                    const next = { ...old };
+                    if (!event.target.checked) { delete next[row.key]; return next; }
+                    // Exclusive tags (a gallery setting): picking long hair unpicks short hair.
+                    if (!row.prefixId && exclusiveTagsEnabled()) for (const [key, other] of Object.entries(next)) if (!other.prefixId && other.terms.length === 1 && conflicts(other.terms[0], row.terms[0])) delete next[key];
+                    next[row.key] = row; return next;
+                })} /><Button size="small" disabled={busy || inserting} aria-label={'Append ' + row.label} onClick={() => void append([row])}>Append</Button></>}
                 <Button size="small" aria-label={'Favorite ' + row.label} aria-pressed={favorites.includes(row.key)} onClick={() => favorite(row.key)}>{favorites.includes(row.key) ? '★' : '☆'}</Button>
                 <Button size="small" disabled={busy && tab === 'tags'} onClick={() => onChoose(row.terms, row.prefixId, library.prefixes.find(prefix => prefix.id === row.prefixId)?.negative_terms)} aria-label={(chooseSearches ? 'Search for ' : 'Add ') + row.label} title={chooseSearches ? 'Open an image search for this' : 'Add'}>{row.label.replace(/_/g, ' ')}</Button>
                 {onEdit && row.prefixId && <Button size="small" aria-label={'Edit prefix ' + row.label} title="Open this prefix in the prefix editor" onClick={() => onEdit(row.prefixId!)}>Edit</Button>}{row.prefixId && <PrefixImages library={library} prefixId={row.prefixId} />}

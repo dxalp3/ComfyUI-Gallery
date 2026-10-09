@@ -67,6 +67,8 @@ def get_gallery_static_root():
 
 from .prefix_library import register_prefix_routes
 register_prefix_routes(PromptServer.instance.routes, lambda request: PromptServer.instance.user_manager.get_request_user_filepath(request, "prompt-library.json"))
+from .exclusive_tags import register_exclusive_routes
+register_exclusive_routes(PromptServer.instance.routes, lambda request: PromptServer.instance.user_manager.get_request_user_filepath(request, "gallery-exclusive-tags.json"))
 
 from .hydrus import register_hydrus_routes
 from .thumbnails import register_thumbnail_routes
