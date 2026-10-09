@@ -1,6 +1,7 @@
 import { getComfyApp, STANDALONE } from './ComfyAppApi';
 import { emptyImageSourceManifest, mergePrompt } from './ImageSourceGeometry';
 import type { ImageSourceImage, ImageSourceManifest, PromptApply } from './ImageSourceGeometry';
+import { loadPrefixes, type SharedLibrary } from './PrefixLibrary';
 
 export const SOURCE_EDITOR_EVENT = 'gallery-source-editor';
 export const SOURCE_BROWSE_EVENT = 'gallery-source-browse';
@@ -194,7 +195,27 @@ export const getSourceTargets = () => command<TargetInfo>('targets');
 export const setSourceTarget = (id: string) => command<TargetInfo>('target', id);
 export const editSourceTarget = () => command<boolean>('edit');
 export const getPromptTargets = () => command<{ value: string; label: string }[]>('prompt_targets');
-export const appendToImageSource = (images: ImageSourceImage[], apply?: PromptApply) => command<string>('append', apply ? { images, apply } : images);
+/**
+ * A source image that is paired with a prefix carries that prefix (`gallery_prefix`) into the workflow, so what
+ * is generated from it counts toward the prefix's lineage even when it was not appended under the prefix —
+ * and even when the encoder leaves some of its tags out. `urls` are the local files the images were copied from.
+ */
+async function withPairedPrefix(images: ImageSourceImage[], urls: (string | undefined)[] = []): Promise<ImageSourceImage[]> {
+    let library: SharedLibrary;
+    try { library = await loadPrefixes(); } catch { return images; }
+    const associations = Object.entries(library.associations || {});
+    return images.map((image, index) => {
+        if (image.metadata?.gallery_prefix) return image;
+        const hash = /([a-f0-9]{64})/i.exec(image.input_name)?.[1]?.toLowerCase(), url = urls[index];
+        const found = associations.find(([key, item]) => (hash && (key === 'sha256:' + hash || item.image?.hash?.toLowerCase() === hash)) || (url && key.startsWith('local:') && key.endsWith(':' + url)));
+        if (!found || !library.prefixes.some(prefix => prefix.id === found[1].prefix_id)) return image;
+        return { ...image, metadata: { ...image.metadata, gallery_prefix: { id: found[1].prefix_id, paired: true } } };
+    });
+}
+export const appendToImageSource = async (images: ImageSourceImage[], apply?: PromptApply, urls?: (string | undefined)[]) => {
+    const stamped = await withPairedPrefix(images, urls);
+    return command<string>('append', apply ? { images: stamped, apply } : stamped);
+};
 
 export async function appendLocalImages(urls: string[]) {
     if (!urls.length || urls.length > 32) throw new Error('Select between 1 and 32 images per append.');
@@ -205,7 +226,7 @@ export async function appendLocalImages(urls: string[]) {
         if (!response.ok) throw new Error(data.error || 'Could not copy the local image.');
         entries.push({ input_name: data.input_name, title: data.title, metadata: data.metadata || {} });
     }
-    return appendToImageSource(entries);
+    return appendToImageSource(entries, undefined, urls);
 }
 
 export function openGalleryTab() {

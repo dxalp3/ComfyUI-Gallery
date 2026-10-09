@@ -153,3 +153,50 @@ test('"Add as" turns typed tags into one chip of the chosen kind', () => {
     const state = B.addBoxWithChip(B.stateFromText('x'), B.groupChip('group', ['a', 'b']));
     assert.equal(B.compileBoxes(state), 'x, ' + M + ', {a, b|}');
 });
+
+test('typed keywords relate tags: AND, OR and a trailing OPT', () => {
+    assert.equal(B.expandKeywords('red hair OPT'), '{red hair|}');
+    assert.equal(B.expandKeywords('red hair OR blue hair'), '{red hair|blue hair}');
+    assert.equal(B.expandKeywords('red hair OR blue hair OPT'), '{red hair|blue hair|}');
+    assert.equal(B.expandKeywords('hat AND scarf'), 'hat, scarf');
+    assert.equal(B.expandKeywords('hat AND scarf OPT'), '{hat, scarf|}');
+    assert.equal(B.expandKeywords('hat AND scarf OR coat'), '{hat, scarf|coat}');
+    assert.equal(B.expandKeywords('a OPT, b OPT, c'), '{a|}, {b|}, c');
+    assert.equal(B.expandKeywords('{a|b} OPT'), '{a|b|}');
+    // Lower case and keywords inside brackets are text.
+    assert.equal(B.expandKeywords('salt and pepper hair'), 'salt and pepper hair');
+    assert.equal(B.expandKeywords('(rock AND roll:1.2)'), '(rock AND roll:1.2)');
+    assert.equal(B.parseTyped('{(tag1, tag2)|}').map(B.groupingName).join(), 'Optional');
+});
+
+test('suggestions follow brackets and keywords; closing brackets finishes a chip', () => {
+    assert.deepEqual(B.typingToken('{(red hair, bl'), { token: 'bl', start: 12, inGroup: true });
+    assert.equal(B.typingToken('{rre').token, 'rre');
+    assert.equal(B.typingToken('red hair AND blu').token, 'blu');
+    assert.equal(B.typingToken('red hair AN').token, 'red hair AN');
+    assert.equal(B.closeBraces('{(a, b'), '{(a, b)}');
+    assert.equal(B.closesChip('{red hair|', '{red hair|}'), true);
+    assert.equal(B.closesChip('{(a, b', '{(a, b)'), false);
+    assert.equal(B.closesChip('x, {(a, b)|', 'x, {(a, b)|}'), true);
+    assert.equal(B.closesChip('(red hair:1.2', '(red hair:1.2)'), true);
+    assert.equal(B.pendingKeyword('red hair AND '), true);
+    assert.equal(B.pendingKeyword('a OR b, c'), false);
+});
+
+test('"each" makes every tag optional on its own', () => {
+    assert.deepEqual(B.groupChips('each', ['a', 'b', 'a']).map(B.compileChip), ['{a|}', '{b|}']);
+    assert.equal(B.groupChips('group', ['a', 'b']).map(B.compileChip).join(), '{a, b|}');
+});
+
+test('source tags can be left out; the list rides in the marker', () => {
+    let state = B.stateFromText('a, ' + M + ', b');
+    const source = state.boxes.find(box => box.kind === 'source');
+    state = B.updateBox(state, source.id, { excluded: ['Blue_Eyes', 'x{y|z}'] });
+    const compiled = B.compileBoxes(state);
+    assert.ok(!/[{}|]/.test(compiled.replace(/^a, |, b$/g, '')), 'braces and pipes are escaped for ComfyUI dynamic prompts');
+    assert.equal(B.composeWithSource(compiled, 'red hair, blue eyes, x{y|z}, smile'), 'a, red hair, smile, b');
+    const back = B.stateFromText(compiled);
+    assert.deepEqual(back.boxes.find(box => box.kind === 'source').excluded, ['Blue_Eyes', 'x{y|z}']);
+    assert.deepEqual(B.parseState(JSON.parse(JSON.stringify(state))).boxes.find(box => box.kind === 'source').excluded, ['Blue_Eyes', 'x{y|z}']);
+    assert.equal(B.composeWithSource('a, ' + M, 'b'), 'a, b');
+});

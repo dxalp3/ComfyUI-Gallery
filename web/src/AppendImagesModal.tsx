@@ -62,7 +62,7 @@ export function AppendImagesModal({ entries, onClose }: { entries: GalleryEntry[
                 images.push({ input_name: copied.input_name, title: row.entry.name, metadata, prompt: { positive: (await formatPromptTerms(Array.from(new Set([...(row.usePositive ? row.positive : []), ...(row.useTags ? row.tags : [])])), spaces)).join(', '), negative: row.useNegative ? (await formatPromptTerms(row.negative, spaces)).join(', ') : '', tags: row.tags } });
             }
             // Append first so a missing workflow target cannot silently become a copy-only action.
-            const result = await appendToImageSource(images, apply);
+            const result = await appendToImageSource(images, apply, rows.map(row => row.entry.local?.url));
             message.success(result);
             const failures: string[] = [];
             for (const row of rows.filter(row => row.sync)) {

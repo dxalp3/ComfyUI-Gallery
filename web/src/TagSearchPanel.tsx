@@ -59,7 +59,7 @@ export async function fetchLocalHashes(urls: string[]): Promise<Record<string, s
 
 type Hit = { file: FileDetails; note?: string; color?: string };
 type Section = { title?: string; hits: Hit[] };
-type Input = { input_name: string; title?: string; note: string; original?: boolean };
+type Input = { input_name: string; hash?: string; title?: string; note: string; original?: boolean };
 type ResultTab = { key: string; label: string; hint: string; sections: Section[]; inputs?: Input[]; derived?: { prefixId: string; prefixName: string; urls: string[] } };
 
 export function ImageSearchPanel() {
@@ -160,7 +160,15 @@ export function ImageSearchPanel() {
                     lineage.sections.push({ title: tag + 'Searched image', hits: hit(chip.url, 'searched', 'purple') });
                     if (!file) continue;
                     const levels = ancestorLevels(file.metadata);
-                    lineage.inputs = [...(lineage.inputs || []), ...levels.map(level => ({ input_name: level.input_name, title: level.title, note: level.original ? 'original' : level.depth === 1 ? 'made from' : 'source ' + level.depth + ' back', original: level.original }))];
+                    // Input copies are named by hash: the loaded image with that hash is the same picture, and is shown
+                    // as a normal result (open, select, search by it). Only images of the same file type can match.
+                    const types = new Set(levels.map(level => level.input_name.split('.').pop()?.toLowerCase()));
+                    const byHash = new Map<string, string>();
+                    if (levels.some(level => level.hash)) Object.entries(await hashOf(files.filter(item => types.has(item.name.split('.').pop()?.toLowerCase())).map(item => item.url))).forEach(([url, hash]) => { if (!byHash.has(hash.toLowerCase())) byHash.set(hash.toLowerCase(), url); });
+                    const noteOf = (level: typeof levels[number]) => level.original ? 'original' : level.depth === 1 ? 'made from' : 'source ' + level.depth + ' back';
+                    const found = levels.filter(level => level.hash && byHash.has(level.hash.toLowerCase()));
+                    if (found.length) lineage.sections.push({ title: tag + 'Made from (nearest first)', hits: found.flatMap(level => hit(byHash.get(level.hash!.toLowerCase())!, noteOf(level), level.original ? 'magenta' : 'cyan')) });
+                    lineage.inputs = [...(lineage.inputs || []), ...levels.filter(level => !found.includes(level)).map(level => ({ input_name: level.input_name, hash: level.hash, title: level.title, note: noteOf(level), original: level.original }))];
                     const own = Object.values(await hashOf([chip.url]));
                     const fromIt = await lineageTree(files, own, [], hashOf, new Set([chip.url]), 6, Object.fromEntries(own.map(hash => [chip.url, hash])));
                     tabFor('generated', 'Generated from it', 'Images made from the searched image, grouped by the image they were made from.').sections.push(...bySource(fromIt, new Set(), 'Made from it').map(section => ({ ...section, title: tag + section.title })));
@@ -244,8 +252,8 @@ export function ImageSearchPanel() {
     const targets = (url: string) => selected.has(url) ? gallery.selectedImages.filter(item => byUrl.has(item)) : [url];
     const title = scoped ? 'Image search · ' + [...prefixes.map(chip => '@' + chip.name), ...images.map(chip => chip.name)].join(' + ') : 'Image search' + (tags.length ? ' · ' + tags.join(' + ') : '');
     const scopeMain = (hits: Hit[]) => { gallery.setLocalScope({ label: title.replace(/^Image search · /, ''), urls: new Set(hits.map(item => item.file.url)) }); };
-    /** Open in the gallery viewer: the main gallery shows this tab's results, so the viewer steps through them. */
-    const openInViewer = (url: string) => { scopeMain(currentHits); setTimeout(() => window.dispatchEvent(new CustomEvent(OPEN_VIEWER_EVENT, { detail: { url } })), 60); };
+    /** Open in the gallery viewer, stepping through this tab's results. The main gallery's own view is left alone. */
+    const openInViewer = (url: string) => window.dispatchEvent(new CustomEvent(OPEN_VIEWER_EVENT, { detail: { url, urls: currentHits.map(item => item.file.url) } }));
     const prefixActions = (url: string) => prefixes.map(chip => ({ key: 'pair:' + chip.id, label: `Pair with @${chip.name}` }));
     const pair = async (prefixId: string, urls: string[]) => {
         const entries = urls.flatMap(url => byUrl.get(url) ? [localEntry(byUrl.get(url)!, hydrus.items[url]?.hash)] : []);
@@ -294,8 +302,10 @@ export function ImageSearchPanel() {
                     {grid(visible)}
                 </div>;
             })}
-            {item.inputs && !!item.inputs.length && <><Typography.Text strong style={{ display: 'block', margin: '4px 0' }}>Made from (input images, nearest first)</Typography.Text>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>{item.inputs.map((input, index) => <div key={input.input_name + index} style={{ width: 130, position: 'relative' }}>
+            {item.inputs && !!item.inputs.length && <><Typography.Text strong style={{ display: 'block', margin: '4px 0' }}>{item.sections.length > 1 ? 'Not in the loaded gallery' : 'Made from (input images, nearest first)'}</Typography.Text>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>{item.inputs.map((input, index) => <div key={input.input_name + index} title={input.hash && hydrus.settings?.has_access_key ? 'Not in the loaded gallery · click to open the Hydrus original' : 'Not in the loaded gallery (only its input copy exists)'}
+                    onClick={() => { if (input.hash && hydrus.settings?.has_access_key) window.open(`${BASE_PATH}/Gallery/hydrus/original?hash=${input.hash}&target=${encodeURIComponent(`${hydrus.settings.url}|${hydrus.settings.profile}`)}`, '_blank'); }}
+                    style={{ width: 130, position: 'relative', cursor: input.hash && hydrus.settings?.has_access_key ? 'pointer' : 'default' }}>
                     <img alt={input.title || input.input_name} src={`${BASE_PATH}/Gallery/source/thumbnail?url=${encodeURIComponent('/static_gallery/' + input.input_name)}`} style={{ width: 130, height: 110, objectFit: 'contain', background: '#8882', borderRadius: 4 }} />
                     <Tag color={input.original ? 'magenta' : 'default'} style={{ position: 'absolute', top: 4, left: 4, margin: 0 }}>{input.note}</Tag>
                     <div style={{ fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{input.title || input.input_name}</div>

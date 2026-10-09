@@ -96,6 +96,12 @@ class LibraryTests(unittest.TestCase):
         self.assertEqual(record['resolved'], result['result'][1])
         self.assertEqual(record['text'], 'a, {blond hair|red hair}, b')
         self.assertIn(record['choices'][0]['chosen'], ('blond hair', 'red hair'))
+        # Tags removed from the source box are dropped from the source text when it arrives (escaped like the frontend writes them).
+        info = {'workflow': {}}
+        marker = '⟦source -["Blue_Eyes","x\\u007by\\u007cz\\u007d"]⟧'
+        result = GalleryPromptEncode().encode(Clip(), 'a, ' + marker + ', b', 'red hair, blue eyes, x{y|z}, smile', 'boxes', extra_pnginfo=info, unique_id='8')
+        self.assertEqual(result['result'][1], 'a, red hair, smile, b')
+        self.assertEqual(info[RESOLVED_KEY]['8']['source_excluded'], ['Blue_Eyes', 'x{y|z}'])
         self.assertEqual(GalleryPromptEncode.IS_CHANGED(text='a, b') , '')
         self.assertNotEqual(GalleryPromptEncode.IS_CHANGED(text='a', source_text='{b|c}'), GalleryPromptEncode.IS_CHANGED(text='a', source_text='{b|c}'))
 

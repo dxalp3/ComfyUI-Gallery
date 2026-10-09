@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type DragEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { addBox, addBoxWithChip, addChip, addChips, groupChip, balanced, chipTerms, closeBraces, compileChip, editChips, groupingKind, GROUPING_LABELS, mergeChips, moveBox, moveBoxTo, moveChipTo, moveItem, optionTags, parsePrompt, removeBox, setGroupingKind, splitChip, splitTop, typingToken, updateBox, type BoxState, type Chip, type GroupBox, type GroupingKind, type OrChip, type SourceBox } from './PromptBoxes';
+import { addBox, addBoxWithChip, addChips, ADD_MODES, balanced, chipTerms, closesChip, compileChip, editChips, expandKeywords, closeBraces, groupChips, groupingKind, groupingName, GROUPING_LABELS, mergeChips, moveBox, moveBoxTo, moveChipTo, moveItem, optionTags, parsePrompt, parseTyped, pendingKeyword, removeBox, setGroupingKind, sourceKey, splitChip, splitTop, typingToken, updateBox, type AddMode, type BoxState, type Chip, type GroupBox, type GroupingKind, type OrChip, type SourceBox } from './PromptBoxes';
 
 export type Suggestion = { label: string; kind: 'tag' | 'prefix'; terms?: string[] };
 /** What the node's `source_text` input currently provides. `text` is known for Gallery Image Source and after a run. */
@@ -75,7 +75,7 @@ function ChipView({ chip, selected, picked, onSelect, onPick, onRemove, onDrop }
             ? <>
                 {/* The header spells out the grouping, so the body only needs its separators. */}
                 <span title={GROUPING_LABELS[kind].hint} style={{ display: 'flex', alignItems: 'center', gap: 6, background: color, color: '#fff', fontSize: 10, lineHeight: '15px', padding: '0 2px 0 6px', textTransform: 'uppercase', letterSpacing: .3 }}>
-                    <span style={{ flex: 1 }}>{GROUPING_LABELS[kind].name}{weighted ? ' ×' + chip.weight : ''}</span>{remove}
+                    <span style={{ flex: 1 }}>{groupingName(chip)}{weighted ? ' ×' + chip.weight : ''}</span>{remove}
                 </span>
                 {label}
             </>
@@ -97,8 +97,8 @@ function ChipEditor({ chip, suggest, onChange, onRemove, onSplit, onMove, onClos
     const kind = groupingKind(chip);
     const commit = () => {
         if (chip.kind !== 'tag' || !draft.trim() || draft.trim() === chip.text) return;
-        // Typing {a|b}, {a|b|} or {a, b|} into a tag turns it into that grouping.
-        const parsed = parsePrompt(closeBraces(draft));
+        // Typing {a|b}, {a|b|}, {a, b|} or `a OR b OPT` into a tag turns it into that grouping.
+        const parsed = parseTyped(draft);
         if (parsed.length === 1) onChange({ ...parsed[0], id: chip.id, enabled: chip.enabled, weight: parsed[0].weight ?? chip.weight });
         else onChange({ ...chip, text: draft.trim() });
     };
@@ -159,59 +159,77 @@ function SuggestionMenu({ anchor, items, active, onPick }: { anchor: HTMLElement
 
 /**
  * Text box with library suggestions for the word being typed. A comma ends a tag; Enter adds what was typed.
- * With `onGroup`, an "Add as" choice decides what the typed tags become: separate tags, or one chip of
- * alternatives / optional alternatives / an optional group, whose separators the chip applies itself.
+ * Prompt syntax can be typed as it is: suggestions keep working after `{`, `(` and `|`, and closing the
+ * brackets (`{red hair|}`, `{(red hair, blue eyes)|}`, `(red hair:1.2)`) turns what was typed into a chip.
+ * Upper-case AND / OR / OPT relate the tags of a chip (see KEYWORDS); a preview shows what will be added.
+ * With `onGroup`, an "Add as" choice decides what the typed tags become: separate tags, one chip of
+ * alternatives / optional alternatives / an optional group, or every tag optional on its own.
  */
-function AddInput({ placeholder, suggest, onText, onPrefix, onGroup }: { placeholder: string; suggest: (query: string) => Promise<Suggestion[]>; onText: (text: string) => void; onPrefix: (suggestion: Suggestion, typedBefore: string) => void; onGroup?: (kind: GroupingKind, tags: string[]) => void }) {
+function AddInput({ placeholder, suggest, onText, onPrefix, onGroup }: { placeholder: string; suggest: (query: string) => Promise<Suggestion[]>; onText: (text: string) => void; onPrefix: (suggestion: Suggestion, typedBefore: string) => void; onGroup?: (mode: AddMode, tags: string[]) => void }) {
     const [value, setValue] = useState('');
     const [items, setItems] = useState<Suggestion[]>([]);
     const [active, setActive] = useState(-1);
-    const [mode, setMode] = useState<GroupingKind>('tag');
+    const [mode, setMode] = useState<AddMode>('tag');
     const [pending, setPending] = useState<string[]>([]);
     const request = useRef(0);
     const input = useRef<HTMLInputElement>(null);
     const grouping = !!onGroup && mode !== 'tag';
+    const modeInfo = ADD_MODES.find(item => item.value === mode)!;
     useEffect(() => {
         const { token: query } = typingToken(value);
-        if (query.replace(/^@/, '').length < (query.startsWith('@') ? 0 : 2)) { setItems([]); return; }
+        // No suggestions for a weight being typed (`red hair:1.`).
+        if (/:[\d.]*$/.test(query) || query.replace(/^@/, '').length < (query.startsWith('@') ? 0 : 2)) { setItems([]); return; }
         const id = ++request.current;
         const timer = window.setTimeout(() => { suggest(query).then(found => { if (id === request.current) { setItems(found); setActive(-1); } }).catch(() => { if (id === request.current) setItems([]); }); }, 150);
         return () => window.clearTimeout(timer);
     }, [value]);
     const reset = () => { setValue(''); setItems([]); setActive(-1); };
     const tagsOf = (text: string) => splitTop(text, ',').map(tag => tag.trim()).filter(Boolean);
-    /** Enter: in tag mode add the text; in a grouping mode add the collected tags as one chip. */
-    const commit = () => {
-        if (grouping) { const tags = [...pending, ...tagsOf(value)]; if (tags.length) onGroup!(mode, tags); setPending([]); reset(); return; }
-        if (value.trim()) onText(closeBraces(value)); reset();
+    /** Enter: in tag mode add the text (keywords applied); in a grouping mode add the collected tags. */
+    const commit = (text = value, refocus = true) => {
+        // Adding re-renders the node, and ComfyUI then moves focus to the canvas: keep typing in this input.
+        if (refocus) requestAnimationFrame(() => input.current?.focus());
+        if (grouping) { const tags = [...pending, ...tagsOf(text)]; if (tags.length) onGroup!(mode, tags); setPending([]); reset(); return; }
+        const expanded = expandKeywords(closeBraces(text));
+        if (expanded.trim()) onText(expanded); reset();
     };
     const collect = (tags: string[]) => { setPending(old => [...old, ...tags.filter(tag => !old.includes(tag))]); reset(); input.current?.focus(); };
+    const change = (next: string) => {
+        // Closing the brackets of `{tag|}` or `{(a, b)|}` registers the chip right away.
+        if (!grouping && next.length > value.length && closesChip(value, next)) { commit(next); return; }
+        setValue(next);
+    };
     const pick = (item: Suggestion) => {
         const { start, inGroup } = typingToken(value);
         const before = value.slice(0, start);
-        if (grouping) { collect([...tagsOf(before), ...(item.kind === 'prefix' ? [(item.terms || []).join(', ')] : [item.label])]); return; }
-        if (inGroup) {
-            const text = item.kind === 'prefix' ? (item.terms || []).join(', ') : item.label;
-            setValue(before + text); setItems([]); setActive(-1); input.current?.focus();
+        const text = item.kind === 'prefix' ? (item.terms || []).join(', ') : item.label;
+        if (grouping && !inGroup) { collect([...tagsOf(before), text]); return; }
+        // Inside brackets or after AND / OR the chip is not finished yet: put the tag in and keep typing.
+        if (inGroup || pendingKeyword(before)) {
+            setValue(before + text + (inGroup ? '' : ' ')); setItems([]); setActive(-1); input.current?.focus();
             return;
         }
         const head = before.replace(/,\s*$/, '').trim();
-        if (item.kind === 'prefix') onPrefix(item, head); else onText(head ? head + ', ' + item.label : item.label);
+        if (item.kind === 'prefix') onPrefix(item, head); else onText(expandKeywords(head ? head + ', ' + item.label : item.label));
         reset();
     };
-    const draft = grouping && pending.length ? groupChip(mode, pending) : undefined;
+    const draft = grouping && pending.length ? groupChips(mode, pending) : [];
+    // Tag mode: show what brackets or keywords will make of the text before it is added.
+    const preview = !grouping && /[{([]|\b(?:AND|OR|OPT)\b/.test(value) ? parseTyped(value) : [];
+    const shown = draft.length ? draft : preview;
     return <div>
-        {draft && <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4, opacity: .85 }}>
-            <ChipView chip={draft} selected={false} onSelect={() => undefined} onRemove={() => setPending([])} />
-            <small style={{ opacity: .7 }}>Enter adds it · comma or a suggestion adds another tag</small>
+        {!!shown.length && <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6, marginBottom: 4, opacity: .85 }}>
+            {shown.map(chip => <ChipView key={chip.id} chip={chip} selected={false} onSelect={() => undefined} onRemove={draft.length ? () => setPending([]) : undefined} />)}
+            <small style={{ opacity: .7 }}>{draft.length ? 'Enter adds it · comma or a suggestion adds another tag' : 'Enter adds · closing the brackets adds it too'}</small>
         </div>}
         <div style={{ display: 'flex', gap: 4 }}>
-            {onGroup && <select aria-label="Add as" title="What the typed tags become" value={mode} onChange={event => { setMode(event.target.value as GroupingKind); setPending([]); }}
-                style={{ ...S.input, flex: '0 0 auto', borderColor: mode === 'tag' ? border : KIND_COLORS[mode] }}>
-                {(Object.keys(GROUPING_LABELS) as GroupingKind[]).map(kind => <option key={kind} value={kind}>{kind === 'tag' ? 'Tags' : GROUPING_LABELS[kind].name}</option>)}
+            {onGroup && <select aria-label="Add as" title={modeInfo.hint} value={mode} onChange={event => { setMode(event.target.value as AddMode); setPending([]); }}
+                style={{ ...S.input, flex: '0 0 auto', borderColor: mode === 'tag' ? border : KIND_COLORS[mode === 'each' ? 'group' : mode] }}>
+                {ADD_MODES.map(item => <option key={item.value} value={item.value} title={item.hint}>{item.name}</option>)}
             </select>}
-            <input ref={input} autoComplete="off" spellCheck={false} aria-label={placeholder} placeholder={grouping ? `Type tags for one ${GROUPING_LABELS[mode].name.toLowerCase()} chip` : placeholder} value={value} onChange={event => setValue(event.target.value)}
-                onBlur={() => { if (!grouping) commit(); }}
+            <input ref={input} autoComplete="off" spellCheck={false} aria-label={placeholder} title="Type tags, {a|b} syntax, or AND / OR / OPT between tags (e.g. red hair OR blue hair OPT)"
+                placeholder={grouping ? (mode === 'each' ? 'Type tags; each becomes optional on its own' : `Type tags for one ${modeInfo.name.toLowerCase()} chip`) : placeholder} value={value} onChange={event => change(event.target.value)}
+                onBlur={() => { if (!grouping) commit(value, false); }}
                 onKeyDown={event => {
                     if (event.key === 'ArrowDown' && items.length) { event.preventDefault(); setActive(index => (index + 1) % items.length); }
                     else if (event.key === 'ArrowUp' && items.length) { event.preventDefault(); setActive(index => (index <= 0 ? items.length : index) - 1); }
@@ -286,17 +304,27 @@ function GroupView({ box, index, count, state, onChange, suggest }: Common & { b
                     onChange={next => onChange(editChips(state, box.id, chips => chips.map(item => item.id === next.id ? next : item)))}
                     onMove={delta => onChange(editChips(state, box.id, chips => moveItem(chips, chip.id, delta)))} />}
                 <AddInput placeholder="Add tags (Enter)" suggest={suggest} onText={text => onChange(addChips(state, box.id, text))}
-                    onGroup={(kind, tags) => { const made = kind === 'tag' ? undefined : groupChip(kind, tags); if (made) onChange(addChip(state, box.id, made)); }}
+                    onGroup={(mode, tags) => { const made = groupChips(mode, tags); if (made.length) onChange(editChips(state, box.id, chips => [...chips, ...made])); }}
                     onPrefix={(item, head) => onChange(addChips(state, box.id, [head, (item.terms || []).join(', ')].filter(Boolean).join(', ')))} />
             </div>}
     </div>;
 }
 
+/**
+ * The connected source text as chips. Chips can be removed (×) without touching the source: they are left
+ * out of the prompt when the workflow runs and listed under "Left out", where they can be put back.
+ */
 function SourceView({ box, index, count, state, onChange, source }: Common & { box: SourceBox; source: SourceInfo }) {
     const [mark, setMark] = useState<'before' | 'after'>();
     const ref = useRef<HTMLDivElement>(null);
-    const chips = source.text ? parsePrompt(source.text) : [];
-    const patch = (value: Partial<Pick<SourceBox, 'enabled' | 'collapsed'>>) => onChange(updateBox(state, box.id, value));
+    const excluded = box.excluded || [];
+    const dropped = new Set(excluded.map(sourceKey));
+    // Each top-level part of the source text is one chip; the part's own text is what a removal stores.
+    const parts = source.text ? splitTop(source.text, ',').map(part => part.trim()).filter(Boolean) : [];
+    const kept = parts.filter(part => !dropped.has(sourceKey(part)));
+    const patch = (value: Partial<Pick<SourceBox, 'enabled' | 'collapsed' | 'excluded'>>) => onChange(updateBox(state, box.id, value));
+    const setExcluded = (next: string[]) => patch({ excluded: next.length ? next : undefined });
+    const status = !source.connected ? 'not connected' : source.text ? kept.length + ' tag' + (kept.length === 1 ? '' : 's') + (kept.length < parts.length ? ` · ${parts.length - kept.length} left out` : '') : 'connected';
     return <div ref={ref}
         onDragOver={event => { if (dragging?.kind === 'box' && dragging.id !== box.id) { event.preventDefault(); setMark(lower(event) ? 'after' : 'before'); } }}
         onDragLeave={() => setMark(undefined)}
@@ -307,16 +335,24 @@ function SourceView({ box, index, count, state, onChange, source }: Common & { b
             <Btn label={box.collapsed ? 'Expand source box' : 'Collapse source box'} onClick={() => patch({ collapsed: !box.collapsed })}>{box.collapsed ? '▸' : '▾'}</Btn>
             <input type="checkbox" aria-label="Use source box" title="Use the connected source text" checked={box.enabled} onChange={event => patch({ enabled: event.target.checked })} />
             <strong>Source</strong>
-            <small style={{ opacity: .6 }}>{!source.connected ? 'not connected' : source.text ? chips.length + ' tag' + (chips.length === 1 ? '' : 's') : 'connected'}</small>
+            <small style={{ opacity: .6 }}>{status}</small>
             <span style={{ flex: 1 }} />
             <Btn label="Move source box up" disabled={index === 0} onClick={() => onChange(moveBox(state, box.id, -1))}>▲</Btn>
             <Btn label="Move source box down" disabled={index === count - 1} onClick={() => onChange(moveBox(state, box.id, 1))}>▼</Btn>
         </div>
-        {!box.collapsed && (!source.connected
-            ? <div style={S.muted}>Connect a text output (for example a Gallery Image Source prompt) to <code>source_text</code>. Its tags appear here and are placed where this box sits.</div>
-            : !source.text
-                ? <div style={S.muted}>{source.note || 'Connected prompt will be shown after execution.'}</div>
-                : <div style={{ ...S.body, ...S.chips, padding: '0 6px 6px' }}>{chips.map(item => <ChipView key={item.id} chip={item} selected={false} onSelect={() => undefined} />)}</div>)}
+        {!box.collapsed && <>
+            {!source.connected
+                ? <div style={S.muted}>Connect a text output (for example a Gallery Image Source prompt) to <code>source_text</code>. Its tags appear here and are placed where this box sits.</div>
+                : !source.text
+                    ? <div style={S.muted}>{source.note || 'Connected prompt will be shown after execution.'}</div>
+                    : <div style={{ ...S.body, ...S.chips, padding: '0 6px 6px' }}>{kept.map((part, at) => { const chip = parsePrompt(part)[0]; return chip && <ChipView key={at + part} chip={chip} selected={false} onSelect={() => undefined} onRemove={() => setExcluded([...excluded, part])} />; })}</div>}
+            {!!excluded.length && <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 4, padding: '0 6px 6px' }} aria-label="Source tags left out">
+                <small style={{ opacity: .65 }} title="Removed here only: the source and the image lineage are unchanged">Left out:</small>
+                {excluded.map(tag => <button key={tag} type="button" title="Put this source tag back" aria-label={'Restore ' + tag} onClick={() => setExcluded(excluded.filter(item => item !== tag))}
+                    style={{ ...S.btn, textDecoration: 'line-through', opacity: source.text && !parts.some(part => sourceKey(part) === sourceKey(tag)) ? .45 : .8 }}>{tag} ↺</button>)}
+                {excluded.length > 1 && <Btn label="Restore all source tags" onClick={() => setExcluded([])}>restore all</Btn>}
+            </div>}
+        </>}
     </div>;
 }
 
@@ -326,7 +362,7 @@ export function PromptBoxEditor({ state, source, preview, suggest, onChange }: {
             ? <SourceView key={box.id} box={box} index={index} count={state.boxes.length} state={state} onChange={onChange} source={source} />
             : <GroupView key={box.id} box={box} index={index} count={state.boxes.length} state={state} onChange={onChange} suggest={suggest} />)}
         <AddInput placeholder="New box: type tags and press Enter" suggest={suggest} onText={text => onChange(addBox(state, undefined, text))}
-            onGroup={(kind, tags) => { const made = groupChip(kind, tags); if (made) onChange(addBoxWithChip(state, made)); }}
+            onGroup={(mode, tags) => { const made = groupChips(mode, tags); if (made.length) onChange(addBoxWithChip(state, made)); }}
             onPrefix={(item, head) => onChange(addBox(head ? addBox(state, undefined, head) : state, item.label, (item.terms || []).join(', ')))} />
         <details>
             <summary style={{ cursor: 'pointer', opacity: .8 }}>Prompt sent to the encoder</summary>

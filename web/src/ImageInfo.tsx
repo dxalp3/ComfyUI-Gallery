@@ -6,7 +6,7 @@
  * Both          → the two as tabs of the same window
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Button, Checkbox, Collapse, Descriptions, Empty, Select, Space, Tabs, Tag, Typography, message } from 'antd';
+import { Alert, Button, Collapse, Descriptions, Empty, Input, Select, Space, Tabs, Tag, Typography, message } from 'antd';
 import { FloatingPanel } from './FloatingPanel';
 import { BASE_PATH, BASE_Z_INDEX } from './ComfyAppApi';
 import { useHydrus } from './HydrusContext';
@@ -14,9 +14,10 @@ import { hydrusStatus, type HydrusItem } from './HydrusApi';
 import { useGalleryContext } from './GalleryContext';
 import { MetadataView } from './MetadataView';
 import { AppendImagesModal } from './AppendImagesModal';
-import { associateImages, dissociateImages, expandPrefix, imagePrefixKeys, imagePrefixRefs, loadPrefixes, openPrefixManager, sidesLabel, type SharedLibrary } from './PrefixLibrary';
+import { associateImages, dissociateImages, expandPrefix, imagePrefixKeys, imagePrefixRefs, loadPrefixes, openPrefixManager, savePrefix, sidesLabel, type PrefixImage, type SharedLibrary } from './PrefixLibrary';
+import { PrefixImages } from './PrefixImages';
+import { formatPromptTerms } from './PromptSpelling';
 import { HydrusTagSelect } from './HydrusTagSelect';
-import { Radio } from 'antd';
 import { extractHydrusTags, extractLocalPrompts } from './LocalImageSearch';
 import { chosenTags, promptResolutions } from './PromptResolution';
 import { GROUPING_LABELS } from './PromptBoxes';
@@ -158,8 +159,9 @@ export function ImageInfoPanel() {
 export const HydrusDetailsModal = ImageInfoPanel;
 
 /**
- * "Use for prefix": the short way from an image to a prefix. Pair the image with a saved prefix,
- * take some of its tags into the prefix editor, or continue to "Append images and prompts".
+ * "Use for prefix": make or change a prefix right here, from an image. The image's own tags are a fixed list
+ * of chips (they cannot be deleted, only taken into the prefix and back out); the prefix's tags are edited
+ * next to them, with its paired images below. Saving pairs the image(s); "Pair only" pairs without changes.
  */
 export function SourcePrefixPanel() {
     const gallery = useGalleryContext();
@@ -168,22 +170,20 @@ export function SourcePrefixPanel() {
     const [entries, setEntries] = useState<GalleryEntry[]>([]);
     const [library, setLibrary] = useState<SharedLibrary>({ version: 2, tags: [], prefixes: [] });
     const [prefixId, setPrefixId] = useState<string>();
-    const [picked, setPicked] = useState<Record<'positive' | 'negative' | 'hydrus', string[]>>({ positive: [], negative: [], hydrus: [] });
-    /** Tags that are not on the image: typed or picked from the library / Danbooru / Hydrus. */
-    const [extra, setExtra] = useState<{ positive: string[]; negative: string[] }>({ positive: [], negative: [] });
-    /** For an existing prefix: add the chosen tags to its tags, or replace its tags with them. */
-    const [merge, setMerge] = useState<'add' | 'replace'>('add');
+    const [name, setName] = useState('');
+    const [positive, setPositive] = useState<string[]>([]);
+    const [negative, setNegative] = useState<string[]>([]);
+    const [side, setSide] = useState<'positive' | 'negative'>('positive');
     const [appending, setAppending] = useState<GalleryEntry[]>([]);
     const [busy, setBusy] = useState(false);
     const root = gallery.settings.relativePath;
-    const reload = () => loadPrefixes().then(setLibrary).catch(reason => message.error(String(reason)));
+    const reload = () => loadPrefixes().then(value => { setLibrary(value); return value; }).catch(reason => { message.error(String(reason)); return undefined; });
     useEffect(() => {
         const open = (event: Event) => {
-            setExtra({ positive: [], negative: [] }); setMerge('add');
             const detail = (event as CustomEvent<GalleryEntry[] | string[]>).detail || [];
             const files = hydrusRef.current.imageFiles, items = hydrusRef.current.items;
             setEntries(detail.flatMap(value => typeof value !== 'string' ? [value] : files[value] ? [localEntry(files[value], items[value]?.hash)] : []));
-            setPrefixId(undefined); void reload();
+            setPrefixId(undefined); setName(''); setSide('positive'); void reload();
         };
         window.addEventListener(SOURCE_PREFIX_EVENT, open);
         window.addEventListener('gallery-prefix-library-changed', reload);
@@ -200,64 +200,73 @@ export function SourcePrefixPanel() {
         }
         return { positive: [...sets.positive], negative: [...sets.negative], hydrus: [...sets.hydrus] };
     }, [entries, hydrus.items]);
-    // A new prefix starts with the image's positive tags; an existing one starts with nothing added.
-    useEffect(() => { setPicked(prefixId ? { positive: [], negative: [], hydrus: [] } : { positive: tags.positive, negative: [], hydrus: [] }); }, [prefixId, tags]);
+    const prefix = library.prefixes.find(item => item.id === prefixId);
+    // An existing prefix starts with its own tags; a new one with the image's positive prompt.
+    useEffect(() => {
+        if (prefix) { setName(prefix.name); setPositive(expandPrefix(library, '@' + prefix.name)); setNegative(prefix.negative_terms || []); }
+        else { setPositive(tags.positive); setNegative([]); }
+    }, [prefixId, entries]);
     const keys = entries.flatMap(entry => imagePrefixKeys(entry, root));
     const refs = Object.assign({}, ...entries.map(entry => imagePrefixRefs(entry, root)));
     const pairedWith = [...new Set(keys.map(key => library.associations?.[key]?.prefix_id).filter(Boolean))] as string[];
-    const prefix = library.prefixes.find(item => item.id === prefixId);
     const close = () => setEntries([]);
-    const pair = async () => {
-        if (!prefix) return;
-        setBusy(true);
-        try { await associateImages(prefix.id, keys, refs, library.revision); message.success(`Paired ${entries.length} image(s) with “${prefix.name}”`); await reload(); }
-        catch (reason) { message.error(String(reason)); } finally { setBusy(false); }
-    };
-    const unpair = async (id: string) => {
-        setBusy(true);
-        try { await dissociateImages(keys.filter(key => library.associations?.[key]?.prefix_id === id), library.revision); await reload(); }
-        catch (reason) { message.error(String(reason)); } finally { setBusy(false); }
-    };
-    const chosenPositive = [...picked.positive, ...picked.hydrus, ...extra.positive];
-    const chosenNegative = [...picked.negative, ...extra.negative];
-    const edit = () => {
-        const keepOld = prefix && merge === 'add';
-        const positive = [...(keepOld ? expandPrefix(library, '@' + prefix.name) : []), ...chosenPositive];
-        const negative = [...(keepOld ? prefix.negative_terms || [] : []), ...chosenNegative];
-        openPrefixManager({ name: prefix?.name, positive: [...new Set(positive)], negative: [...new Set(negative)], imageKeys: keys, imageRefs: refs });
-        close();
-    };
+    const run = async (action: () => Promise<void>) => { setBusy(true); try { await action(); } catch (reason) { message.error(String(reason)); } finally { setBusy(false); } };
+    const pair = () => run(async () => { if (!prefix) return; await associateImages(prefix.id, keys, refs, library.revision); message.success(`Paired ${entries.length} image(s) with “${prefix.name}”`); await reload(); });
+    const unpair = (id: string) => run(async () => { await dissociateImages(keys.filter(key => library.associations?.[key]?.prefix_id === id), library.revision); await reload(); });
+    const unpairImage = (image: PrefixImage) => run(async () => { await dissociateImages(image.keys || [], library.revision); await reload(); });
+    const save = () => run(async () => {
+        const label = (prefix?.name || name).trim();
+        if (!label) throw new Error('Name the new prefix first.');
+        // Spelling (spaces or canonical underscores) follows the gallery settings, as in the prefix editor.
+        const terms = positive.length ? await formatPromptTerms(positive) : [], negativeTerms = negative.length ? await formatPromptTerms(negative) : [];
+        message.success(await savePrefix(label, terms, library.revision, keys, negativeTerms, refs));
+        const fresh = await reload();
+        setPrefixId(fresh?.prefixes.find(item => item.name.toLowerCase() === label.toLowerCase())?.id);
+    });
     const thumb = (entry: GalleryEntry) => entry.local ? `${BASE_PATH}/Gallery/thumbnail?url=${encodeURIComponent(entry.local.url)}&v=${entry.local.timestamp || 0}&root=${encodeURIComponent(root)}` : `${BASE_PATH}/Gallery/hydrus/thumbnail?hash=${entry.hash}&target=${encodeURIComponent(`${hydrus.settings?.url}|${hydrus.settings?.profile}`)}`;
-    const side = (key: 'positive' | 'negative' | 'hydrus', label: string): React.ReactNode => !!tags[key].length && <div style={{ marginTop: 8 }}>
-        <Space><Typography.Text strong>{label}</Typography.Text>
-            <Button size="small" type="link" onClick={() => setPicked(old => ({ ...old, [key]: tags[key] }))}>all</Button>
-            <Button size="small" type="link" onClick={() => setPicked(old => ({ ...old, [key]: [] }))}>none</Button></Space>
-        <Checkbox.Group value={picked[key]} onChange={values => setPicked(old => ({ ...old, [key]: values as string[] }))} style={{ display: 'flex', flexWrap: 'wrap', gap: 4, maxHeight: 120, overflowY: 'auto' }}
-            options={tags[key].map(tag => ({ value: tag, label: tag }))} />
+    const value = side === 'positive' ? positive : negative, setValue = side === 'positive' ? setPositive : setNegative;
+    const has = (tag: string) => value.some(item => item.toLowerCase() === tag.toLowerCase());
+    /** The image's tags of one kind: click takes a tag into the prefix (or back out). They are never deleted here. */
+    const imageTags = (key: 'positive' | 'negative' | 'hydrus', label: string): React.ReactNode => !!tags[key].length && <div style={{ marginBottom: 8 }}>
+        <Space size={4}><Typography.Text strong>{label}</Typography.Text><Typography.Text type="secondary">({tags[key].filter(has).length}/{tags[key].length} in the prefix)</Typography.Text>
+            <Button size="small" type="link" disabled={tags[key].every(has)} onClick={() => setValue(old => [...old, ...tags[key].filter(tag => !old.some(item => item.toLowerCase() === tag.toLowerCase()))])}>add all →</Button></Space>
+        <div role="list" aria-label={label} style={{ display: 'flex', flexWrap: 'wrap', gap: 4, maxHeight: 150, overflowY: 'auto' }}>
+            {tags[key].map(tag => { const inside = has(tag); return <Tag key={tag} role="listitem" color={inside ? 'blue' : undefined} title={inside ? 'In the prefix · click to take it back out' : 'Click to add to the prefix'}
+                onClick={() => setValue(old => inside ? old.filter(item => item.toLowerCase() !== tag.toLowerCase()) : [...old, tag])}
+                style={{ cursor: 'pointer', margin: 0, opacity: inside ? .6 : 1, userSelect: 'none' }}>{inside ? '✓ ' : '+ '}{tag}</Tag>; })}
+        </div>
     </div>;
+    const total = positive.length + negative.length;
     return <>
-        <FloatingPanel panelKey="source-prefix" title={'Use for prefix · ' + entries.length + ' image' + (entries.length === 1 ? '' : 's')} open={entries.length > 0} onCancel={close} width={620} zIndex={BASE_Z_INDEX + 30}
+        <FloatingPanel panelKey="source-prefix" title={'Use for prefix · ' + entries.length + ' image' + (entries.length === 1 ? '' : 's')} open={entries.length > 0} onCancel={close} width={980} zIndex={BASE_Z_INDEX + 30}
             footer={<Space wrap>
                 <Button onClick={close}>Close</Button>
                 <Button onClick={() => { setAppending(entries); close(); }}>Append images and prompts…</Button>
-                <Button disabled={!prefix || busy} loading={busy} onClick={() => void pair()}>Pair only</Button>
-                <Button type="primary" onClick={edit} title="Opens the prefix editor; nothing is saved until you press Save there">{!prefix ? `Create prefix with ${chosenPositive.length + chosenNegative.length} tag(s)…` : merge === 'add' ? `Add ${chosenPositive.length + chosenNegative.length} tag(s) to “${prefix.name}”…` : `Replace “${prefix.name}” tags with ${chosenPositive.length + chosenNegative.length} tag(s)…`}</Button>
+                <Button disabled={!prefix || busy} onClick={() => void pair()} title="Pair the image(s) with this prefix without changing its tags">Pair only</Button>
+                <Button type="link" onClick={() => { openPrefixManager({ name: prefix?.name || name, positive, negative, imageKeys: keys, imageRefs: refs }); close(); }}>Full prefix editor…</Button>
+                <Button type="primary" loading={busy} disabled={!total || !(prefix || name.trim())} onClick={() => void save()}>{prefix ? `Save “${prefix.name}” and pair` : `Create prefix with ${total} tag(s)`}</Button>
             </Space>}>
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 8 }}>{entries.slice(0, 8).map(entry => <img key={entry.id} src={thumb(entry)} alt={entry.name} style={{ width: 84, height: 84, objectFit: 'contain', background: '#8882', borderRadius: 4 }} />)}{entries.length > 8 && <Typography.Text type="secondary">+{entries.length - 8}</Typography.Text>}</div>
             {!!pairedWith.length && <div style={{ marginBottom: 8 }}><Typography.Text>Paired with: </Typography.Text>{pairedWith.map(id => <Tag key={id} closable onClose={event => { event.preventDefault(); void unpair(id); }}>{library.prefixes.find(item => item.id === id)?.name || 'deleted prefix'}</Tag>)}</div>}
-            <Select showSearch allowClear optionFilterProp="label" aria-label="Prefix for these images" placeholder="New prefix (or pick an existing one)" value={prefixId} onChange={setPrefixId} style={{ width: '100%' }}
-                options={library.prefixes.map(item => ({ value: item.id, label: item.name + ' · ' + sidesLabel(item) }))} />
-            {prefix && <Radio.Group value={merge} onChange={event => setMerge(event.target.value)} style={{ marginTop: 8 }} options={[
-                { value: 'add', label: `Add the chosen tags to the prefix's ${prefix.tags.length + (prefix.negative_terms?.length || 0)} tags` },
-                { value: 'replace', label: "Replace the prefix's tags with the chosen tags" }]} />}
-            <Typography.Paragraph type="secondary" style={{ margin: '6px 0 0' }}>{prefix ? '“Pair only” links the image(s) to this prefix and changes none of its tags. The other button opens the prefix editor with the result; nothing is saved until you press Save there, and saving also pairs the image(s).' : 'Choose tags below, from the image or any others, and create a prefix; saving pairs the image(s) with it.'}</Typography.Paragraph>
-            {side('positive', "Image's positive prompt")}
-            {side('negative', "Image's negative prompt")}
-            {side('hydrus', "Image's Hydrus tags")}
-            <div style={{ marginTop: 10 }}><Typography.Text strong>Other positive tags</Typography.Text>
-                <HydrusTagSelect label="Other positive tags" value={extra.positive} onChange={positive => setExtra(old => ({ ...old, positive }))} active={entries.length > 0} placeholder="Any tag: Danbooru, Hydrus, your library, or @prefix" style={{ width: '100%' }} /></div>
-            <div style={{ marginTop: 6 }}><Typography.Text strong>Other negative tags</Typography.Text>
-                <HydrusTagSelect label="Other negative tags" value={extra.negative} onChange={negative => setExtra(old => ({ ...old, negative }))} active={entries.length > 0} placeholder="Any tag" style={{ width: '100%' }} /></div>
+            <Space.Compact style={{ width: '100%' }}>
+                <Select showSearch allowClear optionFilterProp="label" aria-label="Prefix for these images" placeholder="New prefix (or pick an existing one)" value={prefixId} onChange={setPrefixId} style={{ flex: 1 }}
+                    options={library.prefixes.map(item => ({ value: item.id, label: item.name + ' · ' + sidesLabel(item) }))} />
+                {!prefix && <Input aria-label="New prefix name" placeholder="Name of the new prefix" value={name} onChange={event => setName(event.target.value)} style={{ flex: 1 }} />}
+            </Space.Compact>
+            <Typography.Paragraph type="secondary" style={{ margin: '6px 0 4px' }}>{prefix ? 'Editing “' + prefix.name + '”: its tags are on the right. Saving changes them and pairs the image(s); “Pair only” pairs without changing anything.' : 'A new prefix starts with the image’s positive prompt. Saving creates it and pairs the image(s).'} Tag spelling follows Settings.</Typography.Paragraph>
+            <Tabs size="small" activeKey={side} onChange={key => setSide(key as 'positive' | 'negative')} items={(['positive', 'negative'] as const).map(key => ({ key, label: `${key === 'positive' ? 'Positive' : 'Negative'} (${(key === 'positive' ? positive : negative).length})` }))} />
+            <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'flex-start' }}>
+                <div style={{ flex: '1 1 340px', minWidth: 0 }}>
+                    <Typography.Title level={5} style={{ marginTop: 0 }}>From the image{entries.length === 1 ? '' : 's'}</Typography.Title>
+                    {side === 'positive' ? <>{imageTags('positive', 'Positive prompt')}{imageTags('hydrus', 'Hydrus tags')}</> : imageTags('negative', 'Negative prompt')}
+                    {!tags[side === 'positive' ? 'positive' : 'negative'].length && !(side === 'positive' && tags.hydrus.length) && <Typography.Text type="secondary">No {side} tags found on the image{entries.length === 1 ? '' : 's'}.</Typography.Text>}
+                </div>
+                <div style={{ flex: '1 1 340px', minWidth: 0 }}>
+                    <Space style={{ width: '100%', justifyContent: 'space-between' }}><Typography.Title level={5} style={{ margin: 0 }}>Prefix {side} tags</Typography.Title><Button size="small" disabled={!value.length} onClick={() => setValue([])}>Clear</Button></Space>
+                    <HydrusTagSelect label={'Prefix ' + side + ' tags'} value={value} onChange={setValue} active={entries.length > 0} placeholder="Any other tag: Danbooru, Hydrus, your library, or @prefix" style={{ width: '100%', marginTop: 6 }} />
+                    {prefix && <PrefixImages library={library} prefixId={prefix.id} onRemove={image => void unpairImage(image)} />}
+                </div>
+            </div>
         </FloatingPanel>
         <AppendImagesModal entries={appending} onClose={() => setAppending([])} />
     </>;

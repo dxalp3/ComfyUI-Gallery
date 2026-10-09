@@ -1,5 +1,6 @@
 // Utility to parse and format metadata for the Gallery preview
 import { isPlainPromptString } from './heuristicMetadataParser';
+import { hasSourceMarker, replaceSourceMarkers } from '../PromptBoxes';
 import { extractByPrompt } from './promptMetadataParser';
 import type { FileDetails, Metadata } from '../types';
 import { isNegativePrompt, isPositivePrompt } from './validator';
@@ -144,7 +145,7 @@ export function parseComfyMetadata(metadata: Metadata): Record<string, string> {
     // Assign all fields to result
     result["Model"] = fields.model || '';
     // Gallery Prompt Encode marks where its source box goes; the marker is not part of the prompt.
-    const unmark = (value: string) => value.includes('\u27e6source\u27e7') ? value.split('\u27e6source\u27e7').join('').replace(/(?:\s*,\s*){2,}/g, ', ').replace(/^[\s,]+|[\s,]+$/g, '') : value;
+    const unmark = (value: string) => hasSourceMarker(value) ? replaceSourceMarkers(value, () => '').replace(/(?:\s*,\s*){2,}/g, ', ').replace(/^[\s,]+|[\s,]+$/g, '') : value;
     result["Positive Prompt"] = unmark(fields.positive || '');
     result["Negative Prompt"] = unmark(fields.negative || '');
     result["Sampler"] = fields.sampler || '';

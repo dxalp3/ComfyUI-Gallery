@@ -204,11 +204,55 @@ SOURCE_MODES = ('after', 'before', 'replace', 'boxes')
 RESOLVED_KEY = 'gallery_prompts'
 
 
+# Tags removed from the source box ride inside the marker: ⟦source -["tag a","tag b"]⟧ (a JSON list).
+SOURCE_MARKER_PATTERN = re.compile('⟦source(?: -(\\[[^⟧]*\\]))?⟧')
+
+
+def split_top(text, separator=','):
+    """Split on a separator outside (), [], {} and <>; unbalanced text falls back to a plain split."""
+    depth, cuts, balanced = 0, [], True
+    for index, char in enumerate(text):
+        if char in '([{<': depth += 1
+        elif char in ')]}>':
+            depth -= 1
+            if depth < 0: balanced, depth = False, 0
+        elif char == separator and depth == 0: cuts.append(index)
+    if depth or not balanced: return text.split(separator)
+    parts, start = [], 0
+    for index in cuts:
+        parts.append(text[start:index]); start = index + 1
+    parts.append(text[start:])
+    return parts
+
+
+def source_key(tag):
+    return re.sub(r'\s+', ' ', tag.strip().lower().replace('_', ' '))
+
+
+def marker_excluded(match):
+    try:
+        value = json.loads(match.group(1)) if match.group(1) else []
+    except ValueError:
+        return []
+    return [item for item in value if isinstance(item, str)] if isinstance(value, list) else []
+
+
+def filter_source(source, excluded):
+    if not excluded: return source
+    drop = {source_key(tag) for tag in excluded}
+    return ','.join(part for part in split_top(source) if source_key(part) not in drop)
+
+
+def source_exclusions(text):
+    """Every tag removed from the source box(es) of a compiled prompt."""
+    return [tag for match in SOURCE_MARKER_PATTERN.finditer(text or '') for tag in marker_excluded(match)]
+
+
 def compose_prompt(text, source_text=None, source_mode='after'):
     if source_mode not in SOURCE_MODES: raise ValueError('Invalid source prompt order.')
     if source_mode == 'boxes':
         source = (source_text or '').strip().strip(',').strip()
-        joined = (text or '').replace(SOURCE_MARKER, source)
+        joined = SOURCE_MARKER_PATTERN.sub(lambda match: filter_source(source, marker_excluded(match)).strip(), text or '')
         joined = re.sub(r'(?:\s*,\s*){2,}', ', ', joined)
         return joined.strip().strip(',').strip()
     return text if source_text is None else source_text if source_mode == 'replace' else ', '.join(part.strip() for part in ([source_text, text] if source_mode == 'before' else [text, source_text]) if part.strip())
@@ -261,17 +305,18 @@ class GalleryPromptEncode:
             raise ValueError('Connect a CLIP text encoder to Gallery Prompt Encode.')
         composed = compose_prompt(text, source_text, source_mode)
         effective, choices = resolve_dynamic(composed)
-        record_resolution(extra_pnginfo, unique_id, composed, effective, choices, source_text)
+        record_resolution(extra_pnginfo, unique_id, composed, effective, choices, source_text, source_exclusions(text) if source_mode == 'boxes' else None)
         return {'ui': {'effective_prompt': [effective], 'source_text': [source_text or '']}, 'result': (clip.encode_from_tokens_scheduled(clip.tokenize(effective)), effective)}
 
 
-def record_resolution(extra_pnginfo, unique_id, composed, effective, choices, source_text=None):
+def record_resolution(extra_pnginfo, unique_id, composed, effective, choices, source_text=None, source_excluded=None):
     """Store what this encoder actually encoded. SaveImage writes every extra_pnginfo key as a PNG text chunk."""
     if not isinstance(extra_pnginfo, dict) or unique_id is None: return
     try:
         entry = {'text': composed, 'resolved': effective}
         if choices: entry['choices'] = choices
         if source_text: entry['source_text'] = source_text
+        if source_excluded: entry['source_excluded'] = source_excluded
         extra_pnginfo.setdefault(RESOLVED_KEY, {})[str(unique_id)] = entry
     except (TypeError, AttributeError):
         pass

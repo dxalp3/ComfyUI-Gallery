@@ -1,6 +1,6 @@
 import type { FileDetails } from './types';
 import { encoderRecords, stripUnresolved, type EncoderRecord } from './PromptResolution';
-const SOURCE_MARKER = '\u27e6source\u27e7';
+import { filterSource, replaceSourceMarkers } from './PromptBoxes';
 
 export type LocalSearchField = 'all' | 'name' | 'hydrus' | 'positive' | 'negative';
 export interface LocalPrompts { positive: string; negative: string }
@@ -111,10 +111,12 @@ function collectGraph(graph: Map<string, Node>, records: Record<string, EncoderR
                 const own = node.inputs.text ?? node.widgets?.[0];
                 // Box layout: the source text goes where the marker sits; the marker itself is never a tag.
                 if (mode === 'boxes' && typeof own === 'string') {
-                    const [before, ...after] = own.split(SOURCE_MARKER);
+                    // Tags removed from the source box are left out of the source text.
+                    let removed: string[] | undefined;
+                    const [before, ...after] = replaceSourceMarkers(own, excluded => { removed ??= excluded; return '\u0000'; }).split('\u0000');
                     const tidy = (value: string) => value.replace(/^[\s,]+|[\s,]+$/g, '');
                     collect(tidy(before), side, depth + 1);
-                    if (after.length) collect(node.inputs.source_text, side, depth + 1);
+                    if (after.length) collect(typeof node.inputs.source_text === 'string' ? filterSource(node.inputs.source_text, removed || []) : node.inputs.source_text, side, depth + 1);
                     collect(tidy(after.join(', ')), side, depth + 1);
                     return;
                 }

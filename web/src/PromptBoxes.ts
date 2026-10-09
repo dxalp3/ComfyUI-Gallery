@@ -12,12 +12,38 @@
  *              substituted by the backend when the workflow runs
  */
 export const SOURCE_MARKER = '\u27e6source\u27e7';
+/**
+ * Tags removed from the source box travel inside the marker, `\u27e6source -["tag a","tag b"]\u27e7`, because the
+ * source text itself is often only known when the workflow runs. The backend drops those tags then.
+ */
+const MARKER = /\u27e6source(?: -(\[[^\u27e7]*\]))?\u27e7/;
+// ComfyUI resolves {a|b} and strips /* */ and // comments in the text when it queues, so those characters are
+// written as JSON \u escapes and cannot change the list.
+const escapeList = (excluded: string[]) => JSON.stringify(excluded).replace(/[{}|/\u27e7]/g, char => '\\u' + char.charCodeAt(0).toString(16).padStart(4, '0'));
+export const sourceMarker = (excluded?: string[]) => excluded?.length ? '\u27e6source -' + escapeList(excluded) + '\u27e7' : SOURCE_MARKER;
+export const hasSourceMarker = (text: string) => MARKER.test(text);
+/** Every source marker (with or without removed tags) replaced by `replace(excluded)`. */
+export function replaceSourceMarkers(text: string, replace: (excluded: string[]) => string): string {
+    return text.replace(new RegExp(MARKER.source, 'g'), (_, list?: string) => {
+        let excluded: string[] = [];
+        try { const value = list ? JSON.parse(list) : []; if (Array.isArray(value)) excluded = value.filter((item): item is string => typeof item === 'string'); } catch { /* a damaged list removes nothing */ }
+        return replace(excluded);
+    });
+}
+/** How removed source tags are compared: case, underscores and spacing do not matter. */
+export const sourceKey = (tag: string) => tag.trim().toLowerCase().replace(/_/g, ' ').replace(/\s+/g, ' ');
+/** The source text without the removed tags (top-level comma parts are compared). */
+export function filterSource(source: string, excluded: string[]): string {
+    if (!excluded.length) return source;
+    const drop = new Set(excluded.map(sourceKey));
+    return splitTop(source, ',').filter(part => !drop.has(sourceKey(part))).join(',');
+}
 
 export type TagChip = { id: string; kind: 'tag'; text: string; enabled: boolean; weight?: number; emphasis?: 'round' | 'square' };
 export type OrChip = { id: string; kind: 'or'; options: string[]; optional: boolean; enabled: boolean; weight?: number };
 export type Chip = TagChip | OrChip;
 export type GroupBox = { id: string; kind: 'group'; name: string; chips: Chip[]; enabled: boolean; collapsed: boolean };
-export type SourceBox = { id: string; kind: 'source'; enabled: boolean; collapsed: boolean };
+export type SourceBox = { id: string; kind: 'source'; enabled: boolean; collapsed: boolean; /** Source tags left out of the prompt. */ excluded?: string[] };
 export type PromptBox = GroupBox | SourceBox;
 export type BoxState = { version: 1; boxes: PromptBox[] };
 
@@ -100,7 +126,7 @@ export function compileBoxes(state: BoxState): string {
     const parts: string[] = [];
     for (const box of state.boxes) {
         if (!box.enabled) continue;
-        if (box.kind === 'source') parts.push(SOURCE_MARKER);
+        if (box.kind === 'source') parts.push(sourceMarker(box.excluded));
         else for (const chip of box.chips) { const compiled = compileChip(chip); if (compiled) parts.push(compiled); }
     }
     return parts.join(', ');
@@ -109,7 +135,7 @@ export function compileBoxes(state: BoxState): string {
 /** Mirrors the backend: put the source text where the marker is and tidy stray commas. */
 export function composeWithSource(compiled: string, source?: string): string {
     const clean = (source || '').trim().replace(/^,+|,+$/g, '').trim();
-    return compiled.split(SOURCE_MARKER).join(clean).replace(/(?:\s*,\s*){2,}/g, ', ').trim().replace(/^,+|,+$/g, '').trim();
+    return replaceSourceMarkers(compiled, excluded => filterSource(clean, excluded).trim()).replace(/(?:\s*,\s*){2,}/g, ', ').trim().replace(/^,+|,+$/g, '').trim();
 }
 
 export const emptyGroup = (name: string, chips: Chip[] = []): GroupBox => ({ id: newId(), kind: 'group', name, chips, enabled: true, collapsed: false });
@@ -128,9 +154,10 @@ export function nextName(state: BoxState): string {
  */
 export function stateFromText(text: string, mode = 'after', hasSource = true): BoxState {
     const source = sourceBox();
-    if (text.includes(SOURCE_MARKER)) {
-        const [before, ...rest] = text.split(SOURCE_MARKER);
-        const after = rest.join(', ');
+    const marker = MARKER.exec(text);
+    if (marker) {
+        replaceSourceMarkers(marker[0], excluded => { if (excluded.length) source.excluded = excluded; return ''; });
+        const before = text.slice(0, marker.index), after = replaceSourceMarkers(text.slice(marker.index + marker[0].length), () => '');
         const boxes: PromptBox[] = [];
         if (parsePrompt(before).length) boxes.push(emptyGroup('#1', parsePrompt(before)));
         boxes.push(source);
@@ -171,7 +198,8 @@ export function parseState(value: unknown): BoxState | undefined {
         if (!isRecord(raw)) continue;
         const id = typeof raw.id === 'string' && raw.id ? raw.id : newId();
         if (raw.kind === 'source') {
-            if (!hasSource) { hasSource = true; boxes.push({ id, kind: 'source', enabled: raw.enabled !== false, collapsed: raw.collapsed === true }); }
+            const excluded = Array.isArray(raw.excluded) ? raw.excluded.filter((item): item is string => typeof item === 'string' && !!item.trim()) : [];
+            if (!hasSource) { hasSource = true; boxes.push({ id, kind: 'source', enabled: raw.enabled !== false, collapsed: raw.collapsed === true, ...(excluded.length ? { excluded } : {}) }); }
         } else if (raw.kind === 'group') {
             boxes.push({ id, kind: 'group', name: typeof raw.name === 'string' ? raw.name.slice(0, 80) : '', chips: (Array.isArray(raw.chips) ? raw.chips : []).map(cleanChip).filter((chip): chip is Chip => !!chip), enabled: raw.enabled !== false, collapsed: raw.collapsed === true });
         }
@@ -182,7 +210,7 @@ export function parseState(value: unknown): BoxState | undefined {
 
 // --- edits (all pure: they return a new state) ---
 
-export const updateBox = (state: BoxState, id: string, patch: Partial<Omit<GroupBox, 'kind' | 'id'>>): BoxState =>
+export const updateBox = (state: BoxState, id: string, patch: Partial<Omit<GroupBox, 'kind' | 'id'>> | Partial<Pick<SourceBox, 'enabled' | 'collapsed' | 'excluded'>>): BoxState =>
     ({ ...state, boxes: state.boxes.map(box => box.id === id ? { ...box, ...patch } as PromptBox : box) });
 
 /** The source box cannot be removed; it can be disabled, collapsed and moved. */
@@ -319,28 +347,117 @@ export function mergeChips(state: BoxState, boxId: string, chipIds: string[], ki
     });
 }
 
+/** An optional group holding a single tag (`{a|}`, `{(a, b)|}`) reads as "Optional" rather than "Optional group". */
+export const groupingName = (chip: Chip): string =>
+    chip.kind === 'or' && groupingKind(chip) === 'group' && optionTags(chip.options[0] || '').length === 1 ? 'Optional' : GROUPING_LABELS[groupingKind(chip)].name;
+
+// --- typing ---
+
 /**
- * What the user is typing right now, for suggestions: the text after the last `,` `|` or `{`.
- * Lets suggestions work inside `{blond hair|bro` as well as after a comma.
+ * Upper-case words that relate the tags around them instead of being tags themselves (upper case only,
+ * so a tag such as "salt and pepper hair" is left alone):
+ *   a AND b        both                       a, b         (with OPT: all or none  {a, b|})
+ *   a OR b         exactly one                {a|b}        (with OPT: one or none  {a|b|})
+ *   a OPT          the tag or nothing         {a|}
+ * AND binds tighter than OR: `a AND b OR c` is `{a, b|c}`. Keywords inside brackets are left as typed.
+ */
+export const KEYWORDS = ['AND', 'OR', 'OPT'] as const;
+
+/** Split on a keyword that stands on its own at bracket depth 0. */
+function splitKeyword(text: string, word: string): string[] {
+    const parts: string[] = []; let depth = 0, start = 0;
+    for (let index = 0; index < text.length; index++) {
+        const char = text[index];
+        if ('([{<'.includes(char)) depth++;
+        else if (')]}>'.includes(char)) depth = Math.max(0, depth - 1);
+        else if (depth === 0 && text.startsWith(word, index) && (index === 0 || /\s/.test(text[index - 1])) && (index + word.length === text.length || /\s/.test(text[index + word.length]))) {
+            parts.push(text.slice(start, index)); start = index + word.length; index += word.length - 1;
+        }
+    }
+    parts.push(text.slice(start));
+    return parts;
+}
+
+function expandSegment(segment: string): string {
+    let text = segment.trim(), optional = false;
+    const tail = splitKeyword(text, 'OPT');
+    if (tail.length > 1 && !tail[tail.length - 1].trim()) { optional = true; text = tail.slice(0, -1).join(' ').trim(); }
+    const options = splitKeyword(text, 'OR').map(option => splitKeyword(option, 'AND').map(tag => tag.trim()).filter(Boolean).join(', ')).filter(Boolean);
+    if (!options.length) return '';
+    if (options.length === 1) {
+        if (!optional) return options[0];
+        // `{a|b} OPT` makes the existing alternatives optional instead of nesting them.
+        if (wraps(options[0], '{', '}') && splitTop(options[0].slice(1, -1), '|').length > 1) return options[0].endsWith('|}') ? options[0] : options[0].slice(0, -1) + '|}';
+    }
+    return '{' + options.join('|') + (optional ? '|' : '') + '}';
+}
+
+/** Typed text with its AND / OR / OPT keywords turned into prompt syntax (see KEYWORDS). */
+export function expandKeywords(text: string): string {
+    return splitTop(text, ',').map(expandSegment).filter(Boolean).join(', ');
+}
+
+/** What was typed, as chips: keywords applied, brackets left open closed. */
+export const parseTyped = (text: string): Chip[] => parsePrompt(expandKeywords(closeBraces(text)));
+
+/** True when the current comma segment uses a keyword, so a picked suggestion continues it instead of ending it. */
+export const pendingKeyword = (text: string): boolean => {
+    const segment = splitTop(text, ',').pop() || '';
+    return KEYWORDS.some(word => splitKeyword(segment, word).length > 1);
+};
+
+/**
+ * What the user is typing right now, for suggestions: the text after the last separator — `,` `|`,
+ * an opening or closing bracket, or a keyword. Lets suggestions work inside `{blond hair|bro`,
+ * `{(red hair, bl` and `red hair AND bl` as well as after a comma.
  */
 export function typingToken(value: string): { token: string; start: number; inGroup: boolean } {
     let start = 0, depth = 0;
     for (let index = 0; index < value.length; index++) {
         const char = value[index];
-        if (char === '{') { depth++; start = index + 1; }
-        else if (char === '}') { depth = Math.max(0, depth - 1); start = index + 1; }
+        if ('{(['.includes(char)) { depth++; start = index + 1; }
+        else if ('})]'.includes(char)) { depth = Math.max(0, depth - 1); start = index + 1; }
         else if (char === ',' || char === '|') start = index + 1;
     }
-    const raw = value.slice(start);
+    let raw = value.slice(start);
+    const keyword = /(?:^|\s)(?:AND|OR|OPT)(?=\s)/g;
+    let match: RegExpExecArray | null, cut = 0;
+    while ((match = keyword.exec(raw))) cut = match.index + match[0].length;
+    start += cut; raw = raw.slice(cut);
     return { token: raw.trim(), start: start + (raw.length - raw.trimStart().length), inGroup: depth > 0 };
 }
 
-/** Close any brace the user left open (Enter on `{a|b` means `{a|b}`). */
+/** Close any bracket the user left open, innermost first (Enter on `{(a, b` means `{(a, b)}`). */
 export function closeBraces(value: string): string {
-    let depth = 0;
-    for (const char of value) { if (char === '{') depth++; else if (char === '}') depth = Math.max(0, depth - 1); }
-    return value + '}'.repeat(depth);
+    const open: string[] = [];
+    const pairs: Record<string, string> = { '{': '}', '(': ')', '[': ']' };
+    for (const char of value) {
+        if (pairs[char]) open.push(pairs[char]);
+        else if (open[open.length - 1] === char) open.pop();
+    }
+    return value + open.reverse().join('');
 }
+
+/**
+ * True when the last keystroke closed a bracketed chip: the text was unbalanced, now it is balanced, ends
+ * with a closing bracket, and the current comma segment started with an opening one. `tagname|}` after
+ * `{` or `tag2)|}` after `{(tag1, ` therefore become a chip without pressing Enter.
+ */
+export function closesChip(previous: string, next: string): boolean {
+    if (balanced(previous) || !balanced(next) || !/[)\]}]\s*$/.test(next)) return false;
+    const segment = (splitTop(next, ',').pop() || '').trim();
+    return /^[({[]/.test(segment);
+}
+
+/** "Add as": a grouping kind, or `each` — every tag optional on its own. */
+export type AddMode = GroupingKind | 'each';
+export const ADD_MODES: { value: AddMode; name: string; hint: string }[] = [
+    { value: 'tag', name: 'Tags', hint: GROUPING_LABELS.tag.hint },
+    { value: 'alternatives', name: GROUPING_LABELS.alternatives.name, hint: GROUPING_LABELS.alternatives.hint },
+    { value: 'optional', name: GROUPING_LABELS.optional.name, hint: GROUPING_LABELS.optional.hint },
+    { value: 'group', name: GROUPING_LABELS.group.name, hint: GROUPING_LABELS.group.hint },
+    { value: 'each', name: 'Optional tags (each)', hint: 'Every tag is used or left out on its own  {a|}, {b|}' },
+];
 
 /** A chip of the given kind made from plain tags: one option per tag, or all tags together for a group. */
 export function groupChip(kind: GroupingKind, tags: string[]): Chip | undefined {
@@ -350,9 +467,18 @@ export function groupChip(kind: GroupingKind, tags: string[]): Chip | undefined 
     return { id: newId(), kind: 'or', options: kind === 'group' ? [clean.join(', ')] : clean, optional: kind !== 'alternatives', enabled: true };
 }
 
+/** The chips an "Add as" mode makes from tags: one grouped chip, or (each) one optional chip per tag. */
+export function groupChips(mode: AddMode, tags: string[]): Chip[] {
+    const clean = [...new Set(tags.map(tag => tag.trim()).filter(Boolean))];
+    if (mode === 'each') return clean.map(tag => ({ id: newId(), kind: 'or', options: [tag], optional: true, enabled: true }));
+    if (mode === 'tag') return clean.flatMap(tag => parsePrompt(tag));
+    const chip = groupChip(mode, clean);
+    return chip ? [chip] : [];
+}
+
 export const addChip = (state: BoxState, boxId: string, chip: Chip): BoxState => editChips(state, boxId, chips => [...chips, chip]);
 
-export function addBoxWithChip(state: BoxState, chip: Chip): BoxState {
-    const box = emptyGroup(nextName(state), [chip]);
+export function addBoxWithChip(state: BoxState, chip: Chip | Chip[]): BoxState {
+    const box = emptyGroup(nextName(state), Array.isArray(chip) ? chip : [chip]);
     return { ...state, boxes: [...state.boxes, box] };
 }

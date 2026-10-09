@@ -55,11 +55,12 @@ export function UnifiedGallery({ sortRequest, source, remote, selectedRemote, se
     const lastViewerIndex = useRef(0);
     const columns = useRef(1);
     const disabled = working || actionBusy;
+    const localEntry = (file: FileDetails): GalleryEntry => ({
+        id: 'local:' + file.url, local: file, name: file.name, date: galleryDate(hydrus.items[file.url]?.metadata, file.timestamp), hash: hydrus.items[file.url]?.hash,
+        mime: file.name.split('.').pop()?.toLowerCase().replace('jpeg', 'jpg'), source: 'local',
+    });
     const entries = useMemo(() => {
-        const local: GalleryEntry[] = source === 'hydrus' ? [] : gallery.imagesDetailsList.filter(file => !['divider', 'empty-space'].includes(file.type)).map(file => ({
-            id: 'local:' + file.url, local: file, name: file.name, date: galleryDate(hydrus.items[file.url]?.metadata, file.timestamp), hash: hydrus.items[file.url]?.hash,
-            mime: file.name.split('.').pop()?.toLowerCase().replace('jpeg', 'jpg'), source: 'local',
-        }));
+        const local: GalleryEntry[] = source === 'hydrus' ? [] : gallery.imagesDetailsList.filter(file => !['divider', 'empty-space'].includes(file.type)).map(localEntry);
         const library: GalleryEntry[] = source === 'local' ? [] : remote.map(file => ({ id: 'hydrus:' + file.hash, remote: file, name: '#' + file.file_id,
             date: galleryDate(file),
             hash: file.hash, mime: file.mime?.split('/')[1]?.replace('jpeg', 'jpg'), source: 'hydrus' }));
@@ -75,20 +76,31 @@ export function UnifiedGallery({ sortRequest, source, remote, selectedRemote, se
     const isVideo = (entry: GalleryEntry) => entry.local?.type === 'media' || entry.remote?.mime?.startsWith('video/');
     const isImage = (entry: GalleryEntry) => entry.local?.type === 'image' || entry.remote?.mime?.startsWith('image/');
     const shownSelected = entries.filter(entry => selected.has(entry.id));
-    const index = entries.findIndex(entry => entry.id === viewer);
-    const current = entries[index];
+    /**
+     * Other windows (the image search) open the viewer on their own results: it then steps through those
+     * images, not through the main grid, and the main gallery's filter and scope stay as they are.
+     */
+    const [viewerUrls, setViewerUrls] = useState<string[]>();
+    const viewerList = useMemo(() => {
+        if (!viewerUrls) return undefined;
+        const byUrl = new Map(Object.values(gallery.data?.folders || {}).flatMap(folder => Object.values(folder)).map(file => [file.url, file]));
+        return viewerUrls.flatMap(url => byUrl.get(url) ? [localEntry(byUrl.get(url)!)] : []);
+    }, [viewerUrls, gallery.data, hydrus.items]);
+    const shown = viewerList || entries;
+    const index = shown.findIndex(entry => entry.id === viewer);
+    const current = shown[index];
     const thumbnail = (entry: GalleryEntry) => entry.local ? `${BASE_PATH}/Gallery/thumbnail?url=${encodeURIComponent(entry.local.url)}&v=${entry.local.timestamp || 0}&root=${encodeURIComponent(gallery.settings.relativePath)}` : `${BASE_PATH}/Gallery/hydrus/thumbnail?hash=${entry.hash}&target=${encodeURIComponent(scope)}`;
     const original = (entry: GalleryEntry) => entry.local ? `${BASE_PATH}${entry.local.url}` : `${BASE_PATH}/Gallery/hydrus/original?hash=${entry.hash}&target=${encodeURIComponent(scope)}`;
     useEffect(() => { setZoom(1); setFailedOriginal(undefined); setMediaError(false); }, [viewer]);
     useEffect(() => {
         if (!active) { stopMedia(viewerRef.current); setViewer(undefined); }
-        else if (viewer && index < 0) setViewer(entries[Math.min(lastViewerIndex.current, entries.length - 1)]?.id);
+        else if (viewer && index < 0) setViewer(shown[Math.min(lastViewerIndex.current, shown.length - 1)]?.id);
         else if (index >= 0) lastViewerIndex.current = index;
-    }, [active, index, viewer, entries]);
+    }, [active, index, viewer, shown]);
     useEffect(() => { setViewer(undefined); setTrashing([]); }, [scope]);
     // The image search window opens its results here ("Open in gallery view").
     useEffect(() => {
-        const show = (event: Event) => { const url = (event as CustomEvent<{ url: string }>).detail?.url; if (url) setViewer('local:' + url); };
+        const show = (event: Event) => { const { url, urls } = (event as CustomEvent<{ url: string; urls?: string[] }>).detail || {}; if (url) { setViewerUrls(urls?.length ? urls : undefined); setViewer('local:' + url); } };
         window.addEventListener(OPEN_VIEWER_EVENT, show);
         return () => window.removeEventListener(OPEN_VIEWER_EVENT, show);
     }, []);
@@ -168,18 +180,18 @@ export function UnifiedGallery({ sortRequest, source, remote, selectedRemote, se
         ...(targets(entry).some(item => item.remote) ? [{ key: 'trash', danger: true, label: `Delete from Hydrus — send to trash (${targets(entry).filter(item => item.remote).length})` }] : []),
         ...(targets(entry).some(item => item.local) ? [{ key: 'delete', danger: true, label: `Delete local file(s) (${targets(entry).filter(item => item.local).length})` }] : []),
     ], onClick: ({ key }: { key: string }) => { void act(key, entry); } });
-    const move = (step: number) => { const next = entries[index + step]; if (next) { stopMedia(viewerRef.current); setViewer(next.id); } };
+    const move = (step: number) => { const next = shown[index + step]; if (next) { stopMedia(viewerRef.current); setViewer(next.id); } };
     const advanceAfterRemoval = (removed: Set<string>) => {
         if (!viewer || !removed.has(viewer)) return;
         stopMedia(viewerRef.current);
-        const next = entries.slice(index + 1).find(entry => !removed.has(entry.id)) || entries.slice(0, index).reverse().find(entry => !removed.has(entry.id));
+        const next = shown.slice(index + 1).find(entry => !removed.has(entry.id)) || shown.slice(0, index).reverse().find(entry => !removed.has(entry.id));
         setViewer(next?.id);
     };
-    useEffect(() => { if (viewer && index >= 0) grid.current?.scrollToItem({ rowIndex: Math.floor(index / columns.current), columnIndex: index % columns.current }); }, [viewer, index]);
+    useEffect(() => { if (viewer && index >= 0 && !viewerList) grid.current?.scrollToItem({ rowIndex: Math.floor(index / columns.current), columnIndex: index % columns.current }); }, [viewer, index]);
     const closeViewer = () => {
         stopMedia(viewerRef.current);
-        setViewer(undefined);
-        if (index >= 0) grid.current?.scrollToItem({ rowIndex: Math.floor(index / columns.current), columnIndex: index % columns.current });
+        setViewer(undefined); setViewerUrls(undefined);
+        if (index >= 0 && !viewerList) grid.current?.scrollToItem({ rowIndex: Math.floor(index / columns.current), columnIndex: index % columns.current });
     };
     const renderCard = (rowIndex: number, columnIndex: number, count: number, style: React.CSSProperties) => {
                         const entry = entries[rowIndex * count + columnIndex]; if (!entry) return null;
@@ -257,32 +269,41 @@ export function UnifiedGallery({ sortRequest, source, remote, selectedRemote, se
                 </FixedSizeGrid>;
             }}</AutoSizer>}
         </div>
-        <FloatingPanel panelKey="viewer" destroyOnHidden className="cg-viewer" title={current ? `Gallery viewer · ${index + 1} / ${entries.length} · ${current.name}` : 'Gallery viewer'} open={!!current && active} onCancel={closeViewer} width="96vw" zIndex={BASE_Z_INDEX + 10} footer={null}
+        {/* The image takes all the height the window has: one compact toolbar row above, the filmstrip below. */}
+        <FloatingPanel panelKey="viewer" destroyOnHidden className="cg-viewer" title={current ? `Gallery viewer · ${index + 1} / ${shown.length}${viewerList ? ' (search results)' : ''} · ${current.name}` : 'Gallery viewer'} open={!!current && active} onCancel={closeViewer} width="96vw" zIndex={BASE_Z_INDEX + 10} footer={null}
+            initialSize={{ width: innerWidth * .96, height: innerHeight - 76 }} bodyStyle={{ padding: 8, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
             afterOpenChange={opened => { if (opened) viewerRef.current?.focus(); }}>
-            {current && active && <div ref={viewerRef} tabIndex={-1} onKeyDown={event => {
+            {current && active && <div ref={viewerRef} tabIndex={-1} style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: 1, minHeight: 0, outline: 'none' }} onKeyDown={event => {
                 if ((event.target as HTMLElement).closest('input,textarea,select,button,[role="menu"],[role="combobox"]')) return;
                 if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { event.preventDefault(); event.stopPropagation(); move(event.key === 'ArrowLeft' ? -1 : 1); }
                 if (event.key === ' ') { event.preventDefault(); toggle(current, event.shiftKey); }
             }}>
-                <Space wrap style={{ marginBottom: 12 }}>
-                    <Button disabled={index === 0} onClick={() => move(-1)}>Previous image</Button><Button disabled={index === entries.length - 1} onClick={() => move(1)}>Next image</Button>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', flex: 'none' }}>
+                    <Space.Compact><Button size="small" disabled={index === 0} title="Previous image (←)" onClick={() => move(-1)}>◀</Button><Button size="small" disabled={index === shown.length - 1} title="Next image (→)" onClick={() => move(1)}>▶</Button></Space.Compact>
                     <Checkbox className="cg-file-checkbox" checked={selected.has(current.id)} disabled={disabled} onClick={event => toggle(current, event.shiftKey)}>Selected</Checkbox>
-                    <Button onClick={() => setZoom(value => Math.max(.25, value / 1.5))}>Zoom out</Button><Button onClick={() => setZoom(value => Math.min(8, value * 1.5))}>Zoom in</Button><Button onClick={() => setZoom(1)}>Fit</Button>
-                    <Button onClick={() => openImageInfo({ url: current.local?.url, remote: current.local ? undefined : current.remote })}>Metadata</Button><Button onClick={() => openSourcePrefix([current])}>Use for prefix…</Button><Button onClick={closeViewer}>Show in grid</Button><Button danger disabled={disabled} onClick={() => void act(current.local ? 'delete' : 'trash', current)}>Delete</Button><Button disabled={disabled || !targets(current).some(isImage)} onClick={() => void act('source', current)}>Append for img2img</Button>
-                    <span>{Math.round(zoom * 100)}% · Arrow keys browse · Space selects · Right-click for actions</span>
-                </Space>
+                    <Space.Compact><Button size="small" title="Zoom out" onClick={() => setZoom(value => Math.max(.25, value / 1.5))}>−</Button><Button size="small" title="Fit to the window" onClick={() => setZoom(1)}>{Math.round(zoom * 100)}%</Button><Button size="small" title="Zoom in" onClick={() => setZoom(value => Math.min(8, value * 1.5))}>+</Button></Space.Compact>
+                    <Button size="small" onClick={() => openImageInfo({ url: current.local?.url, remote: current.local ? undefined : current.remote })}>Metadata</Button>
+                    <Button size="small" onClick={() => openSourcePrefix([current])}>Use for prefix…</Button>
+                    <Button size="small" disabled={disabled || !targets(current).some(isImage)} onClick={() => void act('source', current)}>Append for img2img</Button>
+                    <Button size="small" onClick={closeViewer}>{viewerList ? 'Close' : 'Show in grid'}</Button>
+                    <Button size="small" danger disabled={disabled} onClick={() => void act(current.local ? 'delete' : 'trash', current)}>Delete</Button>
+                    <Typography.Text type="secondary" style={{ marginLeft: 'auto', fontSize: 12 }}>← → browse · Space selects · right-click for actions</Typography.Text>
+                </div>
                 <Dropdown trigger={['contextMenu']} disabled={disabled} menu={menu(current)}>
-                    <div style={{ height: 'min(55vh, 480px)', overflow: 'auto', background: '#111', textAlign: 'center' }}>
-                        {current.local?.type === '3d' ? <ModelViewer url={original(current)} type={current.name.split('.').pop() || ''} /> : isVideo(current) ? <PreviewMedia onError={() => setMediaError(true)} key={current.id} controls autoPlay={gallery.settings.autoPlayVideos} src={original(current)} style={{ maxWidth: '100%', height: '100%' }} /> : current.local?.type === 'audio' ? <PreviewMedia audio key={current.id} controls src={original(current)} /> :
-                        <img onClick={event => { if (event.detail === 1) toggle(current); }} key={current.id} src={failedOriginal === current.id ? thumbnail(current) : original(current)} alt={'Viewing ' + current.name} onError={() => setFailedOriginal(current.id)} style={{ height: zoom === 1 ? '100%' : `${zoom * 100}%`, maxWidth: zoom === 1 ? '100%' : 'none', objectFit: 'contain' }} />}
+                    <div style={{ flex: 1, minHeight: 160, overflow: zoom === 1 ? 'hidden' : 'auto', background: '#111', borderRadius: 4, display: 'flex', alignItems: zoom === 1 ? 'center' : 'flex-start', justifyContent: zoom === 1 ? 'center' : 'flex-start' }}>
+                        {current.local?.type === '3d' ? <ModelViewer url={original(current)} type={current.name.split('.').pop() || ''} /> : isVideo(current) ? <PreviewMedia onError={() => setMediaError(true)} key={current.id} controls autoPlay={gallery.settings.autoPlayVideos} src={original(current)} style={{ maxWidth: '100%', maxHeight: '100%' }} /> : current.local?.type === 'audio' ? <PreviewMedia audio key={current.id} controls src={original(current)} /> :
+                        <img onClick={event => { if (event.detail === 1) toggle(current); }} key={current.id} src={failedOriginal === current.id ? thumbnail(current) : original(current)} alt={'Viewing ' + current.name} onError={() => setFailedOriginal(current.id)}
+                            style={zoom === 1 ? { width: '100%', height: '100%', objectFit: 'contain', display: 'block' } : { height: `${zoom * 100}%`, maxWidth: 'none', objectFit: 'contain', margin: 'auto' }} />}
                     </div>
                 </Dropdown>
                 {mediaError && <Typography.Text type="warning">This browser cannot play this video or its codec. Download the original from the context menu to play it externally.</Typography.Text>}
                 {failedOriginal === current.id && <Typography.Text type="warning">Original could not be displayed; showing thumbnail. Download original is available in the context menu.</Typography.Text>}
-                <div aria-label="Viewer filmstrip" style={{ display: 'flex', gap: 6, overflowX: 'auto', marginTop: 10 }}>
-                    {entries.slice(Math.max(0, index - 8), index + 9).map(entry => <Button key={entry.id} title={entry.name} aria-label={'View ' + entry.name} type={entry.id === viewer ? 'primary' : 'default'} onClick={event => { if (event.detail > 1) return; lastClick.current = undefined; if (selectionActive) { lastClick.current = { id: entry.id, selected: selected.has(entry.id) }; toggle(entry, event.shiftKey); } else setViewer(entry.id); }} onDoubleClick={() => { const previous = lastClick.current; if (previous?.id === entry.id) { const next = new Set(selected); if (previous.selected) next.add(entry.id); else next.delete(entry.id); setSelection(next); } setViewer(entry.id); }} style={{ height: 65, minWidth: 80, borderColor: selected.has(entry.id) ? '#52c41a' : undefined }}>
-                        {entry.local && entry.local.type !== 'image' ? entry.local.type : <img alt="" src={thumbnail(entry)} style={{ width: 60, height: 48, objectFit: 'contain' }} />}{selected.has(entry.id) ? '✓' : ''}
-                    </Button>)}
+                <div aria-label="Viewer filmstrip" style={{ display: 'flex', gap: 4, overflowX: 'auto', flex: 'none', paddingBottom: 2 }}>
+                    {shown.slice(Math.max(0, index - 12), index + 13).map(entry => <button key={entry.id} type="button" title={entry.name} aria-label={'View ' + entry.name} aria-current={entry.id === viewer} onClick={event => { if (event.detail > 1) return; lastClick.current = undefined; if (selectionActive) { lastClick.current = { id: entry.id, selected: selected.has(entry.id) }; toggle(entry, event.shiftKey); } else setViewer(entry.id); }} onDoubleClick={() => { const previous = lastClick.current; if (previous?.id === entry.id) { const next = new Set(selected); if (previous.selected) next.add(entry.id); else next.delete(entry.id); setSelection(next); } setViewer(entry.id); }}
+                        style={{ position: 'relative', flex: '0 0 auto', width: 84, height: 72, padding: 0, background: '#111', cursor: 'pointer', borderRadius: 4, border: `2px solid ${entry.id === viewer ? '#1677ff' : selected.has(entry.id) ? '#52c41a' : 'transparent'}`, opacity: entry.id === viewer ? 1 : .75, color: '#ddd' }}>
+                        {entry.local && entry.local.type !== 'image' ? entry.local.type : <img alt="" src={thumbnail(entry)} style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 2 }} />}
+                        {selected.has(entry.id) && <span style={{ position: 'absolute', top: 1, right: 3, color: '#52c41a', fontWeight: 700 }}>✓</span>}
+                    </button>)}
                 </div>
             </div>}
         </FloatingPanel>

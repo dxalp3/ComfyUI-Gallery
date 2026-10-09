@@ -1,4 +1,4 @@
-export type PromptInsertion = { position: 'before' | 'after'; format: 'comma' | 'alternatives' | 'optional' | 'group'; categoryGroups?: boolean; weight: number; prefix: string; suffix: string };
+export type PromptInsertion = { position: 'before' | 'after'; format: 'comma' | 'alternatives' | 'optional' | 'group' | 'each'; categoryGroups?: boolean; weight: number; prefix: string; suffix: string };
 export const defaultInsertion: PromptInsertion = { position: 'after', format: 'comma', weight: 1, prefix: '', suffix: '' };
 export function formatInsertion(groups: string[][], options: PromptInsertion): string {
     const clean = groups.map(group => group.map(term => term.trim()).filter(Boolean)).filter(group => group.length);
@@ -11,7 +11,9 @@ export function formatInsertion(groups: string[][], options: PromptInsertion): s
     const textGroups = options.categoryGroups ? clean.map(group => alternatives(group)).join(', ') : alternatives(clean.map(group => group.join(', ')));
     // 'group' keeps every selected tag together as ONE optional unit: {a, b, c|}. Insert several selections one after another to give each its own weight.
     const together = [...new Set(clean.flat())].join(', ');
-    let text = options.format === 'comma' ? together : options.format === 'group' ? '{' + together + '|}' : textGroups;
+    // 'each' makes every tag optional on its own: {a|}, {b|}.
+    const each = [...new Set(clean.flat())].map(tag => '{' + tag + '|}').join(', ');
+    let text = options.format === 'comma' ? together : options.format === 'group' ? '{' + together + '|}' : options.format === 'each' ? each : textGroups;
     text = options.prefix + text + options.suffix;
     if (Number.isFinite(options.weight) && options.weight !== 1) text = '(' + text + ':' + options.weight + ')';
     return text;
