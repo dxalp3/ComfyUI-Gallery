@@ -239,3 +239,16 @@ test('exclusive tags turn off the conflicting single-tag chips', () => {
     assert.equal(B.compileBoxes(result.state).replace(/, ⟦source⟧$/, ''), '{smile|}, red eyes, long hair');
     assert.equal(B.disableConflicts(after, after, clash).state, after, 'nothing new, nothing changes');
 });
+
+test('"never together": conflicting optional tags compile into one group; required ones are reported', () => {
+    const bare = tag => tag.replace(/^\((.*):[\d.]+\)$/, '$1');
+    const clash = (a, b) => [bare(a), bare(b)].sort().join() === 'long hair,short hair';
+    const state = B.stateFromText('{short hair|}, smile, {(long hair:1.2)|}, {red eyes|}');
+    const plain = B.compileBoxes(state).replace(/, ⟦source⟧$/, '');
+    assert.equal(plain, '{short hair|}, smile, {(long hair:1.2)|}, {red eyes|}', 'without the mode nothing changes');
+    assert.equal(B.compileBoxes(state, clash).replace(/, ⟦source⟧$/, ''), '{short hair|(long hair:1.2)|}, smile, {red eyes|}');
+    assert.equal(B.neverTogether(state, clash).length, 1);
+    // The node keeps its boxes when the stored text is either compilation.
+    assert.equal(B.reconcileText(state, B.compileBoxes(state, clash), 'boxes', true, clash), state);
+    assert.deepEqual(B.alwaysTogether(B.stateFromText('short hair, long hair'), clash), [['short hair', 'long hair']]);
+});

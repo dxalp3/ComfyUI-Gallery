@@ -2,9 +2,12 @@ import { getComfyApp, STANDALONE } from './ComfyAppApi';
 import { emptyImageSourceManifest, mergePrompt } from './ImageSourceGeometry';
 import type { ImageSourceImage, ImageSourceManifest, PromptApply } from './ImageSourceGeometry';
 import { loadPrefixes, type SharedLibrary } from './PrefixLibrary';
+import { hideWidget } from './NodeWidgets';
 
 export const SOURCE_EDITOR_EVENT = 'gallery-source-editor';
 export const SOURCE_BROWSE_EVENT = 'gallery-source-browse';
+/** Opens the image picker (SourcePicker) for a node. */
+export const SOURCE_PICKER_EVENT = 'gallery-source-picker';
 let target: any;
 let sourceConstructor: any;
 export const registerSourceConstructor = (value: any) => { sourceConstructor = value; };
@@ -67,10 +70,13 @@ export function installSourceWidgets(node: any) {
     const widget = node.widgets?.find((item: any) => item.name === 'sources');
     // Preserve the native STRING/DOM widget type and serializer. Changing its
     // type can break frontend extensions that own the widget's backing value.
-    if (widget) { widget.hidden = true; widget.computeSize = () => [0, -4]; if (widget.inputEl) widget.inputEl.style.display = 'none'; }
+    hideWidget(widget);
     const edit = node.addWidget('button', 'Edit images / crop / stitch', null, () => {
         target = node; window.dispatchEvent(new CustomEvent(SOURCE_EDITOR_EVENT, { detail: node }));
     }, { serialize: false });
+    // The picker (like Load Image's): ComfyUI's input folder, the gallery, and this node's images.
+    const pickButton = node.addWidget('button', 'Pick images…', null, () => { target = node; window.dispatchEvent(new CustomEvent(SOURCE_PICKER_EVENT, { detail: node })); }, { serialize: false });
+    if (pickButton) pickButton.serialize = false;
     const browse = node.addWidget('button', 'Browse / append from Gallery', null, () => {
         target = node; window.dispatchEvent(new CustomEvent(SOURCE_BROWSE_EVENT));
     }, { serialize: false });
@@ -93,14 +99,16 @@ export function installSourceWidgets(node: any) {
                 if (!images.length) {
                     const empty = document.createElement('div');
                     empty.style.cssText = 'flex:1;display:flex;align-items:center;justify-content:center;text-align:center;border:1px dashed #8886;border-radius:6px;padding:8px;opacity:.75';
-                    empty.textContent = note || 'No images yet. Append from Gallery, drop image files here, or drop a Load Image node onto this node.';
+                    empty.textContent = note || 'No images yet. Click to pick images, drop image files here, or drop a Load Image node onto this node.';
+                    empty.style.cursor = 'pointer'; empty.onclick = () => window.dispatchEvent(new CustomEvent(SOURCE_PICKER_EVENT, { detail: node }));
                     preview.append(empty); return;
                 }
                 // In the single layout the slider picks the output image; otherwise it only browses.
                 view = single ? active : Math.min(view, images.length - 1);
                 const go = (index: number) => { const next = (index + images.length) % images.length; if (single) saveSourceManifest(node, { ...manifest, active_index: next }); else { view = next; refresh(); } };
                 const stage = document.createElement('div');
-                stage.style.cssText = 'position:relative;flex:1;min-height:0;display:flex;align-items:center;justify-content:center;background:#0006;border-radius:4px;overflow:hidden';
+                stage.style.cssText = 'position:relative;flex:1;min-height:0;display:flex;align-items:center;justify-content:center;background:#0006;border-radius:4px;overflow:hidden;cursor:pointer';
+                stage.title = 'Click to pick images'; stage.onclick = () => window.dispatchEvent(new CustomEvent(SOURCE_PICKER_EVENT, { detail: node }));
                 const img = document.createElement('img');
                 img.src = thumb(images[view]); img.alt = images[view].title || images[view].input_name;
                 img.style.cssText = 'max-width:100%;max-height:100%;object-fit:contain';
@@ -155,21 +163,21 @@ export function installSourceWidgets(node: any) {
     node.setSize?.([320, Math.max(180, node.computeSize?.()[1] || 180)]);
 }
 
-const comfyFetch = (path: string, options?: RequestInit): Promise<Response> => {
+export const comfyFetch = (path: string, options?: RequestInit): Promise<Response> => {
     const api = (window as any).comfyAPI?.api?.api || getComfyApp()?.api;
     return api?.fetchApi ? api.fetchApi(path, options) : fetch(path, options);
 };
-async function sourceRequest(path: string, body: unknown): Promise<ImageSourceImage> {
+export async function sourceRequest(path: string, body: unknown): Promise<ImageSourceImage> {
     const response = await comfyFetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || 'Could not add that image.');
     return { input_name: data.input_name, title: data.title, metadata: data.metadata || {} };
 }
 /** An image from ComfyUI's input folder (a Load Image node's image, an uploaded file) as a source entry. */
-const sourceFromInput = (name: string) => sourceRequest('/Gallery/source/input', { name });
+export const sourceFromInput = (name: string) => sourceRequest('/Gallery/source/input', { name });
 
 /** Add images to one Gallery Image Source node. In the single layout the first new image becomes the output. */
-async function addToNode(node: any, images: ImageSourceImage[], urls?: (string | undefined)[]): Promise<number> {
+export async function addToNode(node: any, images: ImageSourceImage[], urls?: (string | undefined)[]): Promise<number> {
     if (!images.length) return 0;
     const stamped = await withPairedPrefix(images, urls);
     const manifest = readSourceManifest(node);
@@ -189,6 +197,11 @@ export async function appendDropped(node: any, transfer: DataTransfer): Promise<
     try { const value = JSON.parse(transfer.getData('application/x-gallery-image') || transfer.getData('custom') || 'null'); if (value?.url?.startsWith('/static_gallery/')) galleryUrl = value.url; } catch { /* not a gallery image */ }
     const files = [...transfer.files].filter(file => file.type.startsWith('image/'));
     if (galleryUrl) return addToNode(node, [await sourceRequest('/Gallery/source/local', { url: galleryUrl })], [galleryUrl]);
+    return addToNode(node, await uploadImages(files));
+}
+
+/** Upload image files to ComfyUI's input folder (as Load Image does) and make source entries of them. */
+export async function uploadImages(files: File[]): Promise<ImageSourceImage[]> {
     const images: ImageSourceImage[] = [];
     for (const file of files) {
         const form = new FormData(); form.append('image', file);
@@ -197,7 +210,7 @@ export async function appendDropped(node: any, transfer: DataTransfer): Promise<
         const data = await response.json();
         images.push({ ...await sourceFromInput((data.subfolder ? data.subfolder + '/' : '') + data.name), title: file.name });
     }
-    return addToNode(node, images);
+    return images;
 }
 
 let loadImageDrop = false;

@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type DragEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
+import { theme } from 'antd';
 import { addBox, addBoxWithChip, addChips, addModeOf, ADD_MODES, chipItems, convertChip, withItems, balanced, chipTerms, closesChip, compileChip, editChips, expandKeywords, closeBraces, groupChips, groupingKind, groupingName, GROUPING_LABELS, mergeChips, moveBox, moveBoxTo, moveChipTo, moveItem, parsePrompt, parseTyped, pendingKeyword, removeBox, sourceKey, splitChip, splitTop, typingToken, updateBox, type AddMode, type BoxState, type Chip, type GroupBox, type GroupingKind, type OrChip, type SourceBox } from './PromptBoxes';
 
 export type Suggestion = { label: string; kind: 'tag' | 'prefix'; terms?: string[] };
@@ -198,7 +199,9 @@ function SuggestionMenu({ anchor, items, active, onPick }: { anchor: HTMLElement
     }, [anchor, items]);
     if (!anchor || !items.length || !rect || typeof document === 'undefined') return null;
     const below = window.innerHeight - rect.bottom > 190 || rect.top < 190;
-    return createPortal(<div role="listbox" onMouseDown={event => event.preventDefault()} style={{ ...S.menu, position: 'fixed', left: rect.left, width: Math.max(rect.width, 200), right: 'auto', top: below ? rect.bottom + 2 : undefined, bottom: below ? undefined : window.innerHeight - rect.top + 2, zIndex: 100000, color: 'var(--input-text, #ddd)', font: '12px system-ui, sans-serif' }}>
+    // The menu lives in <body>, outside the editor: take the editor's look (node colours, or the gallery's) from the input.
+    const look = getComputedStyle(anchor), value = (name: string) => look.getPropertyValue(name).trim() || undefined;
+    return createPortal(<div role="listbox" onMouseDown={event => event.preventDefault()} style={{ ...S.menu, position: 'fixed', left: rect.left, width: Math.max(rect.width, 200), right: 'auto', top: below ? rect.bottom + 2 : undefined, bottom: below ? undefined : window.innerHeight - rect.top + 2, zIndex: 100000, color: value('--input-text') || '#ddd', background: value('--comfy-menu-bg') || '#353535', borderColor: value('--border-color'), font: look.font || '12px system-ui, sans-serif', ['--comfy-menu-hover-bg' as string]: value('--comfy-menu-hover-bg') } as CSSProperties}>
         {items.map((item, index) => <div key={item.kind + item.label} role="option" aria-selected={index === active} onClick={() => onPick(item)} style={{ ...S.option, background: index === active ? 'var(--comfy-menu-hover-bg, #444)' : 'transparent' }}>
             {item.kind === 'prefix' ? '@' : ''}{item.label}{item.kind === 'prefix' && <small style={{ opacity: .6 }}> · prefix</small>}
         </div>)}
@@ -423,6 +426,16 @@ export function PromptBoxEditor({ state, source, preview, suggest, onChange, not
     </div>;
 }
 
+/** Native controls inside the term editor shaped like the gallery's antd controls. */
+const TERMS_STYLE = `
+.cg-terms > div { border-radius: var(--cg-radius); padding: 8px; }
+.cg-terms input:not([type=checkbox]), .cg-terms select { min-height: 30px; padding: 4px 10px !important; border-radius: var(--cg-radius) !important; font: inherit !important; }
+.cg-terms input[type=number] { min-height: 26px; padding: 2px 6px !important; }
+.cg-terms input:not([type=checkbox]):focus, .cg-terms select:focus { outline: none; border-color: var(--cg-primary) !important; box-shadow: 0 0 0 2px var(--cg-primary-ring); }
+.cg-terms button { border-radius: var(--cg-radius) !important; }
+.cg-terms [aria-label^="Edit "] { line-height: 1.6; }
+`;
+
 const termsBox = (terms: string[]): BoxState => ({ version: 1, boxes: [{ id: 'terms', kind: 'group', name: '', chips: terms.flatMap(parsePrompt), enabled: true, collapsed: false }] });
 const termsOf = (state: BoxState): string[] => state.boxes.flatMap(box => box.kind === 'group' ? box.chips.map(compileChip).filter(Boolean) : []);
 
@@ -437,7 +450,12 @@ export function TermsEditor({ value, onChange, suggest, placeholder }: { value: 
     useEffect(() => { if (JSON.stringify(termsOf(state)) !== JSON.stringify(value)) setState(termsBox(value)); }, [JSON.stringify(value)]);
     const change = (next: BoxState) => { setState(next); onChange(termsOf(next)); };
     const box = state.boxes[0] as GroupBox;
-    return <div style={{ ...S.root, padding: 0, minHeight: 0 }} onWheel={event => event.stopPropagation()}>
+    // Diegetic: in a gallery window the chips take the gallery's colours, font and control shapes (the node look is for ComfyUI nodes).
+    const { token } = theme.useToken();
+    const look = { '--comfy-input-bg': token.colorBgContainer, '--comfy-menu-bg': token.colorFillTertiary, '--comfy-menu-hover-bg': token.controlItemBgHover, '--input-text': token.colorText, '--border-color': token.colorBorder,
+        '--cg-primary': token.colorPrimary, '--cg-primary-ring': token.controlOutline, '--cg-radius': token.borderRadius + 'px', font: `${token.fontSize}px ${token.fontFamily}`, color: token.colorText } as CSSProperties;
+    return <div className="cg-terms" style={{ ...S.root, padding: 0, minHeight: 0, ...look }} onWheel={event => event.stopPropagation()}>
+        <style>{TERMS_STYLE}</style>
         <GroupView bare box={box} index={0} count={1} state={state} onChange={change} suggest={suggest} placeholder={placeholder} />
     </div>;
 }

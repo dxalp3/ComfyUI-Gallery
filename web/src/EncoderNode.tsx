@@ -1,8 +1,9 @@
 import { createRoot } from 'react-dom/client';
 import { PromptBoxEditor, type SourceInfo } from './PromptBoxEditor';
 import { makeSuggest, type SuggestDeps } from './PromptSuggest';
-import { compileBoxes, composeWithSource, disableConflicts, insertText, parseState, reconcileText, stateFromText, type BoxState } from './PromptBoxes';
-import { conflicts, exclusiveTagsEnabled } from './TagConflicts';
+import { hideWidget } from './NodeWidgets';
+import { alwaysTogether, chipTerms, compileBoxes, composeWithSource, disableConflicts, insertText, neverTogether, parseState, reconcileText, stateFromText, type BoxState } from './PromptBoxes';
+import { conflicts, EXCLUSIVE_MODE_EVENT, exclusiveMode } from './TagConflicts';
 import { getComfyApp } from './ComfyAppApi';
 import { sourcePrompt } from './ImageSourceGeometry';
 import type { SharedLibrary } from './PrefixLibrary';
@@ -28,14 +29,6 @@ export function effectiveSourceText(node: any): string | undefined {
 
 type Deps = SuggestDeps;
 
-/** Same approach as the image source node: keep the STRING widget (it is what gets serialized) but present our own editor. */
-function hideWidget(widget: any) {
-    if (!widget) return;
-    widget.hidden = true;
-    if (widget.options) widget.options.hidden = true;
-    widget.computeSize = () => [0, -4];
-    for (const element of [widget.inputEl, widget.element]) if (element?.style) element.style.display = 'none';
-}
 
 /**
  * Replace the encoder's two text boxes with the tag-box editor.
@@ -58,22 +51,35 @@ export function installPromptBoxes(node: any, deps: Deps) {
     const host = document.createElement('div');
     host.style.cssText = 'width:100%;height:100%;overflow:auto;box-sizing:border-box;background:var(--comfy-input-bg,#222);border-radius:6px';
     const root = createRoot(host);
+    /** Exclusive tags in "never together" mode change how the boxes compile (see neverTogether). */
+    const together = () => exclusiveMode() === 'together' ? conflicts : undefined;
+    const compiledNow = () => compileBoxes(state, together());
+    /** Keep the stored prompt in step with the boxes (the exclusive mode can change without an edit). */
+    const sync = () => {
+        const compiled = compiledNow(), text = widget('text');
+        if (text && text.value !== compiled) { text.value = compiled; if (text.inputEl) text.inputEl.value = compiled; text.callback?.(compiled); node.setDirtyCanvas?.(true, true); }
+    };
     const render = () => {
         const source = sourcePromptInfo(node);
-        root.render(<PromptBoxEditor state={state} source={source} preview={composeWithSource(compileBoxes(state), source.text)} suggest={suggest} onChange={commit} notice={notice} />);
+        const mode = exclusiveMode(), names = (ids: string[]) => ids.map(id => state.boxes.flatMap(box => box.kind === 'group' ? box.chips : []).find(chip => chip.id === id)).map(chip => chip && chipTerms(chip)[0]).join(' / ');
+        const notes = [notice,
+            ...(mode === 'together' ? neverTogether(state, conflicts).map(ids => 'Never together: ' + names(ids)) : []),
+            ...(mode !== 'off' ? alwaysTogether(state, conflicts).map(([a, b]) => `${a} and ${b} are both always used (make one optional)`) : [])].filter(Boolean);
+        root.render(<PromptBoxEditor state={state} source={source} preview={composeWithSource(compiledNow(), source.text)} suggest={suggest} onChange={commit} notice={notes.join(' · ')} />);
     };
+    window.addEventListener(EXCLUSIVE_MODE_EVENT, () => { sync(); render(); });
     /** Shown under the boxes after an edit, e.g. which tags "Exclusive tags" turned off. */
     let notice = '';
     function commit(next: BoxState) {
         notice = '';
-        if (exclusiveTagsEnabled()) {
+        if (exclusiveMode() === 'disable') {
             const result = disableConflicts(state, next, conflicts);
             next = result.state;
             if (result.disabled.length) notice = 'Exclusive tags turned off: ' + result.disabled.join(', ');
         }
         state = next;
         node.properties ||= {}; node.properties.prompt_boxes = state;
-        const compiled = compileBoxes(state), text = widget('text'), mode = widget('source_mode');
+        const compiled = compiledNow(), text = widget('text'), mode = widget('source_mode');
         if (text && text.value !== compiled) { text.value = compiled; if (text.inputEl) text.inputEl.value = compiled; text.callback?.(compiled); }
         if (mode && mode.value !== 'boxes') { mode.value = 'boxes'; mode.callback?.('boxes'); }
         node.setDirtyCanvas?.(true, true); node.graph?.change?.();
@@ -83,7 +89,7 @@ export function installPromptBoxes(node: any, deps: Deps) {
     const refresh = () => {
         const text = widget('text');
         if (text && typeof text.value === 'string') {
-            const next = reconcileText(state, text.value, String(widget('source_mode')?.value ?? 'boxes'), hasSource());
+            const next = reconcileText(state, text.value, String(widget('source_mode')?.value ?? 'boxes'), hasSource(), together());
             if (next !== state) { commit(next); return; }
         }
         render();
@@ -94,7 +100,7 @@ export function installPromptBoxes(node: any, deps: Deps) {
     if (dom) dom.serialize = false;
     node.__galleryPromptBoxes = {
         /** Library and image-prompt appends arrive here as text and become their own box. Returns the compiled prompt. */
-        insert(text: string, position: 'before' | 'after' | 'replace', name?: string) { commit(insertText(state, text, position, name)); return compileBoxes(state); },
+        insert(text: string, position: 'before' | 'after' | 'replace', name?: string) { commit(insertText(state, text, position, name)); return compiledNow(); },
     };
 
     for (const key of ['onConnectionsChange', 'onConfigure']) {

@@ -3,7 +3,7 @@ import { PrefixImages } from './PrefixImages';
 import { useEffect, useState } from 'react';
 import { Alert, Button, Checkbox, Input, InputNumber, Select, Space, Tabs, Typography } from 'antd';
 import { hydrusRequest } from './HydrusApi';
-import { conflicts, exclusiveTagsEnabled } from './TagConflicts';
+import { conflicts, exclusiveMode } from './TagConflicts';
 import { expandPrefix, loadPrefixes, matchesPolarity, POLARITY_OPTIONS, type PrefixPolarity, type SharedLibrary } from './PrefixLibrary';
 
 type Vocabulary = { items: { name: string; count: number }[]; total: number; categories: { value: string; label: string; count: number; source: string }[] };
@@ -85,8 +85,8 @@ export function PromptPalette({ onChoose, onSearch, onAppend, onEdit, chooseSear
                 {onAppend && <><Checkbox aria-label={'Pick ' + row.label} checked={!!selected[row.key]} disabled={busy || inserting} onChange={event => setSelected(old => {
                     const next = { ...old };
                     if (!event.target.checked) { delete next[row.key]; return next; }
-                    // Exclusive tags (a gallery setting): picking long hair unpicks short hair.
-                    if (!row.prefixId && exclusiveTagsEnabled()) for (const [key, other] of Object.entries(next)) if (!other.prefixId && other.terms.length === 1 && conflicts(other.terms[0], row.terms[0])) delete next[key];
+                    // Exclusive tags, "turn off" mode: picking long hair unpicks short hair. ("Never together" keeps both picks.)
+                    if (!row.prefixId && exclusiveMode() === 'disable') for (const [key, other] of Object.entries(next)) if (!other.prefixId && other.terms.length === 1 && conflicts(other.terms[0], row.terms[0])) delete next[key];
                     next[row.key] = row; return next;
                 })} /><Button size="small" disabled={busy || inserting} aria-label={'Append ' + row.label} onClick={() => void append([row])}>Append</Button></>}
                 <Button size="small" aria-label={'Favorite ' + row.label} aria-pressed={favorites.includes(row.key)} onClick={() => favorite(row.key)}>{favorites.includes(row.key) ? '★' : '☆'}</Button>

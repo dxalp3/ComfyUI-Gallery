@@ -44,6 +44,7 @@ async function request(body?: unknown): Promise<ListResponse> {
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || 'The exclusive tag list could not be read.');
     setExclusiveSets(data.sets);
+    if (typeof window !== 'undefined' && body !== undefined) window.dispatchEvent(new Event(EXCLUSIVE_MODE_EVENT));
     return data;
 }
 /** The current list (yours, or the built-in one) — also makes it the one in use. */
@@ -54,13 +55,23 @@ export const resetExclusiveSets = () => request({ reset: true });
 
 let loading: Promise<unknown> | undefined;
 const SETTINGS_KEY = 'comfy-ui-gallery-settings';
-/** The gallery setting "Exclusive tags", read from storage so the encoder node (outside React) can use it. Loads the list on first use. */
-export function exclusiveTagsEnabled(): boolean {
-    let enabled = false;
-    try { enabled = JSON.parse(localStorage.getItem(SETTINGS_KEY) || 'null')?.exclusiveTags === true; } catch { /* storage unavailable */ }
-    if (enabled && !loading) loading = loadExclusiveSets().catch(() => { loading = undefined; });
-    return enabled;
+/**
+ * The gallery setting "Exclusive tags", read from storage so the encoder node (outside React) can use it:
+ *   off       nothing happens
+ *   disable   adding or switching on a tag turns off the tags it excludes
+ *   together  conflicting tags can all be added; optional ones compile into one group, so a run never uses two
+ * Loads the list on first use. (`exclusiveTags: true` from before means `disable`.)
+ */
+export type ExclusiveMode = 'off' | 'disable' | 'together';
+export function exclusiveMode(): ExclusiveMode {
+    let mode: ExclusiveMode = 'off';
+    try { const settings = JSON.parse(localStorage.getItem(SETTINGS_KEY) || 'null'); mode = ['disable', 'together'].includes(settings?.exclusiveMode) ? settings.exclusiveMode : settings?.exclusiveTags === true && !settings?.exclusiveMode ? 'disable' : 'off'; } catch { /* storage unavailable */ }
+    if (mode !== 'off' && !loading) loading = loadExclusiveSets().then(() => window.dispatchEvent(new Event(EXCLUSIVE_MODE_EVENT))).catch(() => { loading = undefined; });
+    return mode;
 }
+export const exclusiveTagsEnabled = () => exclusiveMode() !== 'off';
+/** Sent when the mode or the list changes, so open encoder nodes recompile. */
+export const EXCLUSIVE_MODE_EVENT = 'gallery-exclusive-mode';
 
 const cleanTags = (tags: unknown[]): string[] => [...new Set(tags.filter((tag): tag is string => typeof tag === 'string').map(tag => tag.trim()).filter(Boolean))];
 

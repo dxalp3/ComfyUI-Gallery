@@ -1,6 +1,7 @@
 import { FolderRules } from './FolderRules';
 import Modal from 'antd/es/modal/Modal';
 import { openExclusiveTags } from './ExclusiveTagsPanel';
+import { EXCLUSIVE_MODE_EVENT } from './TagConflicts';
 import { Button, Checkbox, Flex, Input, Select, Switch, Typography, message } from 'antd';
 import { useGalleryContext, type SettingsState } from './GalleryContext';
 import { useSetState } from 'ahooks';
@@ -28,7 +29,7 @@ const GallerySettingsModal = () => {
         const exts = extInput.split(',').map(s => s.trim().replace(/^\./, '')).filter(s => s);
         const newSettings = { ...staged, scanExtensions: exts } as SettingsState;
         setSaving(true);
-        try { await setSettings(newSettings); setShowSettings(false); } catch (error) { message.error(String(error)); } finally { setSaving(false); }
+        try { await setSettings(newSettings); window.dispatchEvent(new Event(EXCLUSIVE_MODE_EVENT)); setShowSettings(false); } catch (error) { message.error(String(error)); } finally { setSaving(false); }
     };
     // Cancel: just close modal (staged will reset on next open)
     const handleCancel = () => {
@@ -82,7 +83,13 @@ const GallerySettingsModal = () => {
 
                 <div><Typography.Title level={5}>Extra local folders</Typography.Title><Select mode="tags" aria-label="Extra local folders" value={staged.extraFolders || []} onChange={extraFolders => setStaged({ extraFolders })} style={{ width: '100%' }} placeholder="Absolute folder path — Enter to add" /><Typography.Text type="secondary">Saved roots appear beside the folder selector and can be routing destinations.</Typography.Text></div>
                 <div><Checkbox checked={staged.hydrusSearchAliases !== false} onChange={event => setStaged({ hydrusSearchAliases: event.target.checked })}>Match Danbooru aliases, spaces and underscores in Hydrus searches</Checkbox><Typography.Paragraph type="secondary">For known dictionary tags, search both blue_eyes and blue eyes (and recognized aliases). Turn off to search the exact tags entered. Applies to Hydrus and Both; does not rename stored tags or change prompt spelling.</Typography.Paragraph></div>
-                <div><Typography.Title level={5}>Exclusive tags (experimental)</Typography.Title><Checkbox checked={!!staged.exclusiveTags} onChange={event => setStaged({ exclusiveTags: event.target.checked })}>Choosing a tag turns off the tags that exclude it</Checkbox> <Button size="small" onClick={openExclusiveTags}>Edit tag sets…</Button><Typography.Text type="secondary" style={{ display: 'block' }}>For example adding long hair turns off short hair, and 1girl turns off 2girls. Applies to single tags and optional tags in the prompt encoder and to picks in the tag palette. The sets are a small curated list (hair length and colour, eye colour, character count, framing, posture, time of day, season, skin tone) that you can edit, extend or replace with an imported file.</Typography.Text></div>
+                <div><Typography.Title level={5}>Exclusive tags (experimental)</Typography.Title>
+                    <Select aria-label="Exclusive tags" style={{ width: '100%' }} value={staged.exclusiveMode || (staged.exclusiveTags ? 'disable' : 'off')} onChange={exclusiveMode => setStaged({ exclusiveMode, exclusiveTags: exclusiveMode !== 'off' })} options={[
+                        { value: 'off', label: 'Off' },
+                        { value: 'disable', label: 'Turn off — adding long hair switches short hair off' },
+                        { value: 'together', label: 'Never together — keep both, but a run uses at most one' }]} />
+                    <Typography.Text type="secondary" style={{ display: 'block', marginTop: 4 }}>“Never together” works on optional tags in the prompt encoder: <code>{'{long hair|}'}</code> and <code>{'{short hair|}'}</code> are sent as <code>{'{long hair|short hair|}'}</code> — one of them or neither, each run. Tags that are always used cannot be resolved; the encoder points them out. The sets are an editable list (hair length and colour, eye colour, character count, framing, posture, time of day, season, skin tone) that you can extend or replace with an imported file.</Typography.Text>
+                    <Button size="small" style={{ marginTop: 6 }} onClick={openExclusiveTags}>Edit tag sets…</Button></div>
                 <div><Typography.Title level={5}>Tool windows</Typography.Title><Select aria-label="Window mode" value={staged.panelMode || 'floating'} onChange={panelMode => setStaged({ panelMode })} style={{ width: '100%' }} options={[{ value: 'floating', label: 'Floating windows — move, resize and keep several open side by side' }, { value: 'cover', label: 'Cover the page — each window fills the screen, as before' }]} /><Typography.Text type="secondary">Applies to all floating tool windows (prompt library, tag search, library search, viewers). Each window also has a maximize button for one-off use.</Typography.Text></div>
                 <div><Typography.Title level={5}>Prompt tag spelling</Typography.Title><Switch checkedChildren="Spaces (blue eyes)" unCheckedChildren="Underscores (blue_eyes)" checked={staged.preferPromptSpaces !== false} onChange={preferPromptSpaces => setStaged({ preferPromptSpaces })} /><Typography.Paragraph type="secondary">Recognized Danbooru tags are written this way whenever a prefix is saved or tags are appended to a prompt. Custom text and LoRA names are left alone. Aliases themselves are managed in Hydrus.</Typography.Paragraph></div>
                 <div><Typography.Title level={5}>Library search</Typography.Title><Button onClick={() => window.dispatchEvent(new Event('gallery-library-search'))}>Open library search window</Button><Typography.Paragraph type="secondary">Browse every phrase indexed from your local images together with saved prefixes, including prefixes that do not use Danbooru tags.</Typography.Paragraph></div>

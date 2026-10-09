@@ -1,3 +1,4 @@
+import { SourcePicker } from './SourcePicker';
 import { ExclusiveTagsPanel } from './ExclusiveTagsPanel';
 import { HydrusSyncPanel } from './HydrusSyncPanel';
 import { LIBRARY_SEARCH_EVENT, PROMPTS_WINDOW_EVENT, LocalPromptSearch } from './LocalPromptLibrary';
@@ -95,7 +96,7 @@ const GalleryModal = () => {
             <GalleryHeader /><HydrusToolbar onBrowseHydrus={() => { changeSource('hydrus'); setTools(false); }} /><GallerySidebar />
         </Modal>
         {showSettings && <GallerySettingsModal />}
-        <HydrusSettingsModal /><HydrusExportModal /><HydrusDetailsModal /><SourcePrefixPanel /><ImageSearchPanel /><ExclusiveTagsPanel />
+        <HydrusSettingsModal /><HydrusExportModal /><HydrusDetailsModal /><SourcePrefixPanel /><ImageSearchPanel /><ExclusiveTagsPanel /><SourcePicker />
     </>;
 };
 export default GalleryModal;

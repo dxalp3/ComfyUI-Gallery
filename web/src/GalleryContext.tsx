@@ -56,6 +56,8 @@ export interface SettingsState {
     panelMode: 'floating' | 'cover';
     /** Experimental: choosing a tag turns off the tags that exclude it (short hair / long hair). */
     exclusiveTags?: boolean;
+    /** off · disable (turn the excluded tags off) · together (keep both, a run uses at most one). */
+    exclusiveMode?: 'off' | 'disable' | 'together';
     /** Recognized Danbooru tags are written with spaces (true) or canonical underscores (false). */
     preferPromptSpaces: boolean;
 }

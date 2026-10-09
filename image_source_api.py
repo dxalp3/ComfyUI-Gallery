@@ -104,6 +104,43 @@ def import_file(source, input_root):
 
 
 HASH_CACHE = {}
+SIZE_CACHE = {}
+INPUT_IMAGE_TYPES = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".tiff", ".tif", ".avif"}
+
+
+def list_input_images(input_root, limit=5000):
+    """Images in ComfyUI's input folder (what Load Image lists), newest first, for the Image Source picker.
+
+    The gallery's own copies (gallery_sources/, hydrus/) are left out: they are already sources somewhere.
+    """
+    base = Path(input_root).resolve(strict=True)
+    found = []
+    for directory, folders, files in os.walk(base):
+        folders[:] = [name for name in folders if not name.startswith(".") and not (Path(directory) == base and name in ("gallery_sources", "hydrus"))]
+        for name in files:
+            path = Path(directory) / name
+            if name.startswith(".") or path.suffix.lower() not in INPUT_IMAGE_TYPES:
+                continue
+            try:
+                stamp = file_fingerprint(path)
+            except OSError:
+                continue
+            found.append((stamp, path))
+    found.sort(key=lambda item: item[0][1], reverse=True)
+    items = []
+    for stamp, path in found[:limit]:
+        size = SIZE_CACHE.get(str(path))
+        if not size or size[0] != stamp:
+            try:
+                with Image.open(path) as image:
+                    size = (stamp, image.size)
+            except (OSError, ValueError, Image.DecompressionBombError):
+                size = (stamp, None)
+            if len(SIZE_CACHE) > 50000: SIZE_CACHE.clear()
+            SIZE_CACHE[str(path)] = size
+        items.append({"name": path.relative_to(base).as_posix(), "modified": stamp[1] / 1e9, "bytes": stamp[0],
+                      **({"width": size[1][0], "height": size[1][1]} if size[1] else {})})
+    return {"images": items, "total": len(found)}
 
 
 def local_hashes(gallery_root, urls):
@@ -154,6 +191,8 @@ def register_source_routes(routes, get_gallery_root, get_input_root):
             async with workers:
                 if action == "hashes":
                     return web.json_response(await asyncio.to_thread(local_hashes, get_gallery_root(), data.get("urls")))
+                if action == "inputs":
+                    return web.json_response(await asyncio.to_thread(list_input_images, get_input_root()))
                 if action == "input":
                     return web.json_response(await asyncio.to_thread(import_input_image, get_input_root(), data.get("name")))
                 if action == "local":
@@ -174,6 +213,10 @@ def register_source_routes(routes, get_gallery_root, get_input_root):
     @routes.post("/Gallery/source/local")
     async def import_local(request):
         return await handle(request, "local")
+
+    @routes.post("/Gallery/source/inputs")
+    async def input_images(request):
+        return await handle(request, "inputs")
 
     @routes.post("/Gallery/source/input")
     async def import_input(request):

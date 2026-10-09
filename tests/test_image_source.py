@@ -14,7 +14,7 @@ from PIL import Image
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from image_source import (GalleryImageSource, ImageSourceError, parse_manifest,
                           plan_composition, render_batch, render_composition, resolve_input, source_prompts)
-from image_source_api import import_input_image, import_local_image, register_source_routes
+from image_source_api import import_input_image, import_local_image, list_input_images, register_source_routes
 from gallery_app import register_gallery_app_routes
 
 
@@ -44,6 +44,14 @@ class CompositionTests(unittest.TestCase):
         self.assertEqual([frame.size for frame in frames], [(2, 3), (2, 3)])
         self.assertEqual([frame.mode for frame in frames], ['RGB', 'RGB'])
         self.assertEqual(frames[1].getpixel((1, 1)), (0, 0, 255))
+
+    def test_input_folder_listing_skips_gallery_copies_and_reports_sizes(self):
+        (self.root / 'gallery_sources').mkdir()
+        Image.new('RGB', (3, 3), 'red').save(self.root / 'gallery_sources' / 'copy.png')
+        (self.root / 'notes.txt').write_text('x')
+        listed = {item['name']: item for item in list_input_images(self.root)['images']}
+        self.assertEqual(set(listed), {'red.png', 'blue.png'})
+        self.assertEqual((listed['blue.png']['width'], listed['blue.png']['height']), (2, 5))
 
     def test_input_folder_images_become_sources_and_cannot_escape_it(self):
         (self.root / 'sub').mkdir()

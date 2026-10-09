@@ -40,7 +40,7 @@ function bridgeFixture() {
         comfyClass: 'GalleryImageSource', widgets: [{ name: 'sources', type: 'customtext', value: JSON.stringify(geometry.emptyImageSourceManifest()) }],
         addWidget(type, name, value, callback, options) { this.widgets.push({ type, name, value, callback, options }); },
     }; } } };
-    const bridge = compile('ImageSourceBridge', { window, CustomEvent: class { constructor(type, detail) { this.type=type;this.detail=detail; } } }, { './ComfyAppApi': { getComfyApp: () => app, STANDALONE: false }, './ImageSourceGeometry': geometry });
+    const bridge = compile('ImageSourceBridge', { window, CustomEvent: class { constructor(type, detail) { this.type=type;this.detail=detail; } } }, { './ComfyAppApi': { getComfyApp: () => app, STANDALONE: false }, './ImageSourceGeometry': geometry, './NodeWidgets': compile('NodeWidgets') });
     return { bridge, graph, app };
 }
 test('append creates one dedicated node and keeps serialized crop/layout across later appends', async () => {

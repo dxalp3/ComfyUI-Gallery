@@ -43,9 +43,14 @@ Every edit is compiled into one prompt string, so the node still works as a norm
   one `{a|}` chip per tag), × on a part removes it, + adds parts (with suggestions; `a | b` or `a OR b` adds several options).
   Clicking a chip opens its remaining settings (weight, on/off, split, move). Plain tags get the same kinds in that editor.
   Switching kinds keeps the tags: a chip never turns into one comma-separated option.
-- **Exclusive tags** (experimental gallery setting): adding or switching on a single tag turns off the single tags that
-  exclude it (long hair turns off short hair, 1girl turns off 2girls), with a note under the boxes. The sets are a small
-  curated list (`TagConflicts.ts`); Danbooru's wiki groups only list related tags, not exclusive ones.
+- **Exclusive tags** (experimental gallery setting, with an editable list of tag sets):
+  - *Turn off*: adding or switching on a single tag turns off the single tags that exclude it (long hair turns off
+    short hair, 1girl turns off 2girls), with a note under the boxes. Palette picks behave the same.
+  - *Never together*: conflicting tags can all be added. Optional ones (`{long hair|}`, `{short hair|}`) are sent as one
+    group, `{long hair|short hair|}`, so each run uses at most one; the boxes keep them as separate chips. Tags that are
+    always used cannot be resolved and are pointed out under the boxes.
+  Danbooru's wiki groups only list related tags, not exclusive ones, so the sets are a list of their own
+  (`data/exclusive-tags.json`, edited copy per ComfyUI user).
 - Shift/Ctrl-click several chips to combine them into one grouped chip.
 - The input at the bottom creates a new box.
 - Click a chip to edit its text, weight, brackets, "or nothing" and on/off state.

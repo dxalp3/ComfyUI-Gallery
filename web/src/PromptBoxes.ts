@@ -122,12 +122,47 @@ export function compileChip(chip: Chip): string {
 }
 
 /** The prompt string stored in the node. The source box becomes SOURCE_MARKER at its position. */
-export function compileBoxes(state: BoxState): string {
+export type Conflicts = (a: string, b: string) => boolean;
+
+/**
+ * "Never together" (exclusive tags): single optional tags that exclude each other — `{long hair|}` and
+ * `{short hair|}` — are groups of chip ids that compile into one optional-alternatives chip at the first one's
+ * place, `{long hair|short hair|}`, so a run uses one of them or neither, never both.
+ */
+export function neverTogether(state: BoxState, conflicts: Conflicts): string[][] {
+    const singles: { id: string; tag: string }[] = [];
+    for (const box of state.boxes) if (box.kind === 'group' && box.enabled) for (const chip of box.chips) if (chip.enabled && addModeOf(chip) === 'each') singles.push({ id: chip.id, tag: chipTerms(chip)[0] });
+    const group = new Map<string, string>();
+    const find = (id: string): string => { const parent = group.get(id) ?? id; return parent === id ? id : find(parent); };
+    singles.forEach((a, i) => singles.slice(i + 1).forEach(b => { if (conflicts(a.tag, b.tag)) group.set(find(b.id), find(a.id)); }));
+    const sets = new Map<string, string[]>();
+    for (const item of singles) { const key = find(item.id); sets.set(key, [...(sets.get(key) || []), item.id]); }
+    return [...sets.values()].filter(ids => ids.length > 1);
+}
+
+/** Plain (always used) tags that exclude each other: these cannot be resolved, only reported. */
+export function alwaysTogether(state: BoxState, conflicts: Conflicts): [string, string][] {
+    const tags: string[] = [];
+    for (const box of state.boxes) if (box.kind === 'group' && box.enabled) for (const chip of box.chips) if (chip.enabled && chip.kind === 'tag') tags.push(chipTerms(chip)[0] || chip.text);
+    return tags.flatMap((a, i) => tags.slice(i + 1).filter(b => conflicts(a, b)).map(b => [a, b] as [string, string]));
+}
+
+/** The prompt string stored in the node. The source box becomes SOURCE_MARKER at its position. With `conflicts`, see neverTogether. */
+export function compileBoxes(state: BoxState, conflicts?: Conflicts): string {
+    const merged = new Map<string, string>(), skipped = new Set<string>();
+    if (conflicts) {
+        const chips = new Map(state.boxes.flatMap(box => box.kind === 'group' ? box.chips.map(chip => [chip.id, chip] as const) : []));
+        for (const ids of neverTogether(state, conflicts)) {
+            const options = ids.map(id => { const chip = chips.get(id)!; return withWeight(chipTerms(chip)[0], chip.weight); });
+            merged.set(ids[0], '{' + options.join('|') + '|}');
+            ids.slice(1).forEach(id => skipped.add(id));
+        }
+    }
     const parts: string[] = [];
     for (const box of state.boxes) {
         if (!box.enabled) continue;
         if (box.kind === 'source') parts.push(sourceMarker(box.excluded));
-        else for (const chip of box.chips) { const compiled = compileChip(chip); if (compiled) parts.push(compiled); }
+        else for (const chip of box.chips) { if (skipped.has(chip.id)) continue; const compiled = merged.get(chip.id) ?? compileChip(chip); if (compiled) parts.push(compiled); }
     }
     return parts.join(', ');
 }
@@ -171,8 +206,8 @@ export function stateFromText(text: string, mode = 'after', hasSource = true): B
 }
 
 /** Keep the boxes unless the stored text no longer matches them (changed by an API call or another extension). */
-export function reconcileText(state: BoxState, text: string, mode: string, hasSource: boolean): BoxState {
-    return compileBoxes(state) === text ? state : stateFromText(text, mode, hasSource);
+export function reconcileText(state: BoxState, text: string, mode: string, hasSource: boolean, conflicts?: Conflicts): BoxState {
+    return compileBoxes(state, conflicts) === text || compileBoxes(state) === text ? state : stateFromText(text, mode, hasSource);
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
