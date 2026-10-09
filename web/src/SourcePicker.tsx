@@ -1,118 +1,177 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Button, Empty, Input, Segmented, Space, Tooltip, Typography, message } from 'antd';
-import { AppstoreOutlined, CheckOutlined, CloseOutlined, SortAscendingOutlined, SortDescendingOutlined, UnorderedListOutlined, UploadOutlined } from '@ant-design/icons';
-import { FloatingPanel } from './FloatingPanel';
-import { BASE_PATH, BASE_Z_INDEX } from './ComfyAppApi';
-import { useGalleryContext } from './GalleryContext';
-import { addToNode, comfyFetch, readSourceManifest, saveSourceManifest, sourceFromInput, sourceRequest, SOURCE_PICKER_EVENT, uploadImages } from './ImageSourceBridge';
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { createPortal } from 'react-dom';
+import { getComfyApp } from './ComfyAppApi';
+import { imageOrigin, ORIGIN_STYLE, removeSourceImage, type ImageSourceImage } from './ImageSourceGeometry';
+import { filterSourceHistory, sourcePickerPlacement, type HistoryTab } from './SourceHistory';
+import { addToNode, readSourceHistory, readSourceManifest, saveSourceManifest, SOURCE_PICKER_EVENT, uploadImages, type SourcePickerRequest } from './ImageSourceBridge';
 
-/** Open the picker for one Gallery Image Source node. */
-export const openSourcePicker = (node: any) => window.dispatchEvent(new CustomEvent(SOURCE_PICKER_EVENT, { detail: node }));
+export { openSourcePicker } from './ImageSourceBridge';
 
-type Tab = 'all' | 'imported' | 'generated' | 'node';
-type Item = { key: string; kind: 'input' | 'gallery' | 'node'; name: string; thumb: string; time: number; width?: number; height?: number; url?: string; input?: string; index?: number };
-type InputImage = { name: string; modified: number; width?: number; height?: number };
-const sourceThumb = (name: string) => `${BASE_PATH}/Gallery/source/thumbnail?url=${encodeURIComponent('/static_gallery/' + name)}`;
+const styles = `
+.cg-source-picker { --sp-bg:var(--comfy-menu-bg,#242424); --sp-field:var(--comfy-input-bg,#171717); --sp-text:var(--input-text,#ddd); --sp-border:var(--border-color,#555); --sp-accent:var(--p-primary-color,#70a9ff); position:fixed;z-index:3100;box-sizing:border-box;background:var(--sp-bg);color:var(--sp-text);border:1px solid var(--sp-border);border-radius:8px;box-shadow:0 8px 28px #0007;font:12px system-ui,sans-serif;display:flex;flex-direction:column;overflow:visible; }
+.cg-source-picker * { box-sizing:border-box; }
+.cg-source-picker button,.cg-source-picker input,.cg-source-picker select { font:inherit;color:inherit;border:1px solid var(--sp-border);background:var(--sp-field);border-radius:4px; }
+.cg-source-picker button { cursor:pointer;padding:5px 8px; }
+.cg-source-picker button:hover { background:var(--comfy-menu-secondary-bg,var(--sp-bg));border-color:var(--sp-accent); }
+.cg-source-picker button:focus-visible,.cg-source-picker input:focus-visible,.cg-source-picker select:focus-visible { outline:2px solid var(--sp-accent);outline-offset:1px; }
+.cg-source-picker button:disabled { opacity:.5;cursor:default; }
+.cg-source-picker header { display:flex;align-items:center;gap:8px;padding:9px 10px 5px;flex:none; }
+.cg-source-picker header strong { flex:1;font-size:12px; }
+.cg-source-picker .sp-tabs { display:flex;gap:3px;padding:5px 10px;flex:none; }
+.cg-source-picker .sp-tabs button { flex:1;border-color:transparent;background:transparent;white-space:nowrap;padding:6px 2px; }
+.cg-source-picker .sp-tabs button[aria-selected=true] { background:var(--sp-field);border-color:var(--sp-border);box-shadow:inset 0 -2px var(--sp-accent); }
+.cg-source-picker .sp-tools { display:flex;gap:5px;padding:4px 10px 9px;flex:none; }
+.cg-source-picker .sp-tools input { min-width:0;flex:1;padding:6px 8px; }
+.cg-source-picker .sp-scroll { overflow:auto;min-height:0;padding:2px 10px 10px;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:var(--sp-border) var(--sp-field); }
+.cg-source-picker .sp-grid { display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px; }
+.cg-source-picker .sp-tile { position:relative;min-width:0; }
+.cg-source-picker .sp-image { display:block;width:100%;padding:0;overflow:hidden;position:relative;aspect-ratio:1;background:var(--sp-field); }
+.cg-source-picker .sp-image img { display:block;width:100%;height:100%;object-fit:cover; }
+.cg-source-picker .sp-image[aria-pressed=true] { outline:2px solid var(--sp-accent);outline-offset:2px; }
+.cg-source-picker .sp-badge { position:absolute;bottom:0;left:0;padding:1px 4px;color:#111;font-size:9px; }
+.cg-source-picker .sp-check { position:absolute;top:3px;left:3px;background:var(--sp-bg);border-radius:3px;padding:0 3px; }
+.cg-source-picker .sp-remove { position:absolute;top:3px;right:3px;padding:0 4px;line-height:18px;opacity:.85; }
+.cg-source-picker .sp-name { display:block;margin-top:4px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-size:11px; }
+.cg-source-picker .sp-list { display:flex;flex-direction:column;gap:7px; }
+.cg-source-picker .sp-list .sp-tile { display:flex;align-items:center;gap:8px; }
+.cg-source-picker .sp-list .sp-image { flex:none;width:52px;height:52px; }
+.cg-source-picker .sp-list .sp-name { flex:1;margin:0;padding-right:22px; }
+.cg-source-picker footer { padding:8px 10px;border-top:1px solid var(--sp-border);display:flex;align-items:center;gap:8px;flex:none; }
+.cg-source-picker footer span { flex:1;opacity:.65;font-size:11px; }
+.cg-source-picker .sp-empty { padding:24px 10px;text-align:center;opacity:.7; }
+.cg-source-picker .sp-error { padding:4px 10px 8px;color:#ff8a80; }
+.cg-source-picker .sp-arrow { position:absolute;width:10px;height:10px;background:var(--sp-bg);transform:rotate(45deg);pointer-events:none; }
+`;
 
-/**
- * The image picker of a Gallery Image Source node, laid out like Load Image's: All / Imported (ComfyUI's input
- * folder) / Generated (the gallery) / In this node, a search box, sort order, grid or list, and Upload.
- * Clicking an image adds it to the node; in "In this node" it picks the output image or removes one.
- */
+/** A node-local popover. No gallery index, input-folder scan, or gallery theme is involved. */
 export function SourcePicker() {
-    const gallery = useGalleryContext();
-    const [node, setNode] = useState<any>();
-    const [tab, setTab] = useState<Tab>('all');
+    const [request, setRequest] = useState<SourcePickerRequest>();
+    const [placement, setPlacement] = useState<ReturnType<typeof sourcePickerPlacement>>();
+    const [tab, setTab] = useState<HistoryTab>('all');
     const [query, setQuery] = useState('');
     const [newest, setNewest] = useState(true);
     const [grid, setGrid] = useState(true);
-    const [inputs, setInputs] = useState<InputImage[]>([]);
-    const [busy, setBusy] = useState('');
     const [error, setError] = useState('');
-    const [added, setAdded] = useState<string[]>([]);
+    const [busy, setBusy] = useState(false);
     const [revision, setRevision] = useState(0);
-    const [shown, setShown] = useState(120);
-    const file = useRef<HTMLInputElement>(null);
-    const root = gallery.settings.relativePath;
-    const loadInputs = () => comfyFetch('/Gallery/source/inputs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
-        .then(response => response.json()).then(data => { if (data.error) throw new Error(data.error); setInputs(data.images); }).catch(reason => setError(String(reason instanceof Error ? reason.message : reason)));
+    const root = useRef<HTMLDivElement>(null), search = useRef<HTMLInputElement>(null), file = useRef<HTMLInputElement>(null);
+    const current = useRef(request); current.current = request;
+    const close = (focus = false) => {
+        const previous = current.current;
+        setRequest(undefined); current.current = undefined;
+        if (focus) requestAnimationFrame(() => {
+            if (previous?.trigger?.isConnected) previous.trigger.focus({ preventScroll: true });
+            else previous?.node.__galleryFocusPreview?.();
+        });
+    };
     useEffect(() => {
-        const open = (event: Event) => { setNode((event as CustomEvent).detail); setAdded([]); setError(''); setQuery(''); setShown(120); void loadInputs(); if (!gallery.data) void gallery.runAsync?.().catch(() => undefined); };
+        const open = (event: Event) => {
+            const detail = (event as CustomEvent<SourcePickerRequest>).detail;
+            if (!detail?.node || typeof detail.anchor !== 'function') return;
+            if (current.current?.node === detail.node) { close(); return; }
+            setPlacement(undefined); setError(''); setQuery(''); setTab('all'); setRequest(detail);
+        };
         const changed = () => setRevision(value => value + 1);
         window.addEventListener(SOURCE_PICKER_EVENT, open);
         window.addEventListener('gallery-source-changed', changed);
         return () => { window.removeEventListener(SOURCE_PICKER_EVENT, open); window.removeEventListener('gallery-source-changed', changed); };
     }, []);
-    useEffect(() => setShown(120), [tab, query, newest]);
-    const manifest = useMemo(() => { try { return node ? readSourceManifest(node) : undefined; } catch { return undefined; } }, [node, revision]);
-    const items = useMemo(() => {
-        const imported: Item[] = inputs.map(image => ({ key: 'input:' + image.name, kind: 'input', name: image.name, thumb: sourceThumb(image.name), time: image.modified, width: image.width, height: image.height, input: image.name }));
-        const generated: Item[] = Object.values(gallery.data?.folders || {}).flatMap(folder => Object.values(folder)).filter(item => item.type === 'image').map(item => {
-            const [width, height] = (item.metadata?.fileinfo?.resolution || '').split('x').map(Number);
-            return { key: 'gallery:' + item.url, kind: 'gallery', name: item.name, thumb: `${BASE_PATH}/Gallery/thumbnail?url=${encodeURIComponent(item.url)}&v=${item.timestamp || 0}&root=${encodeURIComponent(root)}`, time: item.timestamp || 0, width: width || undefined, height: height || undefined, url: item.url };
-        });
-        const own: Item[] = (manifest?.images || []).map((image, index) => ({ key: 'node:' + index, kind: 'node', name: image.title || image.input_name, thumb: sourceThumb(image.input_name), time: -index, index }));
-        const list = tab === 'node' ? own : tab === 'imported' ? imported : tab === 'generated' ? generated : [...imported, ...generated];
-        const needle = query.trim().toLowerCase();
-        const found = needle ? list.filter(item => item.name.toLowerCase().includes(needle)) : list;
-        return tab === 'node' ? found : [...found].sort((a, b) => newest ? b.time - a.time : a.time - b.time);
-    }, [inputs, gallery.data, manifest, tab, query, newest, root]);
-    const run = async (label: string, action: () => Promise<void>) => { setBusy(label); setError(''); try { await action(); } catch (reason) { setError(String(reason instanceof Error ? reason.message : reason)); } finally { setBusy(''); } };
-    const pick = (item: Item) => run(item.key, async () => {
-        if (!node) return;
-        if (item.kind === 'node') { if (manifest?.layout === 'single') saveSourceManifest(node, { ...manifest, active_index: item.index! }); return; }
-        const image = item.kind === 'input' ? await sourceFromInput(item.input!) : await sourceRequest('/Gallery/source/local', { url: item.url });
-        await addToNode(node, [{ ...image, title: item.name.split('/').pop() }], [item.url]);
-        setAdded(old => [...old, item.key]);
-    });
-    const remove = (index: number) => { if (!node || !manifest) return; const images = manifest.images.filter((_, at) => at !== index); saveSourceManifest(node, { ...manifest, images, active_index: Math.min(manifest.active_index || 0, Math.max(0, images.length - 1)) }); };
-    const upload = (files: File[]) => run('upload', async () => {
-        if (!node || !files.length) return;
-        const count = await addToNode(node, await uploadImages(files));
-        message.success(`Uploaded and added ${count} image(s)`); void loadInputs();
-    });
-    const count = manifest?.images.length || 0;
-    const tile = (item: Item) => {
-        const active = item.kind === 'node' && manifest?.layout === 'single' && item.index === (manifest.active_index || 0);
-        const done = added.includes(item.key);
-        const size = item.width && item.height ? `${item.width} × ${item.height}` : '';
-        const label = item.kind === 'node' ? (manifest?.layout === 'single' ? 'Use as the output image' : item.name) : 'Add to this node';
-        const remover = item.kind === 'node' && <Button size="small" type="text" danger icon={<CloseOutlined />} aria-label={'Remove ' + item.name} title="Remove from this node" onClick={event => { event.stopPropagation(); remove(item.index!); }} />;
-        const picture = <div style={{ position: 'relative', width: grid ? '100%' : 56, aspectRatio: grid ? '1' : undefined, height: grid ? undefined : 56, flex: 'none', background: '#8882', borderRadius: 6, overflow: 'hidden', outline: active ? '2px solid #1677ff' : done ? '2px solid #52c41a' : undefined, outlineOffset: -2 }}>
-            <img loading="lazy" src={item.thumb} alt={item.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-            {(active || done) && <CheckOutlined style={{ position: 'absolute', top: 4, right: 4, color: '#fff', background: active ? '#1677ff' : '#52c41a', borderRadius: 8, padding: 2, fontSize: 11 }} />}
-            {busy === item.key && <div style={{ position: 'absolute', inset: 0, background: '#0008', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>adding…</div>}
-        </div>;
-        return <Tooltip key={item.key} title={label} mouseEnterDelay={.6}>
-            <div role="button" tabIndex={0} aria-label={label + ': ' + item.name} onClick={() => void pick(item)} onKeyDown={event => { if (event.key === 'Enter') void pick(item); }}
-                style={grid ? { cursor: 'pointer', minWidth: 0, textAlign: 'center' } : { cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10, padding: 4, borderRadius: 6 }}>
-                {grid && <Typography.Text type="secondary" style={{ fontSize: 11, display: 'block', height: 16 }}>{size}</Typography.Text>}
-                {picture}
-                <div style={{ minWidth: 0, flex: 1, display: 'flex', alignItems: 'center', gap: 2 }}>
-                    <Typography.Text style={{ fontSize: 11, display: 'block', overflowWrap: 'anywhere', lineHeight: 1.3, flex: 1, textAlign: grid ? 'center' : 'left' }}>{item.name.split('/').pop()}{!grid && size && <Typography.Text type="secondary" style={{ fontSize: 11, display: 'block' }}>{size}</Typography.Text>}</Typography.Text>
-                    {remover}
-                </div>
-            </div>
-        </Tooltip>;
+    useEffect(() => {
+        if (!request) return;
+        request.node.__galleryPickerOpen = true;
+        request.trigger?.setAttribute('aria-expanded', 'true');
+        request.node.__galleryRefreshPreview?.();
+        let frame = 0, last = '';
+        const update = () => {
+            const app = getComfyApp(), graph = app?.canvas?.graph || app?.graph;
+            const anchor = request.anchor();
+            if (!anchor || graph && !graph._nodes?.includes(request.node) || anchor.bottom <= 0 || anchor.top >= innerHeight || anchor.right <= 0 || anchor.left >= innerWidth) { close(); return; }
+            const next = sourcePickerPlacement(anchor, { width: innerWidth, height: innerHeight });
+            const serialized = JSON.stringify(next);
+            if (last !== serialized) { last = serialized; setPlacement(next); }
+            frame = requestAnimationFrame(update);
+        };
+        update();
+        const outside = (event: PointerEvent) => {
+            if (root.current?.contains(event.target as Node) || request.trigger?.contains(event.target as Node)) return;
+            const anchor = request.anchor();
+            if (anchor && event.clientX >= anchor.left && event.clientX <= anchor.right && event.clientY >= anchor.top && event.clientY <= anchor.bottom) return;
+            close();
+        };
+        const escape = (event: KeyboardEvent) => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close(true); } };
+        document.addEventListener('pointerdown', outside, true); document.addEventListener('keydown', escape, true);
+        return () => {
+            cancelAnimationFrame(frame); document.removeEventListener('pointerdown', outside, true); document.removeEventListener('keydown', escape, true);
+            request.node.__galleryPickerOpen = false; request.trigger?.setAttribute('aria-expanded', 'false'); request.node.__galleryRefreshPreview?.();
+        };
+    }, [request]);
+    useEffect(() => { if (request && placement) search.current?.focus({ preventScroll: true }); }, [request, !!placement]);
+    const manifest = useMemo(() => { try { return request ? readSourceManifest(request.node) : undefined; } catch { return undefined; } }, [request, revision]);
+    const history = useMemo(() => { try { return request ? readSourceHistory(request.node) : []; } catch { return []; } }, [request, revision]);
+    if (!request || !placement || !manifest) return null;
+    const items = filterSourceHistory(history, tab, query, newest);
+    const counts = { all: history.length, imported: filterSourceHistory(history, 'imported', '', false).length, generated: filterSourceHistory(history, 'generated', '', false).length };
+    const node = request.node;
+    const pick = (image: ImageSourceImage) => {
+        setError('');
+        try {
+            let state = readSourceManifest(node);
+            let index = state.images.findIndex(item => item.input_name === image.input_name);
+            if (index < 0) {
+                if (state.images.length >= 32) throw new Error('This node already holds 32 images. Remove one before restoring another.');
+                index = state.images.length;
+                state = { ...state, images: [...state.images, image] };
+            }
+            saveSourceManifest(node, state.layout === 'single' ? { ...state, active_index: index } : state);
+            if (state.layout !== 'single') node.__galleryFocusImage?.(index);
+            if (current.current?.node === node) close(true);
+        } catch (reason) { setError(String(reason instanceof Error ? reason.message : reason)); }
     };
-    return <FloatingPanel panelKey="source-picker" title={`Gallery Image Source${node ? ' #' + node.id : ''} · ${count} image${count === 1 ? '' : 's'}`} open={!!node} onCancel={() => setNode(undefined)} width={420} zIndex={BASE_Z_INDEX + 30} footer={null}
-        initialSize={{ width: 420, height: Math.min(innerHeight - 80, 640) }}>
-        <Space style={{ width: '100%', justifyContent: 'space-between', marginBottom: 8 }} wrap>
-            <Segmented size="small" value={tab} onChange={value => setTab(value as Tab)} options={[{ value: 'all', label: 'All' }, { value: 'imported', label: 'Imported' }, { value: 'generated', label: 'Generated' }, { value: 'node', label: `In this node (${count})` }]} />
-            <Button size="small" icon={<UploadOutlined />} loading={busy === 'upload'} onClick={() => file.current?.click()}>Upload</Button>
+    const upload = async (files: File[]) => {
+        if (!files.length) return;
+        setBusy(true); setError('');
+        try { await addToNode(node, await uploadImages(files)); }
+        catch (reason) { setError(String(reason instanceof Error ? reason.message : reason)); }
+        finally { setBusy(false); }
+    };
+    const position: CSSProperties = { left: placement.left, top: placement.top, bottom: placement.bottom, width: placement.width, maxHeight: placement.maxHeight };
+    return createPortal(<div ref={root} role="dialog" aria-modal="false" aria-label="This node's image history" className="cg-source-picker" data-placement={placement.side} style={position}
+        onPointerDown={event => event.stopPropagation()} onWheel={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()}>
+        <style>{styles}</style>
+        <span className="sp-arrow" style={{ left: placement.arrow - 5, ...(placement.side === 'below' ? { top: -6, borderLeft: '1px solid var(--sp-border)', borderTop: '1px solid var(--sp-border)' } : { bottom: -6, borderRight: '1px solid var(--sp-border)', borderBottom: '1px solid var(--sp-border)' }) }} />
+        <header><strong>Image history{node.id != null ? ` · #${node.id}` : ''}</strong><button aria-label="Close image picker" onClick={() => close(true)}>×</button></header>
+        <div className="sp-tabs" role="tablist" aria-label="History source">
+            {(['all', 'imported', 'generated'] as const).map(key => <button key={key} role="tab" aria-selected={key === tab} onClick={() => setTab(key)}>{key === 'all' ? 'All' : key === 'imported' ? 'Imported' : 'Generated'} <small>{counts[key]}</small></button>)}
+        </div>
+        <div className="sp-tools">
+            <input ref={search} type="search" placeholder="Search this node…" aria-label="Search this node's history" value={query} onChange={event => setQuery(event.target.value)} />
+            <button title={newest ? 'Newest first' : 'Oldest first'} aria-label={newest ? 'Newest first' : 'Oldest first'} onClick={() => setNewest(value => !value)}>{newest ? '↓' : '↑'}</button>
+            <button title={grid ? 'Show list' : 'Show grid'} aria-label={grid ? 'Show list' : 'Show grid'} onClick={() => setGrid(value => !value)}>{grid ? '☰' : '▦'}</button>
+        </div>
+        {error && <div className="sp-error" role="alert">{error}</div>}
+        <div className="sp-scroll">
+            {!items.length ? <div className="sp-empty">{query ? 'No matching images in this node.' : history.length ? 'No images of this type in this node.' : 'Images added to this node will appear here.'}</div> :
+                <div className={grid ? 'sp-grid' : 'sp-list'}>{items.map(image => {
+                    const index = manifest.images.findIndex(item => item.input_name === image.input_name);
+                    const selected = index >= 0 && index === (manifest.layout === 'single' ? manifest.active_index || 0 : node.__galleryViewIndex || 0);
+                    const origin = imageOrigin(image), look = ORIGIN_STYLE[origin], name = image.title || image.input_name.split('/').pop()!;
+                    return <div className="sp-tile" key={image.input_name}>
+                        <button className="sp-image" disabled={busy} aria-label={(index < 0 ? 'Restore ' : 'Select ') + name} aria-pressed={selected}
+                            title={(index < 0 ? 'Restore from history: ' : 'Select image: ') + image.input_name} onClick={() => void pick(image)} style={{ borderColor: look.color, borderWidth: origin === 'external' ? 3 : 2 }}>
+                            <img loading="lazy" src={'/Gallery/source/thumbnail?url=' + encodeURIComponent('/static_gallery/' + image.input_name)} alt="" />
+                            <span className="sp-badge" style={{ background: look.color }}>{look.label}</span>
+                            {index >= 0 && <span className="sp-check">{selected ? '✓' : '•'}</span>}
+                        </button>
+                        <span className="sp-name" title={name}>{name}</span>
+                        {index >= 0 && <button className="sp-remove" disabled={busy} title="Remove from node (keep in history)" aria-label={'Remove ' + name + ' from node'} onClick={() => {
+                            try { const state = readSourceManifest(node); const at = state.images.findIndex(item => item.input_name === image.input_name); saveSourceManifest(node, removeSourceImage(state, at)); }
+                            catch (reason) { setError(String(reason)); }
+                        }}>×</button>}
+                    </div>;
+                })}</div>}
+        </div>
+        <footer><span>{manifest.images.length} in node · {history.length} in history</span><button disabled={busy} onClick={() => file.current?.click()}>{busy ? 'Adding…' : 'Upload'}</button>
             <input ref={file} type="file" accept="image/*" multiple hidden onChange={event => { const files = [...(event.target.files || [])]; event.target.value = ''; void upload(files); }} />
-        </Space>
-        <Space.Compact style={{ width: '100%', marginBottom: 8 }}>
-            <Input allowClear placeholder="Search…" aria-label="Search images" value={query} onChange={event => setQuery(event.target.value)} />
-            <Button aria-label={newest ? 'Newest first' : 'Oldest first'} title={newest ? 'Newest first' : 'Oldest first'} icon={newest ? <SortDescendingOutlined /> : <SortAscendingOutlined />} disabled={tab === 'node'} onClick={() => setNewest(value => !value)} />
-            <Button aria-label="List view" type={grid ? 'default' : 'primary'} icon={<UnorderedListOutlined />} onClick={() => setGrid(false)} />
-            <Button aria-label="Grid view" type={grid ? 'primary' : 'default'} icon={<AppstoreOutlined />} onClick={() => setGrid(true)} />
-        </Space.Compact>
-        {error && <Alert type="error" showIcon closable message={error} onClose={() => setError('')} style={{ marginBottom: 8 }} />}
-        {!items.length
-            ? <Empty description={tab === 'node' ? 'No images in this node yet.' : tab === 'generated' && !gallery.data ? 'Loading the gallery…' : 'No images found.'} />
-            : <div style={grid ? { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(84px, 1fr))', gap: 8 } : { display: 'flex', flexDirection: 'column', gap: 2 }}>{items.slice(0, shown).map(tile)}</div>}
-        {items.length > shown && <Button block style={{ marginTop: 8 }} onClick={() => setShown(value => value + 120)}>Show more ({(items.length - shown).toLocaleString()} left)</Button>}
-        <Typography.Paragraph type="secondary" style={{ marginTop: 8, marginBottom: 0, fontSize: 12 }}>Click an image to add it{manifest?.layout === 'single' ? '; in “In this node”, click one to make it the output image' : ''}. Image files and gallery images can also be dropped on the node, or a Load Image node dropped onto it.</Typography.Paragraph>
-    </FloatingPanel>;
+        </footer>
+    </div>, document.body);
 }

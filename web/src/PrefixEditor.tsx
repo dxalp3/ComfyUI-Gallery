@@ -1,3 +1,4 @@
+import type { PrefixDraft } from './UnsavedPrefix';
 import { useState, type Dispatch, type SetStateAction } from 'react';
 import { Button, Input, Modal, Select, Space, Tabs, Typography } from 'antd';
 import { TermsEditor } from './PromptBoxEditor';
@@ -14,7 +15,8 @@ import { BASE_Z_INDEX } from './ComfyAppApi';
 /** Suggestions for the term editors: saved prefixes, library tags and the Danbooru dictionary. */
 const suggest = makeSuggest({ loadLibrary: loadPrefixes, expandPrefix });
 
-export function PrefixEditor({ shared, seed, active, name, setName, positive, setPositive, negative, setNegative, saving, onSave, onDelete, onAppendToNode, onOpenLibrarySearch, onOpenPrompts, onUnpair }: {
+export function PrefixEditor({ onLoad, shared, seed, active, name, setName, positive, setPositive, negative, setNegative, saving, onSave, onDelete, onAppendToNode, onOpenLibrarySearch, onOpenPrompts, onUnpair }: {
+    onLoad: (draft: PrefixDraft) => void;
     shared: SharedLibrary; seed: PrefixSeed; active: boolean;
     name: string; setName: (value: string) => void;
     positive: string[]; setPositive: Dispatch<SetStateAction<string[]>>;
@@ -29,6 +31,7 @@ export function PrefixEditor({ shared, seed, active, name, setName, positive, se
     const load = (id?: string) => {
         const prefix = shared.prefixes.find(value => value.id === id);
         if (!prefix) return;
+        onLoad({ name: prefix.name, positive: expandPrefix(shared, '@' + prefix.name), negative: prefix.negative_terms || [] });
         setName(prefix.name); setPositive(expandPrefix(shared, '@' + prefix.name)); setNegative(prefix.negative_terms || []);
     };
     const add = (side: 'positive' | 'negative' | 'hydrus') => (side === 'negative' ? setNegative : setPositive)(old => Array.from(new Set([...old, ...(seed[side] || [])])));
@@ -39,7 +42,7 @@ export function PrefixEditor({ shared, seed, active, name, setName, positive, se
             <Select aria-label="Prefix polarity filter" value={polarity} onChange={setPolarity} options={POLARITY_OPTIONS} style={{ width: 190 }} />
             <Select showSearch optionFilterProp="label" aria-label="Existing prefix" placeholder="Load an existing prefix…" value={existing?.id} onChange={load} style={{ minWidth: 240 }}
                 options={shared.prefixes.filter(prefix => matchesPolarity(prefix, polarity)).map(prefix => ({ value: prefix.id, label: prefix.name + ' · ' + sidesLabel(prefix) }))} notFoundContent={shared.prefixes.length ? 'No prefix matches this filter' : 'No saved prefixes yet'} />
-            <Button onClick={() => { setName(''); setPositive([]); setNegative([]); }}>New prefix</Button>
+            <Button onClick={() => { onLoad({ name: '', positive: [], negative: [] }); setName(''); setPositive([]); setNegative([]); }}>New prefix</Button>
             <Input aria-label="Prefix name" placeholder="Prefix name (an existing name updates it)" value={name} onChange={event => setName(event.target.value)} style={{ width: 280 }} />
             <Button type="primary" loading={saving} disabled={!name.trim() || (!positive.length && !negative.length)} onClick={onSave}>Save prefix</Button>
             {existing && onAppendToNode && <Button onClick={() => onAppendToNode(existing.id)}>Append to node</Button>}

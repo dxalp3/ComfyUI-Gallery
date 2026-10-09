@@ -1,5 +1,6 @@
+import { mergeSourceHistory, sourceStripRange, type PickerRect } from './SourceHistory';
 import { getComfyApp, STANDALONE } from './ComfyAppApi';
-import { emptyImageSourceManifest, mergePrompt } from './ImageSourceGeometry';
+import { imageOrigin, ORIGIN_STYLE, stampOrigin, removeSourceImage, sourceImageUrl, emptyImageSourceManifest, mergePrompt } from './ImageSourceGeometry';
 import type { ImageSourceImage, ImageSourceManifest, PromptApply } from './ImageSourceGeometry';
 import { loadPrefixes, type SharedLibrary } from './PrefixLibrary';
 import { hideWidget } from './NodeWidgets';
@@ -8,6 +9,13 @@ export const SOURCE_EDITOR_EVENT = 'gallery-source-editor';
 export const SOURCE_BROWSE_EVENT = 'gallery-source-browse';
 /** Opens the image picker (SourcePicker) for a node. */
 export const SOURCE_PICKER_EVENT = 'gallery-source-picker';
+export type SourcePickerRequest = { node: any; anchor: () => PickerRect | null; trigger?: HTMLElement };
+export function openSourcePicker(node: any, anchor?: () => PickerRect | null, trigger?: HTMLElement) {
+    window.dispatchEvent(new CustomEvent(SOURCE_PICKER_EVENT, { detail: { node, anchor: anchor || node.__galleryPickerAnchor, trigger } }));
+}
+export function readSourceHistory(node: any) {
+    return mergeSourceHistory(node.properties?.gallery_source_history, readSourceManifest(node).images);
+}
 let target: any;
 let sourceConstructor: any;
 export const registerSourceConstructor = (value: any) => { sourceConstructor = value; };
@@ -32,8 +40,10 @@ export function saveSourceManifest(node: any, manifest: ImageSourceManifest, rec
     if (!widget) throw new Error('Restart ComfyUI to register Gallery Image Source.');
     if (recordChange) graph.beforeChange?.();
     try {
+        const history = mergeSourceHistory(readSourceHistory(node), manifest.images);
         widget.value = JSON.stringify(manifest); widget.callback?.(widget.value);
         if (readSourceManifest(node).images.length !== manifest.images.length) throw new Error('ComfyUI did not retain the appended sources. Check this node’s sources input.');
+        node.properties ||= {}; node.properties.gallery_source_history = history;
         node.__galleryRefreshPreview?.(); window.dispatchEvent(new CustomEvent('gallery-source-changed')); node.setDirtyCanvas?.(true, true);
     }
     finally { if (recordChange) graph.afterChange?.(); }
@@ -74,12 +84,34 @@ export function installSourceWidgets(node: any) {
     const edit = node.addWidget('button', 'Edit images / crop / stitch', null, () => {
         target = node; window.dispatchEvent(new CustomEvent(SOURCE_EDITOR_EVENT, { detail: node }));
     }, { serialize: false });
-    // The picker (like Load Image's): ComfyUI's input folder, the gallery, and this node's images.
-    const pickButton = node.addWidget('button', 'Pick images…', null, () => { target = node; window.dispatchEvent(new CustomEvent(SOURCE_PICKER_EVENT, { detail: node })); }, { serialize: false });
-    if (pickButton) pickButton.serialize = false;
     const browse = node.addWidget('button', 'Browse / append from Gallery', null, () => {
         target = node; window.dispatchEvent(new CustomEvent(SOURCE_BROWSE_EVENT));
     }, { serialize: false });
+    // Put the node-local picker immediately above the preview; the gallery browser stays separate.
+    const pickButton = node.addWidget('button', 'Pick images ▾', null, (...args: any[]) => {
+        target = node;
+        const event = args.find(value => value && typeof value.clientX === 'number');
+        // Vue's WidgetButton invokes callback() without an event; its native button has focus.
+        const focused = document.activeElement instanceof HTMLElement ? document.activeElement.closest('button') : null;
+        const element = event?.target instanceof HTMLElement && event.target.tagName !== 'CANVAS' ? event.target.closest('button') || event.target
+            : focused && /Pick images/.test(focused.getAttribute('aria-label') || focused.textContent || '') ? focused : undefined;
+        const anchor = () => {
+            if (element?.isConnected) return element.getBoundingClientRect();
+            const canvas = getComfyApp()?.canvas;
+            const widgetY = pickButton?.y ?? pickButton?.last_y;
+            if (canvas?.canvas && Number.isFinite(widgetY)) {
+                const bounds = canvas.canvas.getBoundingClientRect(), scale = canvas.ds?.scale || 1, offset = canvas.ds?.offset || [0, 0];
+                const sx = bounds.width / (canvas.canvas.clientWidth || bounds.width), sy = bounds.height / (canvas.canvas.clientHeight || bounds.height);
+                const left = bounds.left + (node.pos[0] + offset[0] + 10) * scale * sx;
+                const top = bounds.top + (node.pos[1] + offset[1] + widgetY) * scale * sy;
+                const width = (node.size[0] - 20) * scale * sx, height = (pickButton.height || 20) * scale * sy;
+                return { left, top, right: left + width, bottom: top + height, width, height };
+            }
+            return node.__galleryPickerAnchor?.() || null;
+        };
+        openSourcePicker(node, anchor, element);
+    }, { serialize: false });
+    if (pickButton) pickButton.serialize = false;
     if (edit) edit.serialize = false;
     if (browse) browse.serialize = false;
     if (typeof document !== 'undefined' && node.addDOMWidget) {
@@ -89,9 +121,62 @@ export function installSourceWidgets(node: any) {
         preview.className = 'gallery-source-node-preview';
         preview.style.cssText = 'display:flex;flex-direction:column;gap:4px;width:100%;height:230px;overflow:hidden;color:var(--input-text,#ddd);background:var(--comfy-input-bg,#222);padding:4px;box-sizing:border-box;font:11px system-ui';
         let view = 0, note = '';
+        node.__galleryPickerAnchor = () => preview.isConnected ? (preview.querySelector<HTMLElement>('[data-picker-trigger]') || preview).getBoundingClientRect() : null;
+        const pickerTrigger = (element: HTMLElement) => {
+            element.dataset.pickerTrigger = 'true'; element.tabIndex = 0;
+            element.setAttribute('role', 'button'); element.setAttribute('aria-label', 'Pick images from this node');
+            element.setAttribute('aria-haspopup', 'dialog'); element.setAttribute('aria-expanded', String(!!node.__galleryPickerOpen));
+            element.onclick = event => { event.stopPropagation(); openSourcePicker(node, node.__galleryPickerAnchor, element); };
+            element.onkeydown = event => { if (event.target === element && ['Enter', ' '].includes(event.key)) { event.preventDefault(); event.stopPropagation(); openSourcePicker(node, node.__galleryPickerAnchor, element); } };
+        };
         const thumb = (image: ImageSourceImage) => '/Gallery/source/thumbnail?url=' + encodeURIComponent('/static_gallery/' + image.input_name);
         const button = (text: string, label: string, onClick: () => void, css = '') => { const item = document.createElement('button'); item.type = 'button'; item.textContent = text; item.title = label; item.setAttribute('aria-label', label); item.onclick = event => { event.stopPropagation(); onClick(); }; item.style.cssText = 'border:0;border-radius:4px;background:#000a;color:#fff;cursor:pointer;' + css; return item; };
+        let dismissMenu: (() => void) | undefined;
+        let dismissViewer: (() => void) | undefined;
+        const badge = (element: HTMLElement, image: ImageSourceImage) => {
+            const origin = imageOrigin(image), look = ORIGIN_STYLE[origin];
+            element.style.position = 'relative';
+            element.style.border = (origin === 'external' ? '3px' : '2px') + ' solid ' + look.color;
+            element.style.boxSizing = 'border-box';
+            const label = document.createElement('span'); label.textContent = look.label;
+            label.style.cssText = 'position:absolute;top:0;left:0;padding:1px 3px;font:9px system-ui;color:#111;background:' + look.color;
+            element.append(label);
+        };
+        const openViewer = (image: ImageSourceImage) => {
+            dismissViewer?.();
+            const dialog = document.createElement('dialog'); dialog.setAttribute('aria-label', 'Image source viewer');
+            dialog.style.cssText = 'max-width:95vw;max-height:95vh;padding:12px;background:#202020;color:white;border:1px solid #888;border-radius:8px';
+            const img = document.createElement('img'); img.src = sourceImageUrl(image.input_name); img.alt = image.title || image.input_name;
+            img.style.cssText = 'display:block;max-width:90vw;max-height:80vh;object-fit:contain';
+            const close = () => { dialog.remove(); dismissViewer = undefined; };
+            dialog.append(button('Close', 'Close viewer', close), img);
+            dialog.addEventListener('cancel', event => { event.preventDefault(); close(); });
+            dismissViewer = close; document.body.append(dialog); dialog.showModal();
+        };
+        const menu = (event: MouseEvent, index: number) => {
+            event.preventDefault(); event.stopPropagation(); dismissMenu?.();
+            const image = readSourceManifest(node).images[index]; if (!image) return;
+            const popup = document.createElement('div'); popup.setAttribute('role', 'menu');
+            popup.style.cssText = 'position:fixed;z-index:4000;display:flex;flex-direction:column;padding:4px;gap:3px;background:#252525;border:1px solid #888;border-radius:6px;box-shadow:0 4px 20px #0008';
+            popup.style.left = Math.max(0, Math.min(event.clientX, innerWidth - 190)) + 'px';
+            popup.style.top = Math.max(0, Math.min(event.clientY, innerHeight - 150)) + 'px';
+            const close = () => { popup.remove(); document.removeEventListener('pointerdown', outside, true); document.removeEventListener('keydown', key, true); dismissMenu = undefined; };
+            const outside = (e: PointerEvent) => { if (!popup.contains(e.target as Node)) close(); };
+            const key = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(); } };
+            const action = (label: string, run: () => void) => {
+                const item = button(label, label, () => { close(); try { run(); } catch (error) { node.__galleryNotify?.(String(error)); } }, 'text-align:left;padding:6px 12px;min-width:180px');
+                item.setAttribute('role', 'menuitem'); popup.append(item);
+            };
+            action('Use as output', () => { const current = readSourceManifest(node); saveSourceManifest(node, { ...current, layout: 'single', active_index: index }); });
+            action('Open in viewer', () => openViewer(image));
+            action('Remove image', () => { const current = readSourceManifest(node); view = Math.max(0, view - (index <= view ? 1 : 0)); saveSourceManifest(node, removeSourceImage(current, index)); });
+            dismissMenu = close; document.body.append(popup); popup.querySelector('button')?.focus();
+            document.addEventListener('pointerdown', outside, true); document.addEventListener('keydown', key, true);
+        };
+        const removed = node.onRemoved;
+        node.onRemoved = function (...args: any[]) { dismissMenu?.(); dismissViewer?.(); return removed?.apply(this, args); };
         const refresh = () => {
+            dismissMenu?.();
             preview.replaceChildren();
             try {
                 const manifest = readSourceManifest(node), images = manifest.images, single = manifest.layout === 'single';
@@ -100,20 +185,22 @@ export function installSourceWidgets(node: any) {
                     const empty = document.createElement('div');
                     empty.style.cssText = 'flex:1;display:flex;align-items:center;justify-content:center;text-align:center;border:1px dashed #8886;border-radius:6px;padding:8px;opacity:.75';
                     empty.textContent = note || 'No images yet. Click to pick images, drop image files here, or drop a Load Image node onto this node.';
-                    empty.style.cursor = 'pointer'; empty.onclick = () => window.dispatchEvent(new CustomEvent(SOURCE_PICKER_EVENT, { detail: node }));
+                    empty.style.cursor = 'pointer'; pickerTrigger(empty);
                     preview.append(empty); return;
                 }
                 // In the single layout the slider picks the output image; otherwise it only browses.
                 view = single ? active : Math.min(view, images.length - 1);
+                node.__galleryViewIndex = view;
                 const go = (index: number) => { const next = (index + images.length) % images.length; if (single) saveSourceManifest(node, { ...manifest, active_index: next }); else { view = next; refresh(); } };
                 const stage = document.createElement('div');
                 stage.style.cssText = 'position:relative;flex:1;min-height:0;display:flex;align-items:center;justify-content:center;background:#0006;border-radius:4px;overflow:hidden;cursor:pointer';
-                stage.title = 'Click to pick images'; stage.onclick = () => window.dispatchEvent(new CustomEvent(SOURCE_PICKER_EVENT, { detail: node }));
+                stage.title = 'Pick images from this node ▾'; pickerTrigger(stage);
                 const img = document.createElement('img');
                 img.src = thumb(images[view]); img.alt = images[view].title || images[view].input_name;
                 img.style.cssText = 'max-width:100%;max-height:100%;object-fit:contain';
                 img.onerror = () => { img.replaceWith(Object.assign(document.createElement('span'), { textContent: 'Preview unavailable: ' + (images[view].title || images[view].input_name) })); };
-                stage.append(img);
+                stage.append(img); badge(stage, images[view]);
+                stage.oncontextmenu = event => menu(event, view);
                 if (images.length > 1) {
                     stage.append(button('‹', 'Previous image', () => go(view - 1), 'position:absolute;left:3px;top:50%;transform:translateY(-50%);width:22px;height:34px;font-size:18px'));
                     stage.append(button('›', 'Next image', () => go(view + 1), 'position:absolute;right:3px;top:50%;transform:translateY(-50%);width:22px;height:34px;font-size:18px'));
@@ -122,24 +209,29 @@ export function installSourceWidgets(node: any) {
                 caption.style.cssText = 'position:absolute;left:0;right:0;bottom:0;padding:2px 6px;background:#000a;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
                 caption.textContent = `${view + 1} / ${images.length} · ${manifest.layout}${single ? ' · output image' : ''} · ${images[view].title || images[view].input_name}${note ? ' · ' + note : ''}`;
                 stage.append(caption);
+                const chevron = document.createElement('span'); chevron.textContent = '▾'; chevron.style.cssText = 'position:absolute;right:6px;top:3px;color:white;text-shadow:0 1px 3px #000;font-size:16px'; stage.append(chevron);
                 preview.append(stage);
                 if (images.length > 1) {
                     const strip = document.createElement('div');
                     strip.setAttribute('aria-label', 'Source images');
-                    strip.style.cssText = 'flex:none;display:flex;gap:3px;overflow-x:auto;overflow-y:hidden;height:46px;padding-bottom:2px';
-                    strip.onwheel = event => { event.stopPropagation(); if (!event.shiftKey && Math.abs(event.deltaY) > Math.abs(event.deltaX)) { event.preventDefault(); strip.scrollLeft += event.deltaY; } };
-                    for (const [index, image] of images.entries()) {
-                        const tile = button('', `${single ? 'Use' : 'Show'} image ${index + 1}: ${image.title || image.input_name}`, () => go(index), `flex:0 0 auto;width:52px;height:42px;padding:0;background:transparent;outline:2px solid ${index === view ? '#1677ff' : 'transparent'};outline-offset:-2px;opacity:${index === view ? 1 : .7}`);
+                    strip.style.cssText = 'flex:none;display:flex;gap:3px;overflow:hidden;height:46px;padding-bottom:2px';
+                    const range = sourceStripRange(images.length, view);
+                    for (let index = range.start; index < range.end; index++) {
+                        const image = images[index];
+                        const tile = button('', `${single ? 'Use' : 'Show'} image ${index + 1}: ${image.title || image.input_name}`, () => go(index), `flex:1 1 0;min-width:0;max-width:64px;height:42px;padding:0;background:transparent;outline:2px solid ${index === view ? '#1677ff' : 'transparent'};outline-offset:-2px;opacity:${index === view ? 1 : .7}`);
                         tile.setAttribute('aria-pressed', String(index === view));
                         const small = document.createElement('img'); small.src = thumb(image); small.alt = ''; small.style.cssText = 'width:100%;height:100%;object-fit:cover;border-radius:3px';
-                        tile.append(small); strip.append(tile);
+                        tile.append(small); badge(tile, image);
+                        tile.oncontextmenu = event => menu(event, index); strip.append(tile);
                     }
                     preview.append(strip);
-                    requestAnimationFrame(() => (strip.children[view] as HTMLElement | undefined)?.scrollIntoView({ block: 'nearest', inline: 'nearest' }));
+                    if (images.length > range.end - range.start) strip.title = 'Showing ' + (range.start + 1) + '–' + range.end + ' of ' + images.length + '. Use the arrows or Pick images for the rest.';
                 }
             } catch (error) { preview.textContent = String(error); }
         };
         node.__galleryRefreshPreview = refresh;
+        node.__galleryFocusImage = (index: number) => { view = index; refresh(); };
+        node.__galleryFocusPreview = () => preview.querySelector<HTMLElement>('[data-picker-trigger]')?.focus({ preventScroll: true });
         node.__galleryNotify = (text: string) => { note = text; refresh(); window.setTimeout(() => { if (note === text) { note = ''; refresh(); } }, 4000); };
         // Files and gallery images dropped on the preview (or on the node) are added to this node.
         const drop = async (transfer: DataTransfer) => {
@@ -171,7 +263,8 @@ export async function sourceRequest(path: string, body: unknown): Promise<ImageS
     const response = await comfyFetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || 'Could not add that image.');
-    return { input_name: data.input_name, title: data.title, metadata: data.metadata || {} };
+    const image = { input_name: data.input_name, title: data.title, metadata: data.metadata || {} };
+    return stampOrigin(image, path === '/Gallery/source/input' ? (imageOrigin(image) === 'hydrus' ? 'hydrus' : 'external') : imageOrigin(image));
 }
 /** An image from ComfyUI's input folder (a Load Image node's image, an uploaded file) as a source entry. */
 export const sourceFromInput = (name: string) => sourceRequest('/Gallery/source/input', { name });
@@ -179,7 +272,7 @@ export const sourceFromInput = (name: string) => sourceRequest('/Gallery/source/
 /** Add images to one Gallery Image Source node. In the single layout the first new image becomes the output. */
 export async function addToNode(node: any, images: ImageSourceImage[], urls?: (string | undefined)[]): Promise<number> {
     if (!images.length) return 0;
-    const stamped = await withPairedPrefix(images, urls);
+    const stamped = await withPairedPrefix(images.map(image => stampOrigin(image)), urls);
     const manifest = readSourceManifest(node);
     const room = 32 - manifest.images.length;
     if (room <= 0) throw new Error('This node already holds 32 images.');
@@ -346,7 +439,7 @@ async function withPairedPrefix(images: ImageSourceImage[], urls: (string | unde
     });
 }
 export const appendToImageSource = async (images: ImageSourceImage[], apply?: PromptApply, urls?: (string | undefined)[]) => {
-    const stamped = await withPairedPrefix(images, urls);
+    const stamped = await withPairedPrefix(images.map(image => stampOrigin(image)), urls);
     return command<string>('append', apply ? { images: stamped, apply } : stamped);
 };
 

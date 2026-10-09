@@ -1,5 +1,21 @@
 export type ImageSourceCrop = { x: number; y: number; width: number; height: number };
 export type ImageSourceImage = { input_name: string; title?: string; crop?: ImageSourceCrop; metadata?: Record<string, any>; prompt?: { positive: string; negative: string; tags: string[] } };
+export type ImageOrigin = 'gallery' | 'hydrus' | 'external';
+export const ORIGIN_STYLE = {
+    gallery: { label: 'Gallery', color: '#4096ff' },
+    hydrus: { label: 'Hydrus', color: '#b37feb' },
+    external: { label: 'External', color: '#ff7a45' },
+};
+export function imageOrigin(image: ImageSourceImage): ImageOrigin {
+    const explicit = image.metadata?.gallery_origin;
+    if (explicit === 'gallery' || explicit === 'hydrus' || explicit === 'external') return explicit;
+    const name = image.input_name.replace(/\\/g, '/');
+    if (name.startsWith('hydrus/') || image.metadata?.hydrus) return 'hydrus';
+    return name.startsWith('gallery_sources/') ? 'gallery' : 'external';
+}
+export function stampOrigin(image: ImageSourceImage, origin = imageOrigin(image)): ImageSourceImage {
+    return { ...image, metadata: { ...image.metadata, gallery_origin: origin } };
+}
 export type ImageSourceManifest = {
     version: 1;
     active_index?: number;
@@ -12,6 +28,14 @@ export type ImageSourceManifest = {
 
 export function emptyImageSourceManifest(): ImageSourceManifest {
     return { version: 1, images: [], layout: 'single', columns: 2, gap: 0, background: '#000000' };
+}
+
+/** Preserve the selected image when an earlier entry is removed. */
+export function removeSourceImage(manifest: ImageSourceManifest, index: number): ImageSourceManifest {
+    if (index < 0 || index >= manifest.images.length) return manifest;
+    const images = manifest.images.filter((_, at) => at !== index);
+    const active = manifest.active_index || 0;
+    return { ...manifest, images, active_index: Math.max(0, Math.min(active - (index < active ? 1 : 0), images.length - 1)) };
 }
 
 const finite = (value: number, fallback: number) => Number.isFinite(value) ? value : fallback;

@@ -1,3 +1,4 @@
+import { useUnsavedPrefix } from './UnsavedPrefix';
 import { FloatingPanel } from './FloatingPanel';
 import { getPromptTargets, writePromptTarget } from './ImageSourceBridge';
 import { formatPromptTerms, prepareInsertion } from './PromptSpelling';
@@ -54,6 +55,7 @@ export function LocalPromptSearch({ onLocalSearch, managerOnly = false }: { onLo
         const refresh = () => { if (openRef.current) setStatus('Library may have changed. Refresh library before saving a stale draft.'); else void load(); };
         const show = (event: Event) => {
             const value = (event as CustomEvent<PrefixSeed>).detail || {};
+            drafts.markSaved({ name: value.name || '', positive: Array.from(new Set([...(value.positive || []), ...(value.hydrus || [])])), negative: value.negative || [] });
             setNodeText(nodePrompt(value.node));
             setAppendTarget(value.node ? JSON.stringify([String(value.node.id), value.node.widgets.findIndex((widget: any) => ['prefix', 'text'].includes(widget.name))]) : undefined);
             // From a workflow node: the prompts window (append target preset). From images or "edit": the prefix editor window.
@@ -62,7 +64,7 @@ export function LocalPromptSearch({ onLocalSearch, managerOnly = false }: { onLo
             setPrefixTags(Array.from(new Set([...(value.positive || []), ...(value.hydrus || [])])));
             if (value.node) void load().then(data => {
                 const selected = data?.prefixes.find(prefix => prefix.id === value.node.properties?.prompt_library_selected_prefix);
-                if (data && selected) { setPrefixName(selected.name); setNegativeTags(selected.negative_terms || []); setPrefixTags(expandPrefix(data, '@' + selected.name)); }
+                if (data && selected) { drafts.markSaved({ name: selected.name, positive: expandPrefix(data, '@' + selected.name), negative: selected.negative_terms || [] }); setPrefixName(selected.name); setNegativeTags(selected.negative_terms || []); setPrefixTags(expandPrefix(data, '@' + selected.name)); }
             });
         };
         const showLibrary = () => setLibraryOpen(true);
@@ -90,6 +92,7 @@ export function LocalPromptSearch({ onLocalSearch, managerOnly = false }: { onLo
     /** Tag searches get their own window; the main gallery's filter and scroll position are left alone. */
     const openTagSearch = (terms: string[], field: LocalSearchField = 'all', prefix?: SearchPrefix) => openImageSearch({ field, chips: prefix?.id ? [{ kind: 'prefix', id: prefix.id, name: prefix.name }] : Array.from(new Set(terms)).map(text => ({ kind: 'tag' as const, text })) });
     const addToDraft = (terms: string[], side: 'positive' | 'negative' = 'positive') => (side === 'negative' ? setNegativeTags : setPrefixTags)(old => Array.from(new Set([...old, ...terms])));
+    const drafts = useUnsavedPrefix({ name: prefixName, positive: prefixTags, negative: negativeTags }, value => { setPrefixName(value.name); setPrefixTags(value.positive); setNegativeTags(value.negative); }, () => save());
     const save = async () => {
         setSaving(true);
         try {
@@ -98,10 +101,12 @@ export function LocalPromptSearch({ onLocalSearch, managerOnly = false }: { onLo
             const negative = negativeTags.length ? await formatPromptTerms(negativeTags) : [];
             setPrefixTags(positive); setNegativeTags(negative);
             message.success(await savePrefix(prefixName, positive, shared.revision, seed.imageKeys, negative, seed.imageRefs));
+            drafts.markSaved({ name: prefixName, positive, negative });
             const data = await load();
             const prefix = data?.prefixes.find(item => item.name.toLowerCase() === prefixName.trim().toLowerCase());
             if (prefix) seed.onSaved?.(positive, prefix.id, negative);
-        } catch (error) { message.error(String(error)); } finally { setSaving(false); }
+            return true;
+        } catch (error) { message.error(String(error)); return false; } finally { setSaving(false); }
     };
     const removePrefix = async (id: string) => {
         try { await deletePrefix(id, shared.revision!); await load(); } catch (error) { message.error(String(error)); }
@@ -124,6 +129,7 @@ export function LocalPromptSearch({ onLocalSearch, managerOnly = false }: { onLo
     const editPrefix = (name: string) => {
         const prefix = shared.prefixes.find(value => value.name === name);
         if (!prefix) return;
+        drafts.markSaved({ name: prefix.name, positive: expandPrefix(shared, '@' + prefix.name), negative: prefix.negative_terms || [] });
         setPrefixName(prefix.name); setPrefixTags(expandPrefix(shared, '@' + prefix.name)); setNegativeTags(prefix.negative_terms || []); setEditorOpen(true);
     };
     const unpair = async (keys: string[]) => {
@@ -191,8 +197,9 @@ export function LocalPromptSearch({ onLocalSearch, managerOnly = false }: { onLo
                 onSearch={terms => openTagSearch(terms)} />
             <Typography.Paragraph type="secondary" style={{ marginTop: 8 }}>{status}. Prefix definitions are shared with your Prompt Library node.</Typography.Paragraph>
         </FloatingPanel>
-        <FloatingPanel panelKey="prefix-editor" title={'Prefix editor · ' + draftLabel} open={editorOpen} onCancel={() => setEditorOpen(false)} footer={null} width={900}>
-            <PrefixEditor shared={shared} seed={seed} active={editorOpen} name={prefixName} setName={setPrefixName} positive={prefixTags} setPositive={setPrefixTags} negative={negativeTags} setNegative={setNegativeTags}
+        <FloatingPanel panelKey="prefix-editor" title={'Prefix editor · ' + draftLabel} open={editorOpen} onCancel={() => { if (!saving) drafts.guard(() => setEditorOpen(false)); }} footer={null} width={900}>
+            {drafts.dialog}
+            <PrefixEditor onLoad={drafts.markSaved} shared={shared} seed={seed} active={editorOpen} name={prefixName} setName={setPrefixName} positive={prefixTags} setPositive={setPrefixTags} negative={negativeTags} setNegative={setNegativeTags}
                 saving={saving} onSave={() => void save()} onDelete={removePrefix} onAppendToNode={seed.node ? id => void appendPrefixToNode(id) : undefined}
                 onOpenLibrarySearch={() => setLibraryOpen(true)} onOpenPrompts={() => setOpen(true)}
                 onUnpair={image => void unpair(image.keys || [])} />

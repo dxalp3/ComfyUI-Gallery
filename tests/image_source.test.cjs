@@ -13,6 +13,7 @@ function compile(name, globals = {}, imports = {}) {
     return module.exports;
 }
 const geometry = compile('ImageSourceGeometry', { URLSearchParams });
+const sourceHistory = compile('SourceHistory', {}, { './ImageSourceGeometry': geometry });
 const search = compile('LocalImageSearch');
 const plain = value => JSON.parse(JSON.stringify(value));
 test('crop clamps reversed/outside drags and preserves at least one pixel', () => {
@@ -40,7 +41,7 @@ function bridgeFixture() {
         comfyClass: 'GalleryImageSource', widgets: [{ name: 'sources', type: 'customtext', value: JSON.stringify(geometry.emptyImageSourceManifest()) }],
         addWidget(type, name, value, callback, options) { this.widgets.push({ type, name, value, callback, options }); },
     }; } } };
-    const bridge = compile('ImageSourceBridge', { window, CustomEvent: class { constructor(type, detail) { this.type=type;this.detail=detail; } } }, { './ComfyAppApi': { getComfyApp: () => app, STANDALONE: false }, './ImageSourceGeometry': geometry, './NodeWidgets': compile('NodeWidgets') });
+    const bridge = compile('ImageSourceBridge', { window, CustomEvent: class { constructor(type, detail) { this.type=type;this.detail=detail; } } }, { './SourceHistory': sourceHistory, './ComfyAppApi': { getComfyApp: () => app, STANDALONE: false }, './ImageSourceGeometry': geometry, './NodeWidgets': compile('NodeWidgets') });
     return { bridge, graph, app };
 }
 test('append creates one dedicated node and keeps serialized crop/layout across later appends', async () => {
@@ -96,4 +97,18 @@ test('direct library insertion reads the current target text and records before/
  assert.equal(await bridge.writePromptTarget(target,'(blue eyes:1.2)','before'),'(blue eyes:1.2), manually changed');
  assert.equal(node.widgets[0].inputEl.value,node.widgets[0].value);assert.equal(changes,2);
  await assert.rejects(bridge.writePromptTarget(JSON.stringify(['missing',0]),'x','after'),/valid prompt target/);
+});
+
+test('source history survives removing an image and workflow serialization, independently per node', async () => {
+    const { bridge, graph } = bridgeFixture();
+    await bridge.appendToImageSource([{ input_name: 'a.png' }, { input_name: 'b.png' }]);
+    const first = graph._nodes[0];
+    bridge.saveSourceManifest(first, geometry.removeSourceImage(bridge.readSourceManifest(first), 0));
+    const saved = JSON.parse(JSON.stringify({ properties: first.properties, widgets: first.widgets }));
+    assert.deepEqual(plain(bridge.readSourceHistory(saved)).map(image => image.input_name), ['a.png', 'b.png']);
+    assert.equal(bridge.readSourceManifest(saved).images.length, 1);
+    await bridge.setSourceTarget('new');
+    await bridge.appendToImageSource([{ input_name: 'only-second.png' }]);
+    assert.deepEqual(plain(bridge.readSourceHistory(graph._nodes[1])).map(image => image.input_name), ['only-second.png']);
+    assert.deepEqual(plain(bridge.readSourceHistory(first)).map(image => image.input_name), ['a.png', 'b.png']);
 });
