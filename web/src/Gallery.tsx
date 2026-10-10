@@ -1,3 +1,4 @@
+import { GalleryAssetPane } from './GalleryAssetPane';
 import { STANDALONE } from './ComfyAppApi';
 import { ImageSourceHost } from './ImageSourceHost';
 import { GalleryProvider } from './GalleryContext';
@@ -11,7 +12,7 @@ function Gallery() {
             <HydrusProvider>
             {!STANDALONE && <GalleryOpenButton />}
             <ImageSourceHost />
-            <GalleryModal />
+            <GalleryModal /><GalleryAssetPane />
             </HydrusProvider>
         </GalleryProvider>
     );

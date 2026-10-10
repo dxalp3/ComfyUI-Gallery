@@ -1,3 +1,4 @@
+import { ASSET_ACTION_EVENT } from './GalleryWorkspace';
 import { sourceImageUrl, type ImageSourceImage } from './ImageSourceGeometry';
 import { FloatingPanel } from './FloatingPanel';
 import { PreviewMedia, stopMedia } from './PreviewMedia';
@@ -8,7 +9,7 @@ import FileSaver from 'file-saver';
 import { AppendImagesModal } from './AppendImagesModal';
 import { hydrusRequest } from './HydrusApi';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Button, Checkbox, Collapse, Dropdown, Empty, Input, Modal, Select, Space, Slider, Tooltip, Tag, Typography, message } from 'antd';
+import { Button, Checkbox, Collapse, Dropdown, Empty, Input, Modal, Select, Space, Slider, Tooltip, Tag, Typography, message, theme } from 'antd';
 import { AutoSizer } from 'react-virtualized';
 import { FixedSizeGrid } from 'react-window';
 import type { GridChildComponentProps } from 'react-window';
@@ -35,6 +36,7 @@ export function UnifiedGallery({ sortRequest, source, remote, selectedRemote, se
     copy: (hashes: string[], append?: boolean) => Promise<void>; download: (hashes: string[]) => Promise<void>; working: boolean; scope: string; active: boolean;
 }) {
     const gallery = useGalleryContext();
+    const { token } = theme.useToken();
     const hydrus = useHydrus();
     const [appending, setAppending] = useState<GalleryEntry[]>([]);
     const [selectionMode, setSelectionMode] = useState(false);
@@ -46,6 +48,8 @@ export function UnifiedGallery({ sortRequest, source, remote, selectedRemote, se
     const [ascending, setAscending] = useState(false);
     const [seed, setSeed] = useState(() => Date.now());
     const [viewer, setViewer] = useState<string>();
+    const [detached, setDetached] = useState(false);
+    const viewerActive = active || detached;
     const [zoom, setZoom] = useState(1);
     const [actionBusy, setActionBusy] = useState(false);
     const [mediaError, setMediaError] = useState(false);
@@ -102,10 +106,10 @@ export function UnifiedGallery({ sortRequest, source, remote, selectedRemote, se
     const original = (entry: GalleryEntry) => entry.local ? `${BASE_PATH}${entry.local.url}` : `${BASE_PATH}/Gallery/hydrus/original?hash=${entry.hash}&target=${encodeURIComponent(scope)}`;
     useEffect(() => { setZoom(1); setFailedOriginal(undefined); setMediaError(false); }, [viewer]);
     useEffect(() => {
-        if (!active) { stopMedia(viewerRef.current); setViewer(undefined); }
+        if (!viewerActive) { stopMedia(viewerRef.current); setViewer(undefined); }
         else if (viewer && index < 0) setViewer(shown[Math.min(lastViewerIndex.current, shown.length - 1)]?.id);
         else if (index >= 0) lastViewerIndex.current = index;
-    }, [active, index, viewer, shown]);
+    }, [viewerActive, index, viewer, shown]);
     useEffect(() => { setViewer(undefined); setTrashing([]); }, [scope]);
     // The image search window opens its results here ("Open in gallery view").
     useEffect(() => {
@@ -115,8 +119,8 @@ export function UnifiedGallery({ sortRequest, source, remote, selectedRemote, se
                 const image = images[sourceIndex] || images[0];
                 const original = image.metadata?.gallery_url;
                 const file = original && Object.values(gallery.data?.folders || {}).some(folder => Object.values(folder).some(file => file.url === original));
-                gallery.setOpen(true); setSourceImages(images); setViewerUrls(undefined); setViewer('local:' + (file ? original : sourceImageUrl(image.input_name)));
-            } else if (url) { setSourceImages(undefined); setViewerUrls(urls?.length ? urls : undefined); setViewer('local:' + url); }
+                setDetached(true); setSourceImages(images); setViewerUrls(undefined); setViewer('local:' + (file ? original : sourceImageUrl(image.input_name)));
+            } else if (url) { setDetached(true); setSourceImages(undefined); setViewerUrls(urls?.length ? urls : undefined); setViewer('local:' + url); }
         };
         window.addEventListener(OPEN_VIEWER_EVENT, show);
         return () => window.removeEventListener(OPEN_VIEWER_EVENT, show);
@@ -186,6 +190,21 @@ export function UnifiedGallery({ sortRequest, source, remote, selectedRemote, se
             }
         });
     };
+    useEffect(() => {
+        const action = (event: Event) => {
+            const {url,key,urls} = (event as CustomEvent).detail || {};
+            const file = Object.values(gallery.data?.folders || {}).flatMap(folder => Object.values(folder)).find(file => file.url === url);
+            if (!file) return;
+            const entry = localEntry(file);
+            if (key === 'view') { setDetached(true); setSourceImages(undefined); setViewerUrls(urls?.length ? urls : [url]); setViewer(entry.id); }
+            else if (key === 'source') setAppending([entry]);
+            else if (key === 'prefix') openSourcePrefix([entry]);
+            else if (key === 'info') openImageInfo({url});
+            else if (key === 'imagesearch') openImageSearch({chips:[{kind:'image',url,name:entry.name}]});
+        };
+        window.addEventListener(ASSET_ACTION_EVENT, action);
+        return () => window.removeEventListener(ASSET_ACTION_EVENT, action);
+    }, [gallery.data, hydrus.items]);
     const menu = (entry: GalleryEntry) => ({ items: entry.source === 'node' ? [{ key: 'download', label: 'Download original' }] : [
         { key: 'select', label: selected.has(entry.id) ? 'Deselect image' : 'Select image' },
         { key: 'source', disabled: !targets(entry).some(isImage), label: `Append to Image Source (${targets(entry).filter(item => isImage(item)).length})` },
@@ -208,7 +227,7 @@ export function UnifiedGallery({ sortRequest, source, remote, selectedRemote, se
     useEffect(() => { if (viewer && index >= 0 && !viewerList) grid.current?.scrollToItem({ rowIndex: Math.floor(index / columns.current), columnIndex: index % columns.current }); }, [viewer, index]);
     const closeViewer = () => {
         stopMedia(viewerRef.current);
-        setViewer(undefined); setViewerUrls(undefined); setSourceImages(undefined);
+        setViewer(undefined); setViewerUrls(undefined); setSourceImages(undefined); setDetached(false);
         if (index >= 0 && !viewerList) grid.current?.scrollToItem({ rowIndex: Math.floor(index / columns.current), columnIndex: index % columns.current });
     };
     const renderCard = (rowIndex: number, columnIndex: number, count: number, style: React.CSSProperties) => {
@@ -224,7 +243,7 @@ export function UnifiedGallery({ sortRequest, source, remote, selectedRemote, se
                                         grid.current?.scrollToItem({ rowIndex: Math.floor(nextIndex / count), columnIndex: nextIndex % count });
                                         requestAnimationFrame(() => document.querySelector<HTMLElement>('[data-gallery-entry="' + CSS.escape(next.id) + '"]')?.focus());
                                     } if (event.key === 'Enter') { event.preventDefault(); setViewer(entry.id); } if (event.key === ' ') { event.preventDefault(); toggle(entry, event.shiftKey); } }}>
-                                <div draggable={!!entry.local && !selectionActive} onDragStart={event => { if (entry.local) { event.dataTransfer.setData('text/uri-list', original(entry)); event.dataTransfer.setData('custom', JSON.stringify({ name: entry.name, folder: gallery.currentFolder, type: entry.local.type, url: entry.local.url })); } }} style={{ height: 'calc(100% - 54px)', background: '#17191d', cursor: 'pointer' }} onClick={event => {
+                                <div draggable={!!entry.local && !selectionActive} onDragStart={event => { if (entry.local) { event.dataTransfer.setData('text/uri-list', original(entry)); event.dataTransfer.setData('custom', JSON.stringify({ name: entry.name, folder: gallery.currentFolder, type: entry.local.type, url: entry.local.url })); } }} style={{ height: 'calc(100% - 54px)', background: token.colorFillQuaternary, cursor: 'pointer' }} onClick={event => {
                                     if (event.detail > 1) return;
                                     lastClick.current = undefined;
                                     if (selectionActive) {
@@ -288,10 +307,10 @@ export function UnifiedGallery({ sortRequest, source, remote, selectedRemote, se
             }}</AutoSizer>}
         </div>
         {/* The image takes all the height the window has: one compact toolbar row above, the filmstrip below. */}
-        <FloatingPanel panelKey="viewer" destroyOnHidden className="cg-viewer" title={current ? `Gallery viewer · ${index + 1} / ${shown.length}${viewerList ? sourceImages ? ' (node images)' : ' (search results)' : ''} · ${current.name}` : 'Gallery viewer'} open={!!current && active} onCancel={closeViewer} width="96vw" zIndex={BASE_Z_INDEX + 10} footer={null}
-            initialSize={{ width: innerWidth * .96, height: innerHeight - 76 }} bodyStyle={{ padding: 8, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
+        <FloatingPanel key={detached ? 'workflow-viewer' : 'viewer'} panelKey={detached ? 'workflow-viewer' : 'viewer'} destroyOnHidden className="cg-viewer" title={current ? `Gallery viewer · ${index + 1} / ${shown.length}${viewerList ? sourceImages ? ' (node images)' : ' (selected assets)' : ''} · ${current.name}` : 'Gallery viewer'} open={!!current && viewerActive} onCancel={closeViewer} width="96vw" zIndex={BASE_Z_INDEX + 10} footer={null}
+            initialSize={detached ? { width: Math.min(960, innerWidth * .78), height: Math.min(720, innerHeight * .82) } : { width: innerWidth * .96, height: innerHeight - 76 }} bodyStyle={{ padding: 8, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
             afterOpenChange={opened => { if (opened) viewerRef.current?.focus(); }}>
-            {current && active && <div ref={viewerRef} tabIndex={-1} style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: 1, minHeight: 0, outline: 'none' }} onKeyDown={event => {
+            {current && viewerActive && <div ref={viewerRef} tabIndex={-1} style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: 1, minHeight: 0, outline: 'none' }} onKeyDown={event => {
                 if ((event.target as HTMLElement).closest('input,textarea,select,button,[role="menu"],[role="combobox"]')) return;
                 if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { event.preventDefault(); event.stopPropagation(); move(event.key === 'ArrowLeft' ? -1 : 1); }
                 if (event.key === ' ') { event.preventDefault(); toggle(current, event.shiftKey); }
@@ -308,7 +327,7 @@ export function UnifiedGallery({ sortRequest, source, remote, selectedRemote, se
                     <Typography.Text type="secondary" style={{ marginLeft: 'auto', fontSize: 12 }}>← → browse · Space selects · right-click for actions</Typography.Text>
                 </div>
                 <Dropdown trigger={['contextMenu']} disabled={disabled} menu={menu(current)}>
-                    <div style={{ flex: 1, minHeight: 160, overflow: zoom === 1 ? 'hidden' : 'auto', background: '#111', borderRadius: 4, display: 'flex', alignItems: zoom === 1 ? 'center' : 'flex-start', justifyContent: zoom === 1 ? 'center' : 'flex-start' }}>
+                    <div style={{ flex: 1, minHeight: 160, overflow: zoom === 1 ? 'hidden' : 'auto', background: token.colorFillQuaternary, borderRadius: 4, display: 'flex', alignItems: zoom === 1 ? 'center' : 'flex-start', justifyContent: zoom === 1 ? 'center' : 'flex-start' }}>
                         {current.local?.type === '3d' ? <ModelViewer url={original(current)} type={current.name.split('.').pop() || ''} /> : isVideo(current) ? <PreviewMedia onError={() => setMediaError(true)} key={current.id} controls autoPlay={gallery.settings.autoPlayVideos} src={original(current)} style={{ maxWidth: '100%', maxHeight: '100%' }} /> : current.local?.type === 'audio' ? <PreviewMedia audio key={current.id} controls src={original(current)} /> :
                         <img onClick={event => { if (event.detail === 1) toggle(current); }} key={current.id} src={failedOriginal === current.id ? thumbnail(current) : original(current)} alt={'Viewing ' + current.name} onError={() => setFailedOriginal(current.id)}
                             style={zoom === 1 ? { width: '100%', height: '100%', objectFit: 'contain', display: 'block' } : { height: `${zoom * 100}%`, maxWidth: 'none', objectFit: 'contain', margin: 'auto' }} />}
@@ -318,7 +337,7 @@ export function UnifiedGallery({ sortRequest, source, remote, selectedRemote, se
                 {failedOriginal === current.id && <Typography.Text type="warning">Original could not be displayed; showing thumbnail. Download original is available in the context menu.</Typography.Text>}
                 <div aria-label="Viewer filmstrip" style={{ display: 'flex', gap: 4, overflowX: 'auto', flex: 'none', paddingBottom: 2 }}>
                     {shown.slice(Math.max(0, index - 12), index + 13).map(entry => <button key={entry.id} type="button" title={entry.name} aria-label={'View ' + entry.name} aria-current={entry.id === viewer} onClick={event => { if (event.detail > 1) return; lastClick.current = undefined; if (selectionActive) { lastClick.current = { id: entry.id, selected: selected.has(entry.id) }; toggle(entry, event.shiftKey); } else setViewer(entry.id); }} onDoubleClick={() => { const previous = lastClick.current; if (previous?.id === entry.id) { const next = new Set(selected); if (previous.selected) next.add(entry.id); else next.delete(entry.id); setSelection(next); } setViewer(entry.id); }}
-                        style={{ position: 'relative', flex: '0 0 auto', width: 84, height: 72, padding: 0, background: '#111', cursor: 'pointer', borderRadius: 4, border: `2px solid ${entry.id === viewer ? '#1677ff' : selected.has(entry.id) ? '#52c41a' : 'transparent'}`, opacity: entry.id === viewer ? 1 : .75, color: '#ddd' }}>
+                        style={{ position: 'relative', flex: '0 0 auto', width: 84, height: 72, padding: 0, background: token.colorFillQuaternary, cursor: 'pointer', borderRadius: 4, border: `2px solid ${entry.id === viewer ? '#1677ff' : selected.has(entry.id) ? '#52c41a' : 'transparent'}`, opacity: entry.id === viewer ? 1 : .75, color: token.colorText }}>
                         {entry.local && entry.local.type !== 'image' ? entry.local.type : <img alt="" src={thumbnail(entry)} style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 2 }} />}
                         {selected.has(entry.id) && <span style={{ position: 'absolute', top: 1, right: 3, color: '#52c41a', fontWeight: 700 }}>✓</span>}
                     </button>)}

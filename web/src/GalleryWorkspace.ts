@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from 'react';
 import { STANDALONE } from './ComfyAppApi';
+export const ASSET_ACTION_EVENT = 'gallery-asset-action';
 export const GALLERY_OPEN = 'comfy-gallery:open';
 export const GALLERY_CLOSE = 'comfy-gallery:close';
 const listeners = new Set<() => void>();
@@ -17,7 +18,7 @@ export function workspaceTop() {
 }
 export function setWorkspaceActive(active: boolean) {
     tab?.setAttribute('aria-selected', String(active));
-    if (tab) { tab.style.color = active ? '#eff6ff' : 'var(--fg-color, #e8edf4)'; tab.style.background = active ? '#263c55' : 'transparent'; tab.style.borderBottomColor = active ? '#80bfff' : 'transparent'; }
+    if (tab) { tab.style.color = 'var(--input-text, #dedede)'; tab.style.background = active ? 'var(--comfy-input-bg, #353535)' : 'transparent'; tab.style.borderBottomColor = active ? 'var(--p-primary-color, #5489bd)' : 'transparent'; }
 }
 // ComfyUI has no public non-workflow tab API. This owns only its button and
 // workspace; it never creates a dummy workflow or patches the workflow store.

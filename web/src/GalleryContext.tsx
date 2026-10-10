@@ -43,6 +43,7 @@ export interface SettingsState {
     autoPlayVideos: boolean;
     hideOpenButton: boolean;
     darkMode: boolean;
+    themeMode?: 'comfy' | 'light' | 'dark';
     galleryShortcut: boolean;
     expandAllFolders: boolean;
     disableLogs: boolean;
@@ -73,6 +74,7 @@ export const DEFAULT_SETTINGS: SettingsState = {
     autoPlayVideos: true,
     hideOpenButton: false,
     darkMode: false,
+    themeMode: 'comfy',
     galleryShortcut: true,
     expandAllFolders: true,
     disableLogs: false,

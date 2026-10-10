@@ -1,9 +1,9 @@
 // Scoped styles keep the gallery readable under ComfyUI's global control styles.
 export const galleryStyles = `
-.cg-workspace { flex-direction:column; overflow:hidden; background:var(--cg-bg); color:var(--cg-text); font:13px/1.5 system-ui,sans-serif; outline:none; color-scheme:normal; }
+.cg-workspace { flex-direction:column; overflow:hidden; background:var(--cg-bg); color:var(--cg-text); font:13px/1.5 system-ui,sans-serif; outline:none;  }
 .cg-workspace *, .cg-workspace *::before, .cg-workspace *::after { box-sizing:border-box; }
-.cg-header { display:flex; align-items:center; gap:18px; padding:14px 24px; border-bottom:1px solid var(--cg-border); flex:none; }
-.cg-brand { display:flex; align-items:center; gap:10px; font-size:19px; letter-spacing:-.4px; margin-right:16px; }
+.cg-header { display:flex; align-items:center; gap:10px; padding:10px 16px; border-bottom:1px solid var(--cg-border); flex:none; }
+.cg-brand { display:flex; align-items:center; gap:10px; font-size:15px; letter-spacing:-.4px; margin-right:16px; }
 .cg-brand .anticon { color:var(--cg-accent); font-size:23px; }
 .cg-spacer { flex:1; }
 .cg-filters { display:flex; align-items:center; gap:10px; padding:12px 24px 0; flex-wrap:wrap; flex:none; }
@@ -16,7 +16,7 @@ export const galleryStyles = `
 .cg-grid-toolbar { display:flex; align-items:center; flex-wrap:wrap; gap:8px; padding:12px 6px; flex:none; }
 .cg-grid-summary { color:var(--cg-muted); margin-right:auto; font-variant-numeric:tabular-nums; }
 .cg-selection { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin:0 6px 10px; padding:8px 12px; background:var(--cg-panel); border:1px solid var(--cg-border); border-radius:8px; flex:none; }
-.cg-workspace .ant-btn { font:inherit; min-height:32px; height:32px; line-height:1; padding:4px 12px; box-shadow:none; }
+.cg-workspace .ant-btn { font:inherit; min-height:30px; height:30px; line-height:1; padding:4px 12px; box-shadow:none; }
 .cg-workspace .ant-btn-default { color:var(--cg-text); background:var(--cg-control); border:1px solid var(--cg-border); }
 .cg-workspace .ant-btn-default:hover { color:var(--cg-accent); border-color:var(--cg-accent); }
 .cg-workspace .ant-btn-primary { color:#fff; background:var(--cg-accent); border-color:var(--cg-accent); }
@@ -28,8 +28,8 @@ export const galleryStyles = `
 .cg-workspace .ant-typography-secondary { color:var(--cg-muted); }
 .cg-workspace .ant-segmented { background:var(--cg-panel); color:var(--cg-muted); }
 .cg-workspace .ant-segmented-item-selected { background:var(--cg-control); color:var(--cg-text); }
-.cg-workspace [data-gallery-entry] { background:var(--cg-control); transition:border-color .12s; }
-.cg-workspace [data-gallery-entry]:hover { border-color:var(--cg-accent) !important; }
+.cg-workspace [data-gallery-entry] { background:var(--cg-control); transition:border-color .14s,box-shadow .14s,background-color .14s; }
+.cg-workspace [data-gallery-entry]:hover { border-color:var(--cg-accent) !important; box-shadow:inset 0 0 0 1px var(--cg-accent); }
 .cg-grid-layout { position:relative; }
 .cg-selection-float { position:absolute; bottom:22px; right:26px; z-index:5; display:flex; align-items:center; gap:10px; padding:8px 12px; border:1px solid var(--cg-border); border-radius:24px; background:var(--cg-control); box-shadow:0 4px 20px #0006; }
 .cg-selection-float span { font-size:12px; color:var(--cg-muted); }

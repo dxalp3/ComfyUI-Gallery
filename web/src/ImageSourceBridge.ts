@@ -125,7 +125,6 @@ export function installSourceWidgets(node: any) {
         const galleryViewer = (index: number) => {
             clearTimeout(clickTimer);
             target = node;
-            window.dispatchEvent(new CustomEvent(SOURCE_BROWSE_EVENT));
             window.dispatchEvent(new CustomEvent('gallery-open-viewer', { detail: { sourceImages: readSourceManifest(node).images, sourceIndex: index } }));
         };
         node.__galleryPickerAnchor = () => preview.isConnected ? (preview.querySelector<HTMLElement>('[data-picker-trigger]') || preview).getBoundingClientRect() : null;
@@ -138,7 +137,7 @@ export function installSourceWidgets(node: any) {
             element.onkeydown = event => { if (event.target === element && ['Enter', ' '].includes(event.key)) { event.preventDefault(); event.stopPropagation(); openSourcePicker(node, node.__galleryPickerAnchor, element); } };
         };
         const thumb = (image: ImageSourceImage) => '/Gallery/source/thumbnail?url=' + encodeURIComponent('/static_gallery/' + image.input_name);
-        const button = (text: string, label: string, onClick: () => void, css = '') => { const item = document.createElement('button'); item.type = 'button'; item.textContent = text; item.title = label; item.setAttribute('aria-label', label); item.onclick = event => { event.stopPropagation(); onClick(); }; item.style.cssText = 'border:0;border-radius:4px;background:#000a;color:#fff;cursor:pointer;' + css; return item; };
+        const button = (text: string, label: string, onClick: () => void, css = '') => { const item = document.createElement('button'); item.type = 'button'; item.textContent = text; item.title = label; item.setAttribute('aria-label', label); item.onclick = event => { event.stopPropagation(); onClick(); }; item.style.cssText = 'border:0;border-radius:4px;background:var(--comfy-input-bg,#333);color:var(--input-text,#ddd);cursor:pointer;' + css; return item; };
         let dismissMenu: (() => void) | undefined;
         let dismissViewer: (() => void) | undefined;
         const badge = (element: HTMLElement, image: ImageSourceImage) => {
@@ -165,7 +164,7 @@ export function installSourceWidgets(node: any) {
             event.preventDefault(); event.stopPropagation(); dismissMenu?.();
             const image = readSourceManifest(node).images[index]; if (!image) return;
             const popup = document.createElement('div'); popup.setAttribute('role', 'menu');
-            popup.style.cssText = 'position:fixed;z-index:4000;display:flex;flex-direction:column;padding:4px;gap:3px;background:#252525;border:1px solid #888;border-radius:6px;box-shadow:0 4px 20px #0008';
+            popup.style.cssText = 'position:fixed;z-index:4000;display:flex;flex-direction:column;padding:4px;gap:3px;background:var(--comfy-menu-bg,#252525);color:var(--input-text,#ddd);border:1px solid var(--border-color,#888);border-radius:6px;box-shadow:0 4px 20px #0008';
             popup.style.left = Math.max(0, Math.min(event.clientX, innerWidth - 190)) + 'px';
             popup.style.top = Math.max(0, Math.min(event.clientY, innerHeight - 150)) + 'px';
             const close = () => { popup.remove(); document.removeEventListener('pointerdown', outside, true); document.removeEventListener('keydown', key, true); dismissMenu = undefined; };

@@ -123,12 +123,7 @@ const GallerySettingsModal = () => {
                     checked={staged.hideOpenButton}
                     onChange={checked => setStaged({ hideOpenButton: checked })}
                 />
-                <Switch
-                    checkedChildren={"Dark Mode"}
-                    unCheckedChildren={"Light Mode"}
-                    checked={staged.darkMode}
-                    onChange={checked => setStaged({ darkMode: checked })}
-                />
+                <div><Typography.Title level={5}>Appearance</Typography.Title><Select aria-label="Gallery theme" value={staged.themeMode || (staged.darkMode ? 'dark' : 'light')} onChange={themeMode => setStaged({ themeMode, darkMode: themeMode === 'dark' })} style={{width:'100%'}} options={[{value:'comfy',label:'Follow ComfyUI'},{value:'light',label:'Light'},{value:'dark',label:'Dark'}]} /><Typography.Text type="secondary">Compact controls and matching surfaces in the workspace, sidebar and tool windows.</Typography.Text></div>
                 <Switch
                     checkedChildren={"Enable Ctrl+G Shortcut"}
                     unCheckedChildren={"Disable Ctrl+G Shortcut"}

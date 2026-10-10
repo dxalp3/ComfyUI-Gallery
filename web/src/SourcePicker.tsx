@@ -28,7 +28,6 @@ const styles = `
 .cg-source-picker .sp-image { display:block;width:100%;padding:0;overflow:hidden;position:relative;aspect-ratio:1;background:var(--sp-field); }
 .cg-source-picker .sp-image img { display:block;width:100%;height:100%;object-fit:cover; }
 .cg-source-picker .sp-image[aria-pressed=true] { outline:2px solid var(--sp-accent);outline-offset:2px; }
-.cg-source-picker .sp-badge { position:absolute;bottom:0;left:0;padding:1px 4px;color:#111;font-size:9px; }
 .cg-source-picker .sp-check { position:absolute;top:3px;left:3px;background:var(--sp-bg);border-radius:3px;padding:0 3px; }
 .cg-source-picker .sp-remove { position:absolute;top:3px;right:3px;padding:0 4px;line-height:18px;opacity:.85; }
 .cg-source-picker .sp-name { display:block;margin-top:4px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-size:11px; }
