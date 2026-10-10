@@ -1,6 +1,6 @@
 import type { FileDetails } from './types';
 import type { RemoteImage } from './HydrusBrowser';
-export type GalleryEntry = { id: string; source: string; name: string; date?: number; mime?: string; hash?: string; local?: FileDetails; remote?: RemoteImage };
+export type GalleryEntry = { id: string; source: string; name: string; date?: number; mime?: string; hash?: string; local?: FileDetails; remote?: RemoteImage; previewUrl?: string };
 export type GalleryOrder = 'date' | 'name' | 'mime' | 'hash' | 'random' | 'result';
 function randomKey(id: string, seed: number) {
     let value = seed | 0;

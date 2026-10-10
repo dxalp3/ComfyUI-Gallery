@@ -2,7 +2,8 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { load } = require('./ts_loader.cjs');
 const { collectSessionOutputs } = load('SessionOutputCollection');
-const { sourceViewerEntry, recoverSourceOriginals } = load('SourceViewer');
+const { sourceViewerEntry, recoverSourceOriginals, recoverStoredSourceMetadata } = load('SourceViewer');
+const { imageOrigin } = load('ImageSourceGeometry');
 const hash = 'a'.repeat(64);
 const image = { input_name: `gallery_sources/${hash}.png`, title: 'image.png' };
 const file = (url, name = 'image.png') => ({ url, name, type: 'image', timestamp: 0, date: '' });
@@ -50,4 +51,25 @@ test('legacy originals can be recovered after a filename change', async () => {
     const renamed = file('/static_gallery/renamed.png', 'renamed.png');
     const recovered = await recoverSourceOriginals([image], [renamed], async () => ({ [renamed.url]: hash }));
     assert.equal(recovered[0].metadata.gallery_url, renamed.url);
+});
+test('Hydrus sources retain gallery actions and preview from the saved input copy', () => {
+    const remote = { hash, file_id: 4, mime: 'image/png', tags: { service: {} } };
+    const source = { ...image, metadata: { gallery_origin: 'gallery', hydrus: remote } };
+    assert.equal(imageOrigin(source), 'hydrus');
+    const result = sourceViewerEntry(source, [], entry);
+    assert.equal(result.source, 'hydrus');
+    assert.equal(result.hash, hash);
+    assert.equal(result.remote.file_id, 4);
+    assert.ok(result.previewUrl.startsWith('/view?'));
+});
+test('Hydrus copies with missing workflow metadata resolve by their input path', () => {
+    const source = { input_name: `hydrus/${hash}.png`, metadata: { gallery_origin: 'gallery' } };
+    assert.equal(imageOrigin(source), 'hydrus');
+    assert.equal(sourceViewerEntry(source, [], entry).source, 'hydrus');
+});
+test('stored provenance recovers Hydrus metadata without replacing workflow prefix edits', async () => {
+    const source = { ...image, metadata: { gallery_origin:'gallery', gallery_prefix: { id:'edited' } } };
+    const recovered = await recoverStoredSourceMetadata([source], async () => ({ [image.input_name]: { hydrus: { hash, file_id:4, tags:{} }, gallery_prefix:{id:'old'} } }));
+    assert.equal(recovered[0].metadata.gallery_prefix.id, 'edited');
+    assert.equal(sourceViewerEntry(recovered[0], [], entry).source, 'hydrus');
 });

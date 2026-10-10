@@ -1,5 +1,5 @@
 import { useSessionOutputs } from './SessionOutputs';
-import { recoverSourceOriginals, sourceViewerEntry } from './SourceViewer';
+import { recoverStoredSourceMetadata, recoverSourceOriginals, sourceViewerEntry } from './SourceViewer';
 import { ASSET_ACTION_EVENT } from './GalleryWorkspace';
 import { type ImageSourceImage } from './ImageSourceGeometry';
 import { FloatingPanel } from './FloatingPanel';
@@ -19,7 +19,7 @@ function GalleryCell(props: GridChildComponentProps) { return props.data.render(
 import { useGalleryContext } from './GalleryContext';
 import { useHydrus } from './HydrusContext';
 import { ComfyAppApi, BASE_PATH, BASE_Z_INDEX } from './ComfyAppApi';
-import { appendLocalImages } from './ImageSourceBridge';
+import { appendLocalImages, restoreSourceProvenance } from './ImageSourceBridge';
 import { ModelViewer } from './ModelViewer';
 import { use3DThumbnail } from './GlobalModelRenderer';
 import type { FileDetails } from './types';
@@ -101,8 +101,8 @@ export function UnifiedGallery({ sortRequest, source, remote, selectedRemote, se
     const shownSelected = [...new Map([...entries, ...(viewerList || [])].map(entry => [entry.id, entry])).values()].filter(entry => selected.has(entry.id));
     const index = shown.findIndex(entry => entry.id === viewer);
     const current = shown[index];
-    const thumbnail = (entry: GalleryEntry) => entry.source === 'node' ? BASE_PATH + entry.local!.url : entry.local ? `${BASE_PATH}/Gallery/thumbnail?url=${encodeURIComponent(entry.local.url)}&v=${entry.local.timestamp || 0}&root=${encodeURIComponent(gallery.settings.relativePath)}` : `${BASE_PATH}/Gallery/hydrus/thumbnail?hash=${entry.hash}&target=${encodeURIComponent(scope)}`;
-    const original = (entry: GalleryEntry) => entry.local ? `${BASE_PATH}${entry.local.url}` : `${BASE_PATH}/Gallery/hydrus/original?hash=${entry.hash}&target=${encodeURIComponent(scope)}`;
+    const thumbnail = (entry: GalleryEntry) => entry.previewUrl ? BASE_PATH + entry.previewUrl : entry.source === 'node' ? BASE_PATH + entry.local!.url : entry.local ? `${BASE_PATH}/Gallery/thumbnail?url=${encodeURIComponent(entry.local.url)}&v=${entry.local.timestamp || 0}&root=${encodeURIComponent(gallery.settings.relativePath)}` : `${BASE_PATH}/Gallery/hydrus/thumbnail?hash=${entry.hash}&target=${encodeURIComponent(scope)}`;
+    const original = (entry: GalleryEntry) => entry.previewUrl ? BASE_PATH + entry.previewUrl : entry.local ? `${BASE_PATH}${entry.local.url}` : `${BASE_PATH}/Gallery/hydrus/original?hash=${entry.hash}&target=${encodeURIComponent(scope)}`;
     useEffect(() => { setZoom(1); setFailedOriginal(undefined); setMediaError(false); }, [viewer]);
     useEffect(() => {
         if (!viewerActive) { stopMedia(viewerRef.current); setViewer(undefined); }
@@ -114,11 +114,17 @@ export function UnifiedGallery({ sortRequest, source, remote, selectedRemote, se
     useEffect(() => {
         const show = (event: Event) => {
             const request = ++viewerRequest.current;
-            const { url, urls, sourceImages: images, sourceIndex = 0 } = (event as CustomEvent<{ url: string; urls?: string[]; sourceImages?: ImageSourceImage[]; sourceIndex?: number }>).detail || {};
+            const { url, urls, sourceImages: images, sourceIndex = 0, sourceNodeId } = (event as CustomEvent<{ url: string; urls?: string[]; sourceImages?: ImageSourceImage[]; sourceIndex?: number; sourceNodeId?: number | string }>).detail || {};
             if (images?.length) {
                 const image = images[sourceIndex] || images[0];
                 setDetached(true); setSourceImages(images); setViewerUrls(undefined); setViewer(sourceViewerEntry(image,knownFiles,localEntry).id);
-                void recoverSourceOriginals(images, knownFiles, async urls => {
+                void recoverStoredSourceMetadata(images, async names => {
+                    const response = await fetch(BASE_PATH + '/Gallery/source/metadata', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({names})});
+                    // Older running backends can still resolve a Hydrus hash from its input path.
+                    if (response.status === 404) return {};
+                    if (!response.ok) throw new Error('Could not read source provenance.');
+                    return (await response.json()).metadata;
+                }).then(stored => recoverSourceOriginals(stored, knownFiles, async urls => {
                     const result: Record<string,string> = {};
                     for (let start = 0; start < urls.length; start += 2000) {
                         const response = await fetch(BASE_PATH + '/Gallery/source/hashes', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({urls:urls.slice(start,start+2000)})});
@@ -126,9 +132,10 @@ export function UnifiedGallery({ sortRequest, source, remote, selectedRemote, se
                         Object.assign(result,(await response.json()).hashes);
                     }
                     return result;
-                }).then(resolved => {
+                })).then(resolved => {
                     if (request !== viewerRequest.current) return;
                     setSourceImages(resolved);
+                    restoreSourceProvenance(sourceNodeId, resolved);
                     setViewer(previous => {
                         const focused = images.findIndex(image => sourceViewerEntry(image,knownFiles,localEntry).id === previous);
                         return focused >= 0 ? sourceViewerEntry(resolved[focused],knownFiles,localEntry).id : previous;

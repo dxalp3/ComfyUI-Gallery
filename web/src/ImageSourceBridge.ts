@@ -34,6 +34,21 @@ export function readSourceManifest(node: any): ImageSourceManifest {
     return value;
 }
 
+/** Persist repaired provenance without replacing current prompts, crops, or prefix choices. */
+export function restoreSourceProvenance(nodeId: number | string | undefined, images: ImageSourceImage[]) {
+    const node = nodes().find((node: any) => node.id === nodeId);
+    if (!node) return;
+    const manifest = readSourceManifest(node);
+    const repaired = manifest.images.map(image => {
+        const resolved = images.find(item => item.input_name === image.input_name);
+        if (!resolved) return image;
+        return { ...image, metadata: { ...image.metadata, gallery_origin: imageOrigin(resolved),
+            ...(resolved.metadata?.hydrus ? { hydrus: resolved.metadata.hydrus } : {}),
+            ...(resolved.metadata?.gallery_url ? { gallery_url: resolved.metadata.gallery_url } : {}) } };
+    });
+    if (JSON.stringify(repaired) !== JSON.stringify(manifest.images)) saveSourceManifest(node, { ...manifest, images: repaired });
+}
+
 export function saveSourceManifest(node: any, manifest: ImageSourceManifest, recordChange = true) {
     const graph = graphNow();
     if (!graph || !nodes().includes(node)) throw new Error('The target node is no longer in the active workflow.');
@@ -125,7 +140,7 @@ export function installSourceWidgets(node: any) {
         const galleryViewer = (index: number) => {
             clearTimeout(clickTimer);
             target = node;
-            window.dispatchEvent(new CustomEvent('gallery-open-viewer', { detail: { sourceImages: readSourceManifest(node).images, sourceIndex: index } }));
+            window.dispatchEvent(new CustomEvent('gallery-open-viewer', { detail: { sourceImages: readSourceManifest(node).images, sourceIndex: index, sourceNodeId: node.id } }));
         };
         node.__galleryPickerAnchor = () => preview.isConnected ? (preview.querySelector<HTMLElement>('[data-picker-trigger]') || preview).getBoundingClientRect() : null;
         const pickerTrigger = (element: HTMLElement) => {

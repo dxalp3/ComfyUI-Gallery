@@ -8,6 +8,8 @@ export const ORIGIN_STYLE = {
 };
 export function imageOrigin(image: ImageSourceImage): ImageOrigin {
     const explicit = image.metadata?.gallery_origin;
+    // Older input imports stamped Hydrus copies as gallery files after moving them to gallery_sources.
+    if (!image.metadata?.gallery_url && (image.metadata?.hydrus || image.input_name.replace(/\\/g, '/').startsWith('hydrus/'))) return 'hydrus';
     if (explicit === 'gallery' || explicit === 'hydrus' || explicit === 'external') return explicit;
     const name = image.input_name.replace(/\\/g, '/');
     if (name.startsWith('hydrus/') || image.metadata?.hydrus) return 'hydrus';

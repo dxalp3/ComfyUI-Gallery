@@ -13,7 +13,7 @@ import { appendToImageSource } from './ImageSourceBridge';
 export type RemoteImage = { hash: string; file_id: number; mime: string; width: number; height: number; tags?: Record<string, any>; [key: string]: any };
 type Page = { page_key: string; name: string; is_media_page: boolean; selected?: boolean; pages?: Page[] };
 type Results = { items: RemoteImage[]; total: number; offset?: number; page_name?: string; page_state?: number };
-type InputCopy = { name: string; subfolder: string; type: string; input_name: string; url: string; hash: string };
+type InputCopy = { name: string; subfolder: string; type: string; input_name: string; url: string; hash: string; metadata?: Record<string, any> };
 
 export function HydrusBrowser({ open, source = 'hydrus', searchMode, viewRevision, onSourceChange }: { onSourceChange: (source: string) => void; source?: string; open: boolean; searchMode: string; viewRevision: number }) {
     const gallery = useGalleryContext();
@@ -119,7 +119,7 @@ export function HydrusBrowser({ open, source = 'hydrus', searchMode, viewRevisio
                 } catch (reason) { failures.push(`${hash.slice(0, 10)}: ${reason instanceof Error ? reason.message : String(reason)}`); }
             }
             if (useWorkflow && inputs.length) {
-                try { setNotice(await appendToImageSource(inputs.map(input => ({ input_name: input.input_name, title: `Hydrus ${input.hash.slice(0, 12)}` })))); }
+                try { setNotice(await appendToImageSource(inputs.map(input => ({ input_name: input.input_name, title: `Hydrus ${input.hash.slice(0, 12)}`, metadata: input.metadata })))); }
                 catch (reason) { failures.push(reason instanceof Error ? reason.message : String(reason)); }
             }
             if (!useWorkflow) setNotice(`${completed} image(s) copied into ComfyUI input/hydrus. Use their names in Load Image nodes.`);

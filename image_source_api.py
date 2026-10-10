@@ -15,13 +15,13 @@ try:
     from .thumbnails import register_thumbnail_routes
     from .hydrus import HydrusError, resolve_image
     from .image_source import (ImageSourceError, MAX_SOURCE_BYTES, file_fingerprint,
-                               inspect_image, preview_composition)
+                               inspect_image, preview_composition, resolve_input)
 except ImportError:  # Standalone unit tests.
     from transfer_metadata import read_metadata, write_metadata
     from thumbnails import register_thumbnail_routes
     from hydrus import HydrusError, resolve_image
     from image_source import (ImageSourceError, MAX_SOURCE_BYTES, file_fingerprint,
-                              inspect_image, preview_composition)
+                              inspect_image, preview_composition, resolve_input)
 
 
 def import_local_image(gallery_root, input_root, url):
@@ -175,6 +175,18 @@ def local_hashes(gallery_root, urls):
     return {"hashes": result}
 
 
+def source_metadata(input_root, names):
+    if not isinstance(names, list) or len(names) > 32 or any(not isinstance(name, str) for name in names):
+        raise ImageSourceError('Send up to 32 input image names.')
+    metadata, errors = {}, {}
+    for name in dict.fromkeys(names):
+        try:
+            metadata[name] = read_metadata(resolve_input(input_root, name))
+        except (ImageSourceError, OSError, ValueError) as error:
+            errors[name] = str(error)
+    return {'metadata': metadata, 'errors': errors}
+
+
 def register_source_routes(routes, get_gallery_root, get_input_root):
     workers = asyncio.Semaphore(2)
     register_thumbnail_routes(routes, get_input_root, route_path="/Gallery/source/thumbnail")
@@ -192,6 +204,8 @@ def register_source_routes(routes, get_gallery_root, get_input_root):
             if not isinstance(data, dict):
                 raise ImageSourceError("Request body must be a JSON object.")
             async with workers:
+                if action == "metadata":
+                    return web.json_response(await asyncio.to_thread(source_metadata, get_input_root(), data.get("names")))
                 if action == "hashes":
                     return web.json_response(await asyncio.to_thread(local_hashes, get_gallery_root(), data.get("urls")))
                 if action == "inputs":
@@ -228,6 +242,10 @@ def register_source_routes(routes, get_gallery_root, get_input_root):
     @routes.post("/Gallery/source/hashes")
     async def hashes(request):
         return await handle(request, "hashes")
+
+    @routes.post("/Gallery/source/metadata")
+    async def metadata(request):
+        return await handle(request, "metadata")
 
     @routes.post("/Gallery/source/preview")
     async def preview(request):

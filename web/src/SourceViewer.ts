@@ -2,6 +2,18 @@ import { imageOrigin, sourceImageUrl, type ImageSourceImage } from './ImageSourc
 import type { FileDetails } from './types';
 import type { GalleryEntry } from './GalleryOrder';
 
+export async function recoverStoredSourceMetadata(images: ImageSourceImage[], read: (names: string[]) => Promise<Record<string, Record<string, any>>>) {
+    const metadata = await read([...new Set(images.map(image => image.input_name))]);
+    return images.map(image => {
+        const saved = metadata[image.input_name];
+        if (!saved) return image;
+        // Workflow edits to prompts/prefixes take precedence; saved provenance repairs legacy imports.
+        return { ...image, metadata: { ...saved, ...image.metadata,
+            ...(saved.hydrus ? { hydrus: saved.hydrus } : {}),
+            ...(saved.gallery_url && !image.metadata?.gallery_url ? { gallery_url: saved.gallery_url } : {}) } };
+    });
+}
+
 /** A known original remains a gallery asset even when the current folder/index omits it. */
 export function sourceViewerEntry(image: ImageSourceImage, files: FileDetails[], localEntry: (file: FileDetails) => GalleryEntry): GalleryEntry {
     const original: string | undefined = image.metadata?.gallery_url;
@@ -12,6 +24,13 @@ export function sourceViewerEntry(image: ImageSourceImage, files: FileDetails[],
         metadata: image.metadata as FileDetails['metadata'],
     });
     const url = sourceImageUrl(image.input_name);
+    const cached = image.metadata?.hydrus;
+    const hash = cached?.hash || (imageOrigin(image) === 'hydrus' ? /([a-f0-9]{64})/i.exec(image.input_name)?.[1] : undefined);
+    if (typeof hash === 'string' && /^[a-f0-9]{64}$/i.test(hash)) {
+        const extension = image.input_name.split('.').pop()?.toLowerCase();
+        const remote = { file_id: 0, width: 0, height: 0, mime: extension === 'jpg' ? 'image/jpeg' : 'image/' + (extension || 'png'), ...cached, hash: hash.toLowerCase() };
+        return { id: 'hydrus:' + remote.hash, source: 'hydrus', name: image.title || 'Hydrus ' + remote.hash.slice(0,12), hash: remote.hash, mime: remote.mime, remote, previewUrl: url };
+    }
     return { id: 'local:' + url, source: 'node', name: image.title || image.input_name,
         local: { name: image.title || image.input_name, url, timestamp: 0, date: '', type: 'image', metadata: image.metadata as FileDetails['metadata'] || { fileinfo: { filename: '', resolution: '', date: '', size: '' } } } };
 }
