@@ -148,6 +148,10 @@ class CompositionTests(unittest.TestCase):
         first = import_local_image(self.root, input_root, '/static_gallery/red.png')
         second = import_local_image(self.root, input_root, '/static_gallery/red.png')
         self.assertEqual(first, second)
+        self.assertEqual(first['metadata']['gallery_url'], '/static_gallery/red.png')
+        self.assertEqual(first['metadata']['gallery_origin'], 'gallery')
+        restored = import_input_image(input_root, first['input_name'])
+        self.assertEqual(restored['metadata']['gallery_url'], '/static_gallery/red.png')
         saved = input_root / first['input_name']
         self.assertEqual(saved.read_bytes(), (self.root / 'red.png').read_bytes())
         saved.write_bytes(b'unrelated existing data')

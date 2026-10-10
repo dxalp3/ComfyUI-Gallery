@@ -1,5 +1,7 @@
+import { useSessionOutputs } from './SessionOutputs';
+import { recoverSourceOriginals, sourceViewerEntry } from './SourceViewer';
 import { ASSET_ACTION_EVENT } from './GalleryWorkspace';
-import { sourceImageUrl, type ImageSourceImage } from './ImageSourceGeometry';
+import { type ImageSourceImage } from './ImageSourceGeometry';
 import { FloatingPanel } from './FloatingPanel';
 import { PreviewMedia, stopMedia } from './PreviewMedia';
 import { openImageInfo, openSourcePrefix } from './ImageInfo';
@@ -36,6 +38,7 @@ export function UnifiedGallery({ sortRequest, source, remote, selectedRemote, se
     copy: (hashes: string[], append?: boolean) => Promise<void>; download: (hashes: string[]) => Promise<void>; working: boolean; scope: string; active: boolean;
 }) {
     const gallery = useGalleryContext();
+    const session = useSessionOutputs();
     const { token } = theme.useToken();
     const hydrus = useHydrus();
     const [appending, setAppending] = useState<GalleryEntry[]>([]);
@@ -62,7 +65,7 @@ export function UnifiedGallery({ sortRequest, source, remote, selectedRemote, se
     const disabled = working || actionBusy;
     const localEntry = (file: FileDetails): GalleryEntry => ({
         id: 'local:' + file.url, local: file, name: file.name, date: galleryDate(hydrus.items[file.url]?.metadata, file.timestamp), hash: hydrus.items[file.url]?.hash,
-        mime: file.name.split('.').pop()?.toLowerCase().replace('jpeg', 'jpg'), source: 'local',
+        mime: file.name.split('.').pop()?.toLowerCase().replace('jpeg', 'jpg'), source: file.url.startsWith('/view?') ? 'node' : 'local',
     });
     const entries = useMemo(() => {
         const local: GalleryEntry[] = source === 'hydrus' ? [] : gallery.imagesDetailsList.filter(file => !['divider', 'empty-space'].includes(file.type)).map(localEntry);
@@ -80,26 +83,22 @@ export function UnifiedGallery({ sortRequest, source, remote, selectedRemote, se
     const selectionActive = selectionMode || selected.size > 0;
     const isVideo = (entry: GalleryEntry) => entry.local?.type === 'media' || entry.remote?.mime?.startsWith('video/');
     const isImage = (entry: GalleryEntry) => entry.local?.type === 'image' || entry.remote?.mime?.startsWith('image/');
-    const shownSelected = entries.filter(entry => selected.has(entry.id));
     /**
      * Other windows (the image search) open the viewer on their own results: it then steps through those
      * images, not through the main grid, and the main gallery's filter and scope stay as they are.
      */
     const [viewerUrls, setViewerUrls] = useState<string[]>();
     const [sourceImages, setSourceImages] = useState<ImageSourceImage[]>();
+    const knownFiles = useMemo(() => [...new Map([...session, ...Object.values(gallery.data?.folders || {}).flatMap(folder => Object.values(folder))].map(file => [file.url,file])).values()], [session,gallery.data]);
+    const viewerRequest = useRef(0);
     const viewerList = useMemo(() => {
         if (!viewerUrls && !sourceImages) return undefined;
-        const byUrl = new Map(Object.values(gallery.data?.folders || {}).flatMap(folder => Object.values(folder)).map(file => [file.url, file]));
-        if (sourceImages) return sourceImages.map(image => {
-            const original = image.metadata?.gallery_url;
-            const file = original && byUrl.get(original);
-            if (file) return localEntry(file);
-            const url = sourceImageUrl(image.input_name);
-            return { id: 'local:' + url, source: 'node', name: image.title || image.input_name, local: { name: image.title || image.input_name, url, timestamp: 0, date: '', type: 'image', metadata: image.metadata || { fileinfo: {} } } } as GalleryEntry;
-        });
+        const byUrl = new Map(knownFiles.map(file => [file.url, file]));
+        if (sourceImages) return sourceImages.map(image => sourceViewerEntry(image, knownFiles, localEntry));
         return viewerUrls!.flatMap(url => byUrl.get(url) ? [localEntry(byUrl.get(url)!)] : []);
-    }, [viewerUrls, sourceImages, gallery.data, hydrus.items]);
+    }, [viewerUrls, sourceImages, knownFiles, hydrus.items]);
     const shown = viewerList || entries;
+    const shownSelected = [...new Map([...entries, ...(viewerList || [])].map(entry => [entry.id, entry])).values()].filter(entry => selected.has(entry.id));
     const index = shown.findIndex(entry => entry.id === viewer);
     const current = shown[index];
     const thumbnail = (entry: GalleryEntry) => entry.source === 'node' ? BASE_PATH + entry.local!.url : entry.local ? `${BASE_PATH}/Gallery/thumbnail?url=${encodeURIComponent(entry.local.url)}&v=${entry.local.timestamp || 0}&root=${encodeURIComponent(gallery.settings.relativePath)}` : `${BASE_PATH}/Gallery/hydrus/thumbnail?hash=${entry.hash}&target=${encodeURIComponent(scope)}`;
@@ -114,17 +113,32 @@ export function UnifiedGallery({ sortRequest, source, remote, selectedRemote, se
     // The image search window opens its results here ("Open in gallery view").
     useEffect(() => {
         const show = (event: Event) => {
+            const request = ++viewerRequest.current;
             const { url, urls, sourceImages: images, sourceIndex = 0 } = (event as CustomEvent<{ url: string; urls?: string[]; sourceImages?: ImageSourceImage[]; sourceIndex?: number }>).detail || {};
             if (images?.length) {
                 const image = images[sourceIndex] || images[0];
-                const original = image.metadata?.gallery_url;
-                const file = original && Object.values(gallery.data?.folders || {}).some(folder => Object.values(folder).some(file => file.url === original));
-                setDetached(true); setSourceImages(images); setViewerUrls(undefined); setViewer('local:' + (file ? original : sourceImageUrl(image.input_name)));
+                setDetached(true); setSourceImages(images); setViewerUrls(undefined); setViewer(sourceViewerEntry(image,knownFiles,localEntry).id);
+                void recoverSourceOriginals(images, knownFiles, async urls => {
+                    const result: Record<string,string> = {};
+                    for (let start = 0; start < urls.length; start += 2000) {
+                        const response = await fetch(BASE_PATH + '/Gallery/source/hashes', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({urls:urls.slice(start,start+2000)})});
+                        if (!response.ok) throw new Error('Could not locate the original gallery image.');
+                        Object.assign(result,(await response.json()).hashes);
+                    }
+                    return result;
+                }).then(resolved => {
+                    if (request !== viewerRequest.current) return;
+                    setSourceImages(resolved);
+                    setViewer(previous => {
+                        const focused = images.findIndex(image => sourceViewerEntry(image,knownFiles,localEntry).id === previous);
+                        return focused >= 0 ? sourceViewerEntry(resolved[focused],knownFiles,localEntry).id : previous;
+                    });
+                }).catch(error => { if (request === viewerRequest.current) message.warning(String(error)); });
             } else if (url) { setDetached(true); setSourceImages(undefined); setViewerUrls(urls?.length ? urls : undefined); setViewer('local:' + url); }
         };
         window.addEventListener(OPEN_VIEWER_EVENT, show);
         return () => window.removeEventListener(OPEN_VIEWER_EVENT, show);
-    }, [gallery.data, gallery.setOpen]);
+    }, [knownFiles, hydrus.items]);
     const setSelection = (ids: Set<string>) => {
         gallery.setSelectedImages([...ids].filter(id => id.startsWith('local:')).map(id => id.slice(6)));
         setSelectedRemote([...ids].filter(id => id.startsWith('hydrus:')).map(id => id.slice(7)));
@@ -193,10 +207,11 @@ export function UnifiedGallery({ sortRequest, source, remote, selectedRemote, se
     useEffect(() => {
         const action = (event: Event) => {
             const {url,key,urls} = (event as CustomEvent).detail || {};
-            const file = Object.values(gallery.data?.folders || {}).flatMap(folder => Object.values(folder)).find(file => file.url === url);
+            const file = knownFiles.find(file => file.url === url);
             if (!file) return;
             const entry = localEntry(file);
-            if (key === 'view') { setDetached(true); setSourceImages(undefined); setViewerUrls(urls?.length ? urls : [url]); setViewer(entry.id); }
+            if (key === 'view') { viewerRequest.current++; setDetached(true); setSourceImages(undefined); setViewerUrls(urls?.length ? urls : [url]); setViewer(entry.id); }
+            else if (key === 'download') void act(key, entry);
             else if (key === 'source') setAppending([entry]);
             else if (key === 'prefix') openSourcePrefix([entry]);
             else if (key === 'info') openImageInfo({url});
@@ -204,7 +219,7 @@ export function UnifiedGallery({ sortRequest, source, remote, selectedRemote, se
         };
         window.addEventListener(ASSET_ACTION_EVENT, action);
         return () => window.removeEventListener(ASSET_ACTION_EVENT, action);
-    }, [gallery.data, hydrus.items]);
+    }, [knownFiles, hydrus.items]);
     const menu = (entry: GalleryEntry) => ({ items: entry.source === 'node' ? [{ key: 'download', label: 'Download original' }] : [
         { key: 'select', label: selected.has(entry.id) ? 'Deselect image' : 'Select image' },
         { key: 'source', disabled: !targets(entry).some(isImage), label: `Append to Image Source (${targets(entry).filter(item => isImage(item)).length})` },
@@ -226,7 +241,7 @@ export function UnifiedGallery({ sortRequest, source, remote, selectedRemote, se
     };
     useEffect(() => { if (viewer && index >= 0 && !viewerList) grid.current?.scrollToItem({ rowIndex: Math.floor(index / columns.current), columnIndex: index % columns.current }); }, [viewer, index]);
     const closeViewer = () => {
-        stopMedia(viewerRef.current);
+        viewerRequest.current++; stopMedia(viewerRef.current);
         setViewer(undefined); setViewerUrls(undefined); setSourceImages(undefined); setDetached(false);
         if (index >= 0 && !viewerList) grid.current?.scrollToItem({ rowIndex: Math.floor(index / columns.current), columnIndex: index % columns.current });
     };

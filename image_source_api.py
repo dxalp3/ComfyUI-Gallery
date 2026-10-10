@@ -25,7 +25,10 @@ except ImportError:  # Standalone unit tests.
 
 
 def import_local_image(gallery_root, input_root, url):
-    return import_file(resolve_image(gallery_root, url), input_root)
+    result = import_file(resolve_image(gallery_root, url), input_root)
+    result['metadata'] = {**result['metadata'], 'gallery_url': url, 'gallery_origin': 'gallery'}
+    write_metadata(Path(input_root) / result['input_name'], result['hash'], result['metadata'])
+    return result
 
 
 def import_input_image(input_root, name):

@@ -1,3 +1,4 @@
+import { installSessionOutputs } from './SessionOutputs';
 import { mountGalleryAssetPane } from './GalleryAssetPane';
 import { useGalleryTheme, interactionStyles } from './GalleryTheme';
 import { installPrefixWidgets } from './PrefixLibrary';
@@ -21,6 +22,8 @@ if (STANDALONE) {
 } else ComfyAppApi.registerExtension({
     name: "Gallery",
     async setup() {
+        const api = (window as any).comfyAPI?.api?.api || getComfyApp()?.api || (await import(/* @vite-ignore */ `${location.origin}/scripts/api.js`)).api;
+        installSessionOutputs(api);
         installWorkspaceTab();
         installLoadImageDrop();
         exclusiveTagsEnabled(); // loads the exclusive tag list when the setting is on
