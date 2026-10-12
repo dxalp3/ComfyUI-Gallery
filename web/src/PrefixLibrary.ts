@@ -124,7 +124,8 @@ export function applyLibraryPrefix(node: any, library: PrefixLibrary, id: string
     node.graph.beforeChange?.();
     try {
         node.properties ||= {}; node.properties.prompt_library_selected_prefix = id;
-        const value = text ?? expandPrefix(library, '@' + prefix.name).join(', ');
+        const positive = expandPrefix(library, '@' + prefix.name);
+        const value = text ?? (positive.length ? positive : prefix.negative_terms || []).join(', ');
         // The encoder shows boxes; setting its text means replacing them with one box named after the prefix.
         if (node.__galleryPromptBoxes) { node.__galleryPromptBoxes.insert(value, 'replace', prefix.name); return; }
         if (widget.inputEl) widget.inputEl.readOnly = false;

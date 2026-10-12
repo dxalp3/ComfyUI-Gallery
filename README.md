@@ -271,3 +271,11 @@ The compact sidebar keeps Workspace, Search images and Refresh visible. Tools co
 ## Workspace search memory
 
 Local, Hydrus and Both keep separate queries, filters, results, selection and ordering during the workspace session. Switching back restores that view, including its random order and scroll position, without searching again. This memory resets when the workspace is remounted or the browser reloads.
+
+## Prompt and viewer controls
+
+Tag boxes have an inline input beside their chips. Click blank space to type or use Backspace; drag a chip to another box (including a paired Source box) to move or copy it. Canvas shortcuts do not receive editor keystrokes or drag events.
+
+When appending saved prefixes, Automatic polarity uses positive terms if present, otherwise negative terms. Choose the intended workflow text target explicitly. Select multiple prefixes and choose **Separate groups, same rule**, **One combined group**, or **Separate groups, individual rules**. Separate encoder boxes retain their prefix names. Existing single-conditioning encoders remain compatible; a dual-conditioning encoder is not introduced.
+
+Associated prefix images open in the gallery viewer, including Hydrus originals. Context menus consistently use **Find related images**. Image Source keeps **Open in gallery** and **Choose batch images**; connect its **batch** IMAGE output to send the chosen images together. Its ordinary **image** output still follows the selected image/composition layout.

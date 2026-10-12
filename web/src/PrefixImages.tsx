@@ -2,7 +2,7 @@ import type { PrefixImage, PrefixLibrary } from './PrefixLibrary';
 import { collectPrefixImages } from './PrefixAssociations';
 import { useHydrus } from './HydrusContext';
 import { BASE_PATH } from './ComfyAppApi';
-import { openImageSearch } from './TagSearchPanel';
+import { OPEN_VIEWER_EVENT } from './TagSearchPanel';
 
 export { collectPrefixImages } from './PrefixAssociations';
 
@@ -27,11 +27,8 @@ export function PrefixImageGrid({ images, onRemove }: { images: PrefixImage[]; o
             const thumbnail = local ? `${BASE_PATH}/Gallery/thumbnail?url=${encodeURIComponent(local)}&root=${encodeURIComponent(image.root || './')}` : `${BASE_PATH}/Gallery/hydrus/thumbnail?hash=${hash}&target=${target}`;
             const body = <><img loading="lazy" src={thumbnail} alt={'Image: ' + (image.name || local || hash)} style={{ width: 110, height: 90, objectFit: 'contain' }} /><div style={{ overflowWrap: 'anywhere', fontSize: 11 }}>{image.name || 'Associated image'}</div></>;
             return original && <div key={(image.hash || image.local_url || '') + index} style={{ width: 110, position: 'relative' }}>
-                {/* A local image opens the image search for it (its lineage, what was made from it, its prefixes). */}
-                {local
-                    ? <div role="button" tabIndex={0} title="Search by this image: lineage, images made from it, same prefix" onClick={() => openImageSearch({ chips: [{ kind: 'image', url: local, name: image.name || local.split('/').pop() || local }] })}
-                        onKeyDown={event => { if (event.key === 'Enter') openImageSearch({ chips: [{ kind: 'image', url: local, name: image.name || local }] }); }} style={{ cursor: 'pointer' }}>{body}</div>
-                    : <a href={original} target="_blank" rel="noreferrer" title="Only in Hydrus: open the original" style={{ color: 'inherit' }}>{body}</a>}
+                <div role="button" tabIndex={0} title="Open in gallery" onClick={() => window.dispatchEvent(new CustomEvent(OPEN_VIEWER_EVENT, { detail: { sourceImages: [{ input_name: '', title: image.name, metadata: local ? { gallery_origin: 'gallery', gallery_url: local } : { gallery_origin: 'hydrus', hydrus: { hash } } }] } }))}
+                    onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); event.currentTarget.click(); } }} style={{ cursor: 'pointer' }}>{body}</div>
                 {onRemove && <button type="button" aria-label={'Unpair ' + (image.name || 'image')} title="Unpair this image from the prefix" onClick={() => onRemove(image)} style={{ position: 'absolute', top: 2, right: 2, border: 0, borderRadius: 10, background: '#000a', color: '#fff', cursor: 'pointer', width: 20, height: 20, lineHeight: '18px', padding: 0 }}>×</button>}
             </div>;
         })}

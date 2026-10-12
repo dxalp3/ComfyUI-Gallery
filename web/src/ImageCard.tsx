@@ -172,7 +172,7 @@ const ImageCardView = memo(function ImageCardView({
             { key: 'refresh', label: `Refresh Hydrus status (${targetCount})` },
             { key: 'info', label: 'Metadata' },
             { key: 'prefix', label: `Use for prefix… (${targetCount})` },
-            { key: 'imagesearch', label: 'Search by image' },
+            { key: 'imagesearch', label: 'Find related images' },
             { key: 'imageadd', label: 'Add image to the open search' },
             { key: 'select', label: selected ? 'Deselect image' : 'Select image' },
         ], onClick: async ({ key, domEvent }) => {

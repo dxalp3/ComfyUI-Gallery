@@ -13,7 +13,9 @@ export function PromptPalette({ onChoose, onSearch, onAppend, onEdit, chooseSear
     type Pick = { key: string; label: string; terms: string[]; prefixId?: string };
     const [selected, setSelected] = useState<Record<string, Pick>>({});
     const [insertion, setInsertion] = useState<PromptInsertion>(defaultInsertion);
-    const [prefixSide, setPrefixSide] = useState('positive');
+    const [prefixSide, setPrefixSide] = useState('auto');
+    const [grouping, setGrouping] = useState('separate');
+    const [rules, setRules] = useState<Record<string, PromptInsertion['format']>>({});
     const [inserting, setInserting] = useState(false);
     const [tab, setTab] = useState('tags');
     const [query, setQuery] = useState('');
@@ -48,11 +50,18 @@ export function PromptPalette({ onChoose, onSearch, onAppend, onEdit, chooseSear
         if (!onAppend || !picks.length) return;
         setInserting(true); setError('');
         try {
-            const groups = picks.map(row => prefixSide === 'negative' && row.prefixId ? library.prefixes.find(prefix => prefix.id === row.prefixId)?.negative_terms || [] : row.terms).filter(terms => terms.length);
-            if (!groups.length) throw new Error('These prefixes contain no terms on the selected side.');
-            // A prefix keeps its name as the box title in the encoder node; anything else becomes #1, #2, ...
-            const names = picks.filter(row => row.prefixId).map(row => row.label);
-            await onAppend(groups, options, { name: names.length === picks.length ? names.join(' + ') : undefined });
+            const chosen = picks.map(row => {
+                const negative = library.prefixes.find(prefix => prefix.id === row.prefixId)?.negative_terms || [];
+                const terms = row.prefixId && (prefixSide === 'negative' || (prefixSide === 'auto' && !row.terms.length)) ? negative : row.terms;
+                return { row, terms };
+            }).filter(item => item.terms.length);
+            if (!chosen.length) throw new Error('No terms are available for this selection. Choose Automatic polarity to use negative-only prefixes.');
+            if (grouping !== 'combined' && picks.some(row => row.prefixId)) {
+                // Prepending reverses calls, so the resulting boxes retain the selection order.
+                for (const { row, terms } of options.position === 'before' ? [...chosen].reverse() : chosen) {
+                    await onAppend(terms.map(term => [term]), { ...options, format: grouping === 'individual' ? rules[row.key] || options.format : options.format }, { name: row.prefixId ? row.label : undefined });
+                }
+            } else await onAppend(chosen.map(item => item.terms), options, { name: chosen.every(item => item.row.prefixId) ? chosen.map(item => item.row.label).join(' + ') : undefined });
         } catch (error) { setError(String(error)); } finally { setInserting(false); }
     };
     const selectAll = async () => { setInserting(true); setError(''); try { const all = await allMatching(); setSelected(Object.fromEntries(all.map(row => [row.key, row]))); } catch (error) { setError(String(error)); } finally { setInserting(false); } };
@@ -78,10 +87,11 @@ export function PromptPalette({ onChoose, onSearch, onAppend, onEdit, chooseSear
             <label>Weight <InputNumber aria-label="Insertion weight" min={0} max={3} step={0.05} value={insertion.weight} onChange={weight => setInsertion(old => ({ ...old, weight: weight ?? 1 }))} /></label>
             <Input aria-label="Insertion prefix" placeholder="Text before insertion" value={insertion.prefix} onChange={event => setInsertion(old => ({ ...old, prefix: event.target.value }))} style={{width:175}} />
             <Input aria-label="Insertion suffix" placeholder="Text after insertion" value={insertion.suffix} onChange={event => setInsertion(old => ({ ...old, suffix: event.target.value }))} style={{width:175}} />
-            {tab === 'prefixes' && <Select aria-label="Prefix polarity to append" value={prefixSide} onChange={setPrefixSide} options={[{value:'positive',label:'Positive prefix terms'},{value:'negative',label:'Negative prefix terms'}]} />}
-        </Space><div><Typography.Text type="secondary">Selection spans pages. Pick one or more wiki categories, then “Select all matching” takes their combined tags (the tag search and favorites filter still apply). Each prefix is one alternative. Optional alternatives add an empty choice (one tag/prefix or nothing). An optional group keeps the selected tags together as one optional unit {'{a, b, c|}'}; append several selections one after another to give each its own weight. Braces use your workflow's dynamic-prompt handling.</Typography.Text></div></>}
+            {tab === 'prefixes' && <Select aria-label="Prefix polarity to append" value={prefixSide} onChange={setPrefixSide} options={[{value:'auto',label:'Automatic: positive, or negative if empty'},{value:'positive',label:'Positive prefix terms'},{value:'negative',label:'Negative prefix terms'}]} />}
+            {tab === 'prefixes' && <Select aria-label="Prefix grouping" value={grouping} onChange={setGrouping} options={[{value:'separate',label:'Separate groups, same rule'},{value:'combined',label:'One combined group'},{value:'individual',label:'Separate groups, individual rules'}]} />}
+        </Space><div><Typography.Text type="secondary">Selection spans pages. Pick one or more wiki categories, then “Select all matching” takes their combined tags (the tag search and favorites filter still apply). Choose separate groups to preserve each prefix as its own box, or one combined group to format the selection together. Automatic polarity uses positive terms when present and otherwise negative terms. Optional alternatives add an empty choice (one tag/prefix or nothing). An optional group keeps the selected tags together as one optional unit {'{a, b, c|}'}; append several selections one after another to give each its own weight. Braces use your workflow's dynamic-prompt handling.</Typography.Text></div></>}
         <div style={{ maxHeight: 235, overflowY: 'auto', marginTop: 8 }} aria-busy={busy}>
-            {rows.map(row => <div key={row.key} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0' }}>
+            {rows.map(row => <div key={row.key} style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, padding: '4px 0' }}>
                 {onAppend && <><Checkbox aria-label={'Pick ' + row.label} checked={!!selected[row.key]} disabled={busy || inserting} onChange={event => setSelected(old => {
                     const next = { ...old };
                     if (!event.target.checked) { delete next[row.key]; return next; }
@@ -91,7 +101,7 @@ export function PromptPalette({ onChoose, onSearch, onAppend, onEdit, chooseSear
                 })} /><Button size="small" disabled={busy || inserting} aria-label={'Append ' + row.label} onClick={() => void append([row])}>Append</Button></>}
                 <Button size="small" aria-label={'Favorite ' + row.label} aria-pressed={favorites.includes(row.key)} onClick={() => favorite(row.key)}>{favorites.includes(row.key) ? '★' : '☆'}</Button>
                 <Button size="small" disabled={busy && tab === 'tags'} onClick={() => onChoose(row.terms, row.prefixId, library.prefixes.find(prefix => prefix.id === row.prefixId)?.negative_terms)} aria-label={(chooseSearches ? 'Search for ' : 'Add ') + row.label} title={chooseSearches ? 'Open an image search for this' : 'Add'}>{row.label.replace(/_/g, ' ')}</Button>
-                {onEdit && row.prefixId && <Button size="small" aria-label={'Edit prefix ' + row.label} title="Open this prefix in the prefix editor" onClick={() => onEdit(row.prefixId!)}>Edit</Button>}{row.prefixId && <PrefixImages library={library} prefixId={row.prefixId} />}
+                {onEdit && row.prefixId && <Button size="small" aria-label={'Edit prefix ' + row.label} title="Open this prefix in the prefix editor" onClick={() => onEdit(row.prefixId!)}>Edit</Button>}{row.prefixId && grouping === 'individual' && <Select style={{ width: 190 }} aria-label={'Format for ' + row.label} value={rules[row.key] || insertion.format} onChange={format => setRules(old => ({ ...old, [row.key]: format }))} options={[{value:'comma',label:'Comma-separated'},{value:'alternatives',label:'Alternatives'},{value:'optional',label:'Optional alternatives'},{value:'group',label:'Optional group'},{value:'each',label:'Each optional'}]} />}{row.prefixId && <PrefixImages library={library} prefixId={row.prefixId} />}
                 <Typography.Text type="secondary" style={{ overflowWrap: 'anywhere' }}>{row.detail}</Typography.Text>
             </div>)}
             {!rows.length && !busy && <Typography.Text type="secondary">No matches. Create a prefix below or change the filters.</Typography.Text>}

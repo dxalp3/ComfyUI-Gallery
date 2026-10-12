@@ -154,7 +154,6 @@ export function installSourceWidgets(node: any) {
         const thumb = (image: ImageSourceImage) => '/Gallery/source/thumbnail?url=' + encodeURIComponent('/static_gallery/' + image.input_name);
         const button = (text: string, label: string, onClick: () => void, css = '') => { const item = document.createElement('button'); item.type = 'button'; item.textContent = text; item.title = label; item.setAttribute('aria-label', label); item.onclick = event => { event.stopPropagation(); onClick(); }; item.style.cssText = 'border:0;border-radius:4px;background:var(--comfy-input-bg,#333);color:var(--input-text,#ddd);cursor:pointer;' + css; return item; };
         let dismissMenu: (() => void) | undefined;
-        let dismissViewer: (() => void) | undefined;
         const badge = (element: HTMLElement, image: ImageSourceImage) => {
             const origin = imageOrigin(image), look = ORIGIN_STYLE[origin];
             element.style.position = 'relative';
@@ -163,17 +162,6 @@ export function installSourceWidgets(node: any) {
             const label = document.createElement('span'); label.textContent = look.label;
             label.style.cssText = 'position:absolute;top:0;left:0;padding:1px 3px;font:9px system-ui;color:#111;background:' + look.color;
             element.append(label);
-        };
-        const openViewer = (image: ImageSourceImage) => {
-            dismissViewer?.();
-            const dialog = document.createElement('dialog'); dialog.setAttribute('aria-label', 'Image source viewer');
-            dialog.style.cssText = 'max-width:95vw;max-height:95vh;padding:12px;background:#202020;color:white;border:1px solid #888;border-radius:8px';
-            const img = document.createElement('img'); img.src = sourceImageUrl(image.input_name); img.alt = image.title || image.input_name;
-            img.style.cssText = 'display:block;max-width:90vw;max-height:80vh;object-fit:contain';
-            const close = () => { dialog.remove(); dismissViewer = undefined; };
-            dialog.append(button('Close', 'Close viewer', close), img);
-            dialog.addEventListener('cancel', event => { event.preventDefault(); close(); });
-            dismissViewer = close; document.body.append(dialog); dialog.showModal();
         };
         const menu = (event: MouseEvent, index: number) => {
             event.preventDefault(); event.stopPropagation(); dismissMenu?.();
@@ -189,16 +177,14 @@ export function installSourceWidgets(node: any) {
                 const item = button(label, label, () => { close(); try { run(); } catch (error) { node.__galleryNotify?.(String(error)); } }, 'text-align:left;padding:6px 12px;min-width:180px');
                 item.setAttribute('role', 'menuitem'); popup.append(item);
             };
-            action('Use as output', () => { const current = readSourceManifest(node); saveSourceManifest(node, { ...current, layout: 'single', active_index: index }); });
             action('Choose batch images…', () => window.dispatchEvent(new CustomEvent(SOURCE_PICKER_EVENT, { detail: { node, anchor: node.__galleryPickerAnchor, batch: true } })));
             action('Open in gallery', () => galleryViewer(index));
-            action('Open in viewer', () => openViewer(image));
             action('Remove image', () => { const current = readSourceManifest(node); view = Math.max(0, view - (index <= view ? 1 : 0)); saveSourceManifest(node, removeSourceImage(current, index)); });
             dismissMenu = close; document.body.append(popup); popup.querySelector('button')?.focus();
             document.addEventListener('pointerdown', outside, true); document.addEventListener('keydown', key, true);
         };
         const removed = node.onRemoved;
-        node.onRemoved = function (...args: any[]) { clearTimeout(clickTimer); dismissMenu?.(); dismissViewer?.(); return removed?.apply(this, args); };
+        node.onRemoved = function (...args: any[]) { clearTimeout(clickTimer); dismissMenu?.(); return removed?.apply(this, args); };
         const refresh = () => {
             dismissMenu?.();
             preview.replaceChildren();

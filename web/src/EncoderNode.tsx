@@ -65,6 +65,9 @@ export function installPromptBoxes(node: any, deps: Deps) {
     const host = document.createElement('div');
     host.style.cssText = 'pointer-events:auto;width:100%;height:100%;overflow:auto;box-sizing:border-box;background:var(--comfy-input-bg,#222);border-radius:6px';
     const root = createRoot(host);
+    for (const type of ['pointerdown', 'mousedown', 'keydown', 'keyup', 'dragstart', 'dragover', 'drop']) {
+        host.addEventListener(type, event => event.stopPropagation());
+    }
     /** Exclusive tags in "never together" mode change how the boxes compile (see neverTogether). */
     const together = () => exclusiveMode() === 'together' ? conflicts : undefined;
     const compiledNow = () => compileBoxes(state, together());

@@ -21,12 +21,14 @@ const assert = require('node:assert/strict');
     const host=document.createElement('div');host.id='qa-control-'+i;host.style.cssText=`width:510px;position:fixed;left:${20+i*550}px;top:10px;z-index:5000;background:#222`;document.body.append(host);
     const node={comfyClass:'GalleryPromptEncode',widgets:[{name:'text',value:i?'destination':'a, b, {red|blue|}'},{name:'source_mode',value:'after'}],inputs:[{name:'source_text',link:i?null:101}],properties:{},setDirtyCanvas(){},addWidget(type,name,value,callback){this.widgets.push({type,name,value,callback});},addDOMWidget(name,type,el){host.append(el);return{name,type};}};
     graph.add(node);window.qaExtension.nodeCreated(node);window.qaControlNodes.push(node);
+    window.qaEscapedEvents=0;
+    for (const type of ['mousedown','keydown','dragstart','drop']) host.addEventListener(type,event=>{window.qaEscapedEvents++;event.preventDefault();});
    }
   },prefix);
   const first=page.locator('#qa-control-0'), second=page.locator('#qa-control-1');
   const add=first.getByRole('textbox',{name:'Add tags (Enter)',exact:true});
   await add.waitFor();
-  await first.getByText('#1',{exact:true}).click(); await add.press('Backspace');
+  const surface=first.locator('[data-tag-surface]').first();const bounds=await surface.boundingBox();await surface.click({position:{x:bounds.width-4,y:bounds.height-4}});assert.equal(await add.evaluate(el=>el===document.activeElement),true);await page.keyboard.press('Backspace');
   await page.waitForFunction(()=>!window.qaControlNodes[0].widgets[0].value.includes('red'));
   await add.fill('{red|blue|}');await add.press('Enter');
   await first.getByRole('button',{name:'Edit b',exact:true}).dblclick();
@@ -46,7 +48,7 @@ const assert = require('node:assert/strict');
   await second.getByRole('button',{name:'Edit destination',exact:true}).click();
   await second.getByRole('textbox',{name:'Add tags (Enter)',exact:true}).press('Backspace');
   await page.waitForFunction(()=>!window.qaControlNodes[1].widgets[0].value.includes('destination'));
-  assert.deepEqual(errors,[]);
+  assert.equal(await page.evaluate(()=>window.qaEscapedEvents),0);assert.deepEqual(errors,[]);
   console.log('PASS box focus, Backspace, double-click removal, cross-editor copies, grouped source-prefix persistence and polarity');
  } finally {await browser.close();}
 })().catch(e=>{console.error(e);process.exit(1)});

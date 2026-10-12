@@ -147,7 +147,7 @@ export function ImageInfoPanel() {
         onCancel={close} footer={<Space wrap>
             <Button onClick={close}>Close</Button>
             {entry && <Button onClick={() => openSourcePrefix([entry])}>Use for prefix…</Button>}
-            {file && <Button onClick={() => openImageSearch({ chips: [{ kind: 'image', url: file.url, name: file.name }] })}>Search by image</Button>}
+            {file && <Button onClick={() => openImageSearch({ chips: [{ kind: 'image', url: file.url, name: file.name }] })}>Find related images</Button>}
             {url && <Button loading={busy} onClick={refreshOne}>Refresh from Hydrus</Button>}
             {url && <Button type="primary" disabled={busy} onClick={() => { requestExport([url]); close(); }}>Export to Hydrus</Button>}
         </Space>}>

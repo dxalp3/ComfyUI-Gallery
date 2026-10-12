@@ -3,7 +3,9 @@ import type { FileDetails } from './types';
 import type { GalleryEntry } from './GalleryOrder';
 
 export async function recoverStoredSourceMetadata(images: ImageSourceImage[], read: (names: string[]) => Promise<Record<string, Record<string, any>>>) {
-    const metadata = await read([...new Set(images.map(image => image.input_name))]);
+    const names = [...new Set(images.map(image => image.input_name).filter(Boolean))];
+    if (!names.length) return images;
+    const metadata = await read(names);
     return images.map(image => {
         const saved = metadata[image.input_name];
         if (!saved) return image;
@@ -29,7 +31,7 @@ export function sourceViewerEntry(image: ImageSourceImage, files: FileDetails[],
     if (typeof hash === 'string' && /^[a-f0-9]{64}$/i.test(hash)) {
         const extension = image.input_name.split('.').pop()?.toLowerCase();
         const remote = { file_id: 0, width: 0, height: 0, mime: extension === 'jpg' ? 'image/jpeg' : 'image/' + (extension || 'png'), ...cached, hash: hash.toLowerCase() };
-        return { id: 'hydrus:' + remote.hash, source: 'hydrus', name: image.title || 'Hydrus ' + remote.hash.slice(0,12), hash: remote.hash, mime: remote.mime, remote, previewUrl: url };
+        return { id: 'hydrus:' + remote.hash, source: 'hydrus', name: image.title || 'Hydrus ' + remote.hash.slice(0,12), hash: remote.hash, mime: remote.mime, remote, previewUrl: image.input_name ? url : undefined };
     }
     return { id: 'local:' + url, source: 'node', name: image.title || image.input_name,
         local: { name: image.title || image.input_name, url, timestamp: 0, date: '', type: 'image', metadata: image.metadata as FileDetails['metadata'] || { fileinfo: { filename: '', resolution: '', date: '', size: '' } } } };

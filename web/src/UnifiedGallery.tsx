@@ -115,7 +115,7 @@ export function UnifiedGallery({ viewKey, sortRequest, source, remote, selectedR
         else if (index >= 0) lastViewerIndex.current = index;
     }, [viewerActive, index, viewer, shown]);
     useEffect(() => { setViewer(undefined); setTrashing([]); }, [scope]);
-    // The image search window opens its results here ("Open in gallery view").
+    // The image search window opens its results here ("Open in gallery").
     useEffect(() => {
         const show = (event: Event) => {
             const request = ++viewerRequest.current;
@@ -237,7 +237,7 @@ export function UnifiedGallery({ viewKey, sortRequest, source, remote, selectedR
         { key: 'source', disabled: !targets(entry).some(isImage), label: `Append to Image Source (${targets(entry).filter(item => isImage(item)).length})` },
         { key: 'info', label: 'Metadata' },
         { key: 'prefix', label: `Use for prefix… (${targets(entry).filter(isImage).length})` },
-        { key: 'imagesearch', disabled: !entry.local, label: 'Search by image' },
+        { key: 'imagesearch', disabled: !entry.local, label: 'Find related images' },
         { key: 'imageadd', disabled: !entry.local, label: 'Add image to the open search' },
         { key: 'download', label: 'Download original(s)' },
         ...(entry.local ? [{ key: 'export', label: 'Export local selection to Hydrus' }, { key: 'refresh', label: 'Refresh Hydrus status' }] : [{ key: 'copy', disabled: !targets(entry).some(item => item.remote && isImage(item)), label: 'Save copy to input only (no workflow append)' }]),

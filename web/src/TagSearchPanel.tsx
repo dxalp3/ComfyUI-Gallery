@@ -14,7 +14,7 @@ import { useSearchPool } from './SearchPool';
 import type { FileDetails } from './types';
 
 /**
- * Image search: one window for "Find images" (from a prefix), "Search by image" and tag search.
+ * Image search: one window for "Find images" (from a prefix), "Find related images" and tag search.
  *
  * The query is a row of chips, stacked in any order:
  *   tag      typed or suggested (prompt phrases, Hydrus tags, library); filters every result
@@ -275,10 +275,10 @@ export function ImageSearchPanel() {
         catch (reason) { message.error(String(reason)); }
     };
     const tile = ({ file, note, color }: Hit) => <Dropdown key={file.url} trigger={['contextMenu']} menu={{ items: [
-        { key: 'view', label: 'Open in gallery view' },
+        { key: 'view', label: 'Open in gallery' },
         { key: 'select', label: selected.has(file.url) ? 'Deselect' : 'Select' },
         { type: 'divider' as const },
-        { key: 'search', label: 'Search by this image (new search)' }, { key: 'add', label: 'Add this image to the search' },
+        { key: 'search', label: 'Find related images' }, { key: 'add', label: 'Add this image to the search' },
         { type: 'divider' as const },
         { key: 'info', label: 'Metadata' }, { key: 'prefix', label: `Use for prefix… (${targets(file.url).length})` }, ...prefixActions(file.url),
         { key: 'source', label: `Append to Image Source (${targets(file.url).length})` }, { key: 'export', label: `Export to Hydrus (${targets(file.url).length})` },

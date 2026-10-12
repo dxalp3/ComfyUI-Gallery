@@ -6,7 +6,8 @@ try{
  await page.route('**/Gallery/settings',async route=>{if(route.request().method()==='POST'){saved=route.request().postDataJSON();await route.fulfill({json:{success:true}});}else await route.continue();});
  await page.goto('http://127.0.0.1:8191');
  await page.waitForFunction(()=>window.qaSidebar&&window.qaListeners.executed);
- await page.evaluate(()=>{const host=document.createElement('div');host.id='qa-sidebar';host.style.cssText='position:fixed;left:0;top:40px;width:260px;height:650px;z-index:5000';document.body.append(host);window.qaSidebar.render(host);window.qaListeners.executed({detail:{output:{images:[{filename:'study-1.png',type:'output'},{filename:'controlnet-temp.png',type:'temp'}]}}});});
+ await page.evaluate(()=>{const host=document.createElement('div');host.id='qa-sidebar';host.style.cssText='position:fixed;left:0;top:0px;width:260px;height:650px;z-index:5000';document.body.append(host);window.qaSidebar.render(host);window.qaListeners.executed({detail:{output:{images:[{filename:'study-1.png',type:'output'},{filename:'controlnet-temp.png',type:'temp'}]}}});});
+ await page.waitForFunction(()=>{const bar=document.querySelector('.workflow-tabs-container'),heading=document.querySelector('.cg-asset-pane header');return heading&&bar&&heading.getBoundingClientRect().top>=bar.getBoundingClientRect().bottom;});
  const pane=page.getByRole('region',{name:'Gallery assets',exact:true});
  await pane.getByRole('button',{name:'View study-1.png',exact:true}).waitFor();
  assert.equal(await pane.getByRole('button',{name:'View controlnet-temp.png',exact:true}).count(),0);

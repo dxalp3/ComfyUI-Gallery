@@ -122,7 +122,7 @@ function ChipView({ chip, selected, picked, onSelect, onPick, onRemove, onDrop, 
     const remove = onRemove && <button type="button" aria-label="Remove tag" title="Remove" onClick={event => { event.stopPropagation(); onRemove(); }} style={{ ...S.x, color: grouped ? '#fff' : 'inherit' }}>×</button>;
     const select = (event: { shiftKey: boolean; ctrlKey: boolean; metaKey: boolean }) => { if ((event.shiftKey || event.ctrlKey || event.metaKey) && onPick) onPick(event.shiftKey); else onSelect(); };
     const label = <span role="button" tabIndex={0} aria-label={'Edit ' + compileChip({ ...chip, enabled: true })} onClick={select}
-        onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); select(event); } else if (onRemove && (event.key === 'Backspace' || event.key === 'Delete')) { event.preventDefault(); event.stopPropagation(); if (!event.repeat) onRemove(); } }} style={{ cursor: 'pointer' }}>
+        onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); select(event); } else if (onRemove && (event.key === 'Backspace' || event.key === 'Delete')) { event.preventDefault(); event.stopPropagation(); if (!event.repeat) onRemove(); } }} style={{ cursor: 'grab' }}>
         {grouped
             ? <ChipParts chip={chip} suggest={suggest} onItems={onItems} />
             : <>{chip.emphasis === 'round' && '('}{chip.emphasis === 'square' && '['}{chip.text}{chip.emphasis === 'round' && ')'}{chip.emphasis === 'square' && ']'}</>}
@@ -135,7 +135,7 @@ function ChipView({ chip, selected, picked, onSelect, onPick, onRemove, onDrop, 
         onDragOver={event => { if (!onDrop || dragging?.kind !== 'chip' || dragging.chip === chip) return; event.preventDefault(); event.stopPropagation(); setMark(right(event) ? 'after' : 'before'); }}
         onDragLeave={() => setMark(undefined)}
         onDrop={event => { if (!onDrop || dragging?.kind !== 'chip') return; event.preventDefault(); event.stopPropagation(); const after = right(event), current = dragging; setMark(undefined); if (current.chip !== chip) onDrop(current.chip, after); }}
-        style={{ ...S.chip, ...(grouped ? { flexDirection: 'column', alignItems: 'stretch', gap: 0, padding: 0, borderRadius: 6, borderColor: color, overflow: 'visible' } : {}), ...(selected ? S.selected : {}), ...(picked ? { outline: `2px dashed ${accent}` } : {}), opacity: chip.enabled ? 1 : .45, textDecoration: chip.enabled ? 'none' : 'line-through', cursor: onDrop ? 'grab' : 'default', boxShadow: mark === 'before' ? `inset 3px 0 0 ${accent}` : mark === 'after' ? `inset -3px 0 0 ${accent}` : undefined }}>
+        style={{ ...S.chip, ...(grouped ? { flexDirection: 'column', alignItems: 'stretch', gap: 0, padding: 0, borderRadius: 6, borderColor: color, overflow: 'visible' } : {}), ...(selected ? S.selected : {}), ...(picked ? { outline: `2px dashed ${accent}` } : {}), opacity: chip.enabled ? 1 : .45, textDecoration: chip.enabled ? 'none' : 'line-through', userSelect: 'none', cursor: 'grab', boxShadow: mark === 'before' ? `inset 3px 0 0 ${accent}` : mark === 'after' ? `inset -3px 0 0 ${accent}` : undefined }}>
         {grouped
             ? <>
                 {/* The header names the grouping (and changes it); the body keeps the separators. */}
@@ -274,7 +274,7 @@ function AddInput({ onBackspace, target, onTargetMode, placeholder, suggest, onT
     // Tag mode: show what brackets or keywords will make of the text before it is added.
     const preview = !grouping && /[{([]|\b(?:AND|OR|OPT)\b/.test(value) ? parseTyped(value) : [];
     const shown = draft.length ? draft : preview;
-    return <div data-add-input>
+    return <div data-add-input style={{ flex: '1 1 220px', minWidth: 160, cursor: 'text' }}>
         {!!shown.length && <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6, marginBottom: 4, opacity: .85 }}>
             {shown.map(chip => <ChipView key={chip.id} chip={chip} selected={false} onSelect={() => undefined} onRemove={draft.length ? () => setPending([]) : undefined} />)}
             <small style={{ opacity: .7 }}>{draft.length ? 'Enter adds it · comma or a suggestion adds another tag' : 'Enter adds · closing the brackets adds it too'}</small>
@@ -384,7 +384,7 @@ function GroupView({ box, index, count, state, onChange, suggest, bare, placehol
             if (chipId && (selecting || event.ctrlKey || event.metaKey || event.shiftKey)) return;
             if (chipId) setActiveChipId(chipId);
             else if (!element.closest('[data-add-input]')) setActiveChipId(undefined);
-            if (!element.closest('button,input,textarea,select,[draggable="true"]')) { if (box.collapsed) patch({ collapsed: false }); focusInput(); }
+            if (!element.closest('button,input,textarea,select,[data-chip-id],[draggable="true"]')) { if (box.collapsed) patch({ collapsed: false }); focusInput(); }
         }}
         onDragOver={event => { if (dragging?.kind === 'box' && dragging.id !== box.id) { event.preventDefault(); setMark(lower(event) ? 'after' : 'before'); } else if (dragging?.kind === 'chip') event.preventDefault(); }}
         onDragLeave={() => setMark(undefined)}
@@ -422,17 +422,18 @@ function GroupView({ box, index, count, state, onChange, suggest, bare, placehol
         {box.collapsed
             ? !!preview && <div style={S.preview} title={preview}>{preview}</div>
             : <div style={S.body}>
-                <div style={S.chips}>{box.chips.map(item => <ChipView key={item.id} chip={item} selected={item.id === selected || item.id === activeChipId} picked={picked.includes(item.id)} onSelect={() => { if (selecting) { pick(item.id); return; } setSelected(item.id); setActiveChipId(item.id); focusInput(); }} onRemove={() => remove(item.id)}
+                <div data-tag-surface style={{ ...S.chips, minHeight: 48, alignItems: 'flex-start', cursor: 'text' }}>{box.chips.map(item => <ChipView key={item.id} chip={item} selected={item.id === selected || item.id === activeChipId} picked={picked.includes(item.id)} onSelect={() => { if (selecting) { pick(item.id); return; } setSelected(item.id); setActiveChipId(item.id); focusInput(); }} onRemove={() => remove(item.id)}
                     onPick={range => pick(item.id, range)}
                     onDrop={(sourceChip, after) => onChange(dropPromptChip(state, sourceChip, box.id, { chipId: item.id, after }))}
                     onKind={mode => onChange(convertChip(state, box.id, item.id, mode))} suggest={suggest}
-                    onItems={items => { const next = withItems(item, items); onChange(editChips(state, box.id, chips => next ? chips.map(other => other.id === item.id ? next : other) : chips.filter(other => other.id !== item.id))); }} />)}</div>
-                {chip && <ChipEditor chip={chip} onKind={mode => { if (mode !== 'alternatives' && mode !== 'optional' && mode !== 'group') setSelected(undefined); onChange(convertChip(state, box.id, chip.id, mode)); }} onClose={() => setSelected(undefined)} onRemove={() => remove(chip.id)} onSplit={() => { setSelected(undefined); onChange(splitChip(state, box.id, chip.id)); }}
-                    onChange={next => onChange(editChips(state, box.id, chips => chips.map(item => item.id === next.id ? next : item)))}
-                    onMove={delta => onChange(editChips(state, box.id, chips => moveItem(chips, chip.id, delta)))} />}
+                    onItems={items => { const next = withItems(item, items); onChange(editChips(state, box.id, chips => next ? chips.map(other => other.id === item.id ? next : other) : chips.filter(other => other.id !== item.id))); }} />)}
                 <AddInput onBackspace={() => { if (pickedIds.length) { removePicked(); return; } const id = activeChipId || box.chips[box.chips.length - 1]?.id; if (id) remove(id); }} target={target} onTargetMode={mode => { if (target) onChange(convertChip(state, box.id, target.id, mode)); }} placeholder={placeholder} suggest={suggest} onText={text => target ? append(parseTyped(text).flatMap(chipTerms)) : onChange(addChips(state, box.id, text))}
                     onGroup={(mode, tags) => { if (target) { append(tags); return; } const made = groupChips(mode, tags); if (made.length) onChange(editChips(state, box.id, chips => [...chips, ...made])); }}
                     onPrefix={(item, head) => target ? append([...parseTyped(head).flatMap(chipTerms), ...(item.terms || [])]) : onChange(addChips(state, box.id, [head, (item.terms || []).join(', ')].filter(Boolean).join(', ')))} />
+                </div>
+                {chip && <ChipEditor chip={chip} onKind={mode => { if (mode !== 'alternatives' && mode !== 'optional' && mode !== 'group') setSelected(undefined); onChange(convertChip(state, box.id, chip.id, mode)); }} onClose={() => setSelected(undefined)} onRemove={() => remove(chip.id)} onSplit={() => { setSelected(undefined); onChange(splitChip(state, box.id, chip.id)); }}
+                    onChange={next => onChange(editChips(state, box.id, chips => chips.map(item => item.id === next.id ? next : item)))}
+                    onMove={delta => onChange(editChips(state, box.id, chips => moveItem(chips, chip.id, delta)))} />}
             </div>}
     </div>;
 }
@@ -505,7 +506,7 @@ function SourceView({ box, index, count, state, onChange, source, suggest }: Com
 }
 
 export function PromptBoxEditor({ state, source, preview, suggest, onChange, notice }: { state: BoxState; source: SourceInfo; preview: string; suggest: (query: string) => Promise<Suggestion[]>; onChange: (state: BoxState) => void; notice?: string }) {
-    return <div style={S.root} onWheel={event => event.stopPropagation()}>
+    return <div style={S.root} onMouseDown={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()} onWheel={event => event.stopPropagation()}>
         {state.boxes.map((box, index) => box.kind === 'source'
             ? <SourceView key={box.id} box={box} index={index} count={state.boxes.length} state={state} onChange={onChange} source={source} suggest={suggest} />
             : <GroupView key={box.id} box={box} index={index} count={state.boxes.length} state={state} onChange={onChange} suggest={suggest} />)}
@@ -555,7 +556,7 @@ export function TermsEditor({ value, onChange, suggest, placeholder }: { value: 
     const { token } = theme.useToken();
     const look = { '--comfy-input-bg': token.colorBgContainer, '--comfy-menu-bg': token.colorFillTertiary, '--comfy-menu-hover-bg': token.controlItemBgHover, '--input-text': token.colorText, '--border-color': token.colorBorder,
         '--cg-primary': token.colorPrimary, '--cg-primary-ring': token.controlOutline, '--cg-radius': token.borderRadius + 'px', font: `${token.fontSize}px ${token.fontFamily}`, color: token.colorText } as CSSProperties;
-    return <div className="cg-terms" style={{ ...S.root, padding: 0, minHeight: 0, ...look }} onWheel={event => event.stopPropagation()}>
+    return <div className="cg-terms" style={{ ...S.root, padding: 0, minHeight: 0, ...look }} onMouseDown={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()} onWheel={event => event.stopPropagation()}>
         <style>{TERMS_STYLE}</style>
         <GroupView bare box={box} index={0} count={1} state={state} onChange={change} suggest={suggest} placeholder={placeholder} />
     </div>;

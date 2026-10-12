@@ -118,7 +118,8 @@ export function LocalPromptSearch({ onLocalSearch, managerOnly = false }: { onLo
         const prefix = shared.prefixes.find(value => value.id === id);
         if (!prefix || !seed.node) return;
         try {
-            const terms = await formatPromptTerms(expandPrefix(shared, '@' + prefix.name));
+            const positive = expandPrefix(shared, '@' + prefix.name);
+            const terms = await formatPromptTerms(positive.length ? positive : prefix.negative_terms || []);
             if (seed.node.__galleryPromptBoxes) {
                 seed.node.properties ||= {}; seed.node.properties.prompt_library_selected_prefix = prefix.id;
                 seed.node.__galleryPromptBoxes.insert(terms.join(', '), 'after', prefix.name);

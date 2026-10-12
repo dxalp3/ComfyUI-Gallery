@@ -48,6 +48,8 @@ const assert = require('node:assert/strict');
         await page.getByText('Both', { exact: true }).click();
         await page.getByRole('button', { name: 'Search', exact: true }).click();
         await page.locator('.ant-segmented-item').filter({ hasText: /^Hydrus$/ }).click();
+        // Source tabs retain independent searches; load the Hydrus tab explicitly.
+        await page.getByRole('button', { name: 'Search', exact: true }).click();
         await page.getByRole('button', { name: 'Select all shown (4)', exact: true }).click();
         await page.getByRole('button', { name: 'Append to Image Source (4)', exact: true }).click();
         await page.getByRole('button', { name: 'Append to workflow', exact: true }).click();

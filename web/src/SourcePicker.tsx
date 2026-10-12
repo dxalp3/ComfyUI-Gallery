@@ -187,7 +187,7 @@ export function SourcePicker() {
                     </div>;
                 })}</div>}
         </div>
-        <footer><span>{batch ? `${selection.length} selected for batch output` : `${manifest.images.length} in node · ${history.length} in history`}</span>{batch && <button disabled={busy || !selection.length} onClick={applyBatch}>Use batch</button>}<button disabled={busy} onClick={() => file.current?.click()}>{busy ? 'Adding…' : 'Upload'}</button>
+        <footer><span>{batch ? `${selection.length} selected · connect the batch IMAGE output to send these images` : `${manifest.images.length} in node · ${history.length} in history`}</span>{batch && <button disabled={busy || !selection.length} onClick={applyBatch}>Use batch</button>}<button disabled={busy} onClick={() => file.current?.click()}>{busy ? 'Adding…' : 'Upload'}</button>
             <input ref={file} type="file" accept="image/*" multiple hidden onChange={event => { const files = [...(event.target.files || [])]; event.target.value = ''; void upload(files); }} />
         </footer>
     </div>, document.body);
