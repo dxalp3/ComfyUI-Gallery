@@ -42,7 +42,7 @@ export function filterSource(source: string, excluded: string[]): string {
 export type TagChip = { id: string; kind: 'tag'; text: string; enabled: boolean; weight?: number; emphasis?: 'round' | 'square' };
 export type OrChip = { id: string; kind: 'or'; options: string[]; optional: boolean; enabled: boolean; weight?: number };
 export type Chip = TagChip | OrChip;
-export type GroupBox = { id: string; kind: 'group'; name: string; chips: Chip[]; enabled: boolean; collapsed: boolean };
+export type GroupBox = { id: string; kind: 'group'; name: string; chips: Chip[]; enabled: boolean; collapsed: boolean; format?: AddMode };
 export type SourceBox = { id: string; kind: 'source'; enabled: boolean; collapsed: boolean; /** Source tags left out of the prompt. */ excluded?: string[] };
 export type PromptBox = GroupBox | SourceBox;
 export type BoxState = { version: 1; boxes: PromptBox[] };
@@ -62,7 +62,7 @@ function wraps(text: string, open: string, close: string): boolean {
 }
 
 /** Split on a separator that is not inside (), [], {} or <>. Unbalanced text falls back to a plain split. */
-export function splitTop(text: string, separator: ',' | '|'): string[] {
+export function splitTop(text: string, separator: ',' | '|' | '\n'): string[] {
     let depth = 0, balancedText = true;
     const cuts: number[] = [], plain: number[] = [];
     for (let index = 0; index < text.length; index++) {
@@ -131,7 +131,7 @@ export type Conflicts = (a: string, b: string) => boolean;
  */
 export function neverTogether(state: BoxState, conflicts: Conflicts): string[][] {
     const singles: { id: string; tag: string }[] = [];
-    for (const box of state.boxes) if (box.kind === 'group' && box.enabled) for (const chip of box.chips) if (chip.enabled && addModeOf(chip) === 'each') singles.push({ id: chip.id, tag: chipTerms(chip)[0] });
+    for (const box of state.boxes) if (box.kind === 'group' && box.enabled && (!box.format || box.format === 'tag')) for (const chip of box.chips) if (chip.enabled && addModeOf(chip) === 'each') singles.push({ id: chip.id, tag: chipTerms(chip)[0] });
     const group = new Map<string, string>();
     const find = (id: string): string => { const parent = group.get(id) ?? id; return parent === id ? id : find(parent); };
     singles.forEach((a, i) => singles.slice(i + 1).forEach(b => { if (conflicts(a.tag, b.tag)) group.set(find(b.id), find(a.id)); }));
@@ -143,7 +143,7 @@ export function neverTogether(state: BoxState, conflicts: Conflicts): string[][]
 /** Plain (always used) tags that exclude each other: these cannot be resolved, only reported. */
 export function alwaysTogether(state: BoxState, conflicts: Conflicts): [string, string][] {
     const tags: string[] = [];
-    for (const box of state.boxes) if (box.kind === 'group' && box.enabled) for (const chip of box.chips) if (chip.enabled && chip.kind === 'tag') tags.push(chipTerms(chip)[0] || chip.text);
+    for (const box of state.boxes) if (box.kind === 'group' && box.enabled && (!box.format || box.format === 'tag')) for (const chip of box.chips) if (chip.enabled && chip.kind === 'tag') tags.push(chipTerms(chip)[0] || chip.text);
     return tags.flatMap((a, i) => tags.slice(i + 1).filter(b => conflicts(a, b)).map(b => [a, b] as [string, string]));
 }
 
@@ -162,7 +162,7 @@ export function compileBoxes(state: BoxState, conflicts?: Conflicts): string {
     for (const box of state.boxes) {
         if (!box.enabled) continue;
         if (box.kind === 'source') parts.push(sourceMarker(box.excluded));
-        else for (const chip of box.chips) { if (skipped.has(chip.id)) continue; const compiled = merged.get(chip.id) ?? compileChip(chip); if (compiled) parts.push(compiled); }
+        else parts.push(...formatBoxTerms(box.chips.filter(chip => !skipped.has(chip.id)).map(chip => merged.get(chip.id) ?? compileChip(chip)).filter(Boolean), box.format));
     }
     return parts.join(', ');
 }
@@ -236,7 +236,7 @@ export function parseState(value: unknown): BoxState | undefined {
             const excluded = Array.isArray(raw.excluded) ? raw.excluded.filter((item): item is string => typeof item === 'string' && !!item.trim()) : [];
             if (!hasSource) { hasSource = true; boxes.push({ id, kind: 'source', enabled: raw.enabled !== false, collapsed: raw.collapsed === true, ...(excluded.length ? { excluded } : {}) }); }
         } else if (raw.kind === 'group') {
-            boxes.push({ id, kind: 'group', name: typeof raw.name === 'string' ? raw.name.slice(0, 80) : '', chips: (Array.isArray(raw.chips) ? raw.chips : []).map(cleanChip).filter((chip): chip is Chip => !!chip), enabled: raw.enabled !== false, collapsed: raw.collapsed === true });
+            boxes.push({ id, kind: 'group', name: typeof raw.name === 'string' ? raw.name.slice(0, 80) : '', ...(ADD_MODES.some(mode => mode.value === raw.format) ? { format: raw.format as AddMode } : {}), chips: (Array.isArray(raw.chips) ? raw.chips : []).map(cleanChip).filter((chip): chip is Chip => !!chip), enabled: raw.enabled !== false, collapsed: raw.collapsed === true });
         }
     }
     if (!hasSource) boxes.push(sourceBox());
@@ -404,9 +404,9 @@ export function singleTag(chip: Chip): string | undefined {
  */
 export function disableConflicts(previous: BoxState, next: BoxState, conflicts: (a: string, b: string) => boolean): { state: BoxState; disabled: string[] } {
     const before = new Map<string, string | undefined>();
-    for (const box of previous.boxes) if (box.kind === 'group' && box.enabled) for (const chip of box.chips) if (chip.enabled) before.set(chip.id, singleTag(chip));
+    for (const box of previous.boxes) if (box.kind === 'group' && box.enabled && (!box.format || box.format === 'tag')) for (const chip of box.chips) if (chip.enabled) before.set(chip.id, singleTag(chip));
     const fresh: { id: string; tag: string }[] = [];
-    for (const box of next.boxes) if (box.kind === 'group' && box.enabled) for (const chip of box.chips) {
+    for (const box of next.boxes) if (box.kind === 'group' && box.enabled && (!box.format || box.format === 'tag')) for (const chip of box.chips) {
         const tag = chip.enabled ? singleTag(chip) : undefined;
         if (tag && before.get(chip.id) !== tag) fresh.push({ id: chip.id, tag });
     }
@@ -573,4 +573,35 @@ export const addChip = (state: BoxState, boxId: string, chip: Chip): BoxState =>
 export function addBoxWithChip(state: BoxState, chip: Chip | Chip[]): BoxState {
     const box = emptyGroup(nextName(state), Array.isArray(chip) ? chip : [chip]);
     return { ...state, boxes: [...state.boxes, box] };
+}
+
+/** A box's format applies to its enabled chips and to tags added later, without rewriting chip data. */
+export function formatBoxTerms(terms: string[], mode: AddMode = 'tag'): string[] {
+    if (!terms.length || mode === 'tag') return terms;
+    if (mode === 'each') return terms.map(term => '{' + term + '|}');
+    return ['{' + terms.join(mode === 'group' ? ', ' : '|') + (mode === 'alternatives' ? '' : '|') + '}'];
+}
+
+/** Combine selected chips, keeping weighted/nested syntax and keeping disabled selections disabled. */
+export function formatSelectedChips(state: BoxState, boxId: string, ids: string[], mode: AddMode): BoxState {
+    if (mode === 'tag' || mode === 'each') return editChips(state, boxId, chips => chips.flatMap(chip => {
+        if (!ids.includes(chip.id) || addModeOf(chip) === mode) return [chip];
+        return chipTerms(chip).flatMap((term, index) => {
+            const text = withWeight(term, chip.weight);
+            const next = mode === 'each' ? { kind: 'or' as const, options: [text], optional: true } : parseChip(text);
+            return [{ ...next, id: index ? newId() : chip.id, enabled: chip.enabled } as Chip];
+        });
+    }));
+    return editChips(state, boxId, chips => {
+        const selected = new Set(ids), emitted = new Set<boolean>();
+        return chips.flatMap(chip => {
+            if (!selected.has(chip.id)) return [chip];
+            if (emitted.has(chip.enabled)) return [];
+            emitted.add(chip.enabled);
+            const peers = chips.filter(item => selected.has(item.id) && item.enabled === chip.enabled);
+            if (peers.length === 1) return [setGroupingKind(chip, mode)];
+            const terms = peers.map(item => compileChip({ ...item, enabled: true }));
+            return [{ id: chip.id, kind: 'or' as const, options: mode === 'group' ? [terms.join(', ')] : terms, optional: mode !== 'alternatives', enabled: chip.enabled }];
+        });
+    });
 }

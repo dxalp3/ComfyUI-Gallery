@@ -33,7 +33,22 @@ const GalleryModal = () => {
     const [targetOpen, setTargetOpen] = useState(false);
     const [searchMode, setSearchMode] = useState('local');
     const [viewRevision, setViewRevision] = useState(0);
-    const changeSource = (value: string) => { setSource(value); setSearchMode(value); setViewRevision(n => n + 1); };
+    const snapshot = () => ({ currentFolder: gallery.currentFolder, searchFileName: gallery.searchFileName, localTerms: gallery.localTerms,
+        localSearchField: gallery.localSearchField, qualities: gallery.qualities, librarySearch: gallery.librarySearch,
+        localScope: gallery.localScope, selectedImages: gallery.selectedImages, sortMethod: gallery.sortMethod });
+    const searchMemory = useRef<Record<string, ReturnType<typeof snapshot>>>({});
+    const changeSource = (value: string) => {
+        if (value !== searchMode) {
+            searchMemory.current[searchMode] = snapshot();
+            const saved = searchMemory.current[value];
+            gallery.setCurrentFolder(saved?.currentFolder ?? gallery.currentFolder);
+            gallery.setSearchFileName(saved?.searchFileName ?? ''); gallery.setLocalTerms(saved?.localTerms ?? []);
+            gallery.setLocalSearchField(saved?.localSearchField ?? 'all'); gallery.setQualities(saved?.qualities ?? {});
+            gallery.setLibrarySearch(saved?.librarySearch ?? null); gallery.setLocalScope(saved?.localScope ?? null);
+            gallery.setSelectedImages(saved?.selectedImages ?? []); gallery.setSortMethod(saved?.sortMethod ?? 'Newest');
+        }
+        setSource(value); setSearchMode(value); if (value !== searchMode) setViewRevision(n => n + 1);
+    };
     const [top, setTop] = useState(0);
     const root = useRef<HTMLDivElement>(null);
     const { token } = theme.useToken();

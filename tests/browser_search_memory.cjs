@@ -1,0 +1,21 @@
+const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');const assert=require('node:assert/strict');
+(async()=>{const browser=await chromium.launch({executablePath:process.env.CHROME_PATH,headless:true});const page=await browser.newPage({viewport:{width:1500,height:1100}});const errors=[];page.on('pageerror',e=>errors.push(e.message));
+try{
+ let requests=0;
+ await page.route('**/Gallery/hydrus/search',async route=>{requests++;await new Promise(resolve=>setTimeout(resolve,150));await route.fulfill({json:{items:[{hash:'e'.repeat(64),file_id:99,mime:'image/png'}],total:1}});});
+ await page.goto('http://127.0.0.1:8191');await page.getByRole('tab',{name:'Gallery workspace',exact:true}).click();
+ const workspace=page.getByRole('region',{name:'Gallery workspace',exact:true});
+ const switchTo=label=>workspace.locator('.cg-header').getByText(label,{exact:true}).click();
+ const ids=()=>page.locator('[data-gallery-entry]').evaluateAll(els=>els.map(el=>el.getAttribute('data-gallery-entry')));
+ const choose=async(label,title)=>{await page.getByRole('combobox',{name:label,exact:true}).press('ArrowDown');await page.locator('.ant-select-dropdown:visible').getByTitle(title,{exact:true}).click();};
+ const local=page.getByRole('combobox',{name:'Filter local files',exact:true});await local.fill('azure');await local.press('Enter');await local.press('Escape');
+ await page.waitForFunction(()=>document.querySelectorAll('[data-gallery-entry]').length===1);const localIds=await ids();
+ await switchTo('Both');await page.getByText('Hydrus result sampling (advanced)',{exact:true}).click();await choose('Hydrus search order','Random');await page.getByRole('button',{name:'Search',exact:true}).click();await page.waitForFunction(()=>document.querySelectorAll('[data-gallery-entry]').length===5);
+ await choose('Gallery order','Random');await page.getByRole('button',{name:'Reshuffle',exact:true}).click();const bothIds=await ids();
+ await switchTo('Local');await page.waitForFunction(()=>document.querySelectorAll('[data-gallery-entry]').length===1);assert.deepEqual(await ids(),localIds);assert.equal(await page.getByRole('button',{name:'Reshuffle',exact:true}).count(),0);
+ await switchTo('Hydrus');assert.equal(await page.locator('[data-gallery-entry]').count(),0);
+ const tags=page.getByRole('combobox',{name:'Hydrus search tags',exact:true});await tags.fill('character:alice');await tags.press('Enter');await tags.press('Escape');await page.getByRole('button',{name:'Search',exact:true}).click();await page.waitForFunction(()=>document.querySelectorAll('[data-gallery-entry]').length===1);
+ await switchTo('Both');await page.waitForFunction(()=>document.querySelectorAll('[data-gallery-entry]').length===5);assert.deepEqual(await ids(),bothIds);assert.equal(requests,2);
+ await switchTo('Hydrus');await page.waitForFunction(()=>document.querySelectorAll('[data-gallery-entry]').length===1);await page.getByText('character:alice',{exact:true}).first().waitFor();assert.equal(await page.getByRole('button',{name:'Reshuffle',exact:true}).count(),0);
+ assert.equal(requests,2);assert.deepEqual(errors,[]);console.log('PASS Local filter restoration, separate Hydrus query/results, stable Both shuffle and no requery when switching tabs');
+}finally{await browser.close();}})().catch(e=>{console.error(e);process.exit(1)});

@@ -29,6 +29,6 @@ export function refreshSourcePrefix(image: ImageSourceImage, library: PrefixLibr
         const kept = splitTop(current, ',').map(s => s.trim()).filter(s => s && !previousKeys.has(key(s)));
         return [...new Map([...kept, ...next].map(s => [key(s), s])).values()].join(', ');
     };
-    return { ...image, metadata: { ...image.metadata, ...(url ? { gallery_url: url } : {}), gallery_prefix: { ...old, id: prefix.id, paired: true, positive, negative } },
+    return { ...image, metadata: { ...image.metadata, ...(url ? { gallery_url: url } : {}), gallery_prefix: { ...old, id: prefix.id, name: prefix.name, paired: true, positive, negative } },
         prompt: { positive: update('positive', positive), negative: update('negative', negative), tags: image.prompt?.tags || [] } };
 }

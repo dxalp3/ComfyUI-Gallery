@@ -61,7 +61,7 @@ export async function fetchLocalHashes(urls: string[]): Promise<Record<string, s
 
 type Hit = { file: FileDetails; note?: string; color?: string };
 type Section = { title?: string; hits: Hit[] };
-type Input = { input_name: string; hash?: string; title?: string; note: string; original?: boolean };
+type Input = { input_name: string; hash?: string; title?: string; metadata?: Record<string, any>; note: string; original?: boolean };
 type ResultTab = { key: string; label: string; hint: string; sections: Section[]; inputs?: Input[]; derived?: { prefixId: string; prefixName: string; urls: string[] } };
 
 export function ImageSearchPanel() {
@@ -182,7 +182,7 @@ export function ImageSearchPanel() {
                     const noteOf = (level: typeof levels[number]) => level.original ? 'original' : level.depth === 1 ? 'made from' : 'source ' + level.depth + ' back';
                     const found = levels.filter(level => level.hash && byHash.has(level.hash.toLowerCase()));
                     if (found.length) lineage.sections.push({ title: tag + 'Made from (nearest first)', hits: found.flatMap(level => hit(byHash.get(level.hash!.toLowerCase())!, noteOf(level), level.original ? 'magenta' : 'cyan')) });
-                    lineage.inputs = [...(lineage.inputs || []), ...levels.filter(level => !found.includes(level)).map(level => ({ input_name: level.input_name, hash: level.hash, title: level.title, note: noteOf(level), original: level.original }))];
+                    lineage.inputs = [...(lineage.inputs || []), ...levels.filter(level => !found.includes(level)).map(level => ({ input_name: level.input_name, hash: level.hash, title: level.title, metadata: level.metadata, note: noteOf(level), original: level.original }))];
                     const own = Object.values(await hashOf([chip.url]));
                     const fromIt = await lineageTree(files, own, [], hashOf, new Set([chip.url]), 6, Object.fromEntries(own.map(hash => [chip.url, hash])));
                     tabFor('generated', 'Generated from it', 'Images made from the searched image, grouped by the image they were made from.').sections.push(...bySource(fromIt, new Set(), 'Made from it').map(section => ({ ...section, title: tag + section.title })));
@@ -317,9 +317,10 @@ export function ImageSearchPanel() {
                 </div>;
             })}
             {item.inputs && !!item.inputs.length && <><Typography.Text strong style={{ display: 'block', margin: '4px 0' }}>{item.sections.length > 1 ? 'Not in the loaded gallery' : 'Made from (input images, nearest first)'}</Typography.Text>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>{item.inputs.map((input, index) => <div key={input.input_name + index} title={input.hash && hydrus.settings?.has_access_key ? 'Not in the loaded gallery · click to open the Hydrus original' : 'Not in the loaded gallery (only its input copy exists)'}
-                    onClick={() => { if (input.hash && hydrus.settings?.has_access_key) window.open(`${BASE_PATH}/Gallery/hydrus/original?hash=${input.hash}&target=${encodeURIComponent(`${hydrus.settings.url}|${hydrus.settings.profile}`)}`, '_blank'); }}
-                    style={{ width: 130, position: 'relative', cursor: input.hash && hydrus.settings?.has_access_key ? 'pointer' : 'default' }}>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>{item.inputs.map((input, index) => <div key={input.input_name + index} title="Open source in gallery viewer" role="button" tabIndex={0}
+                    onClick={() => window.dispatchEvent(new CustomEvent(OPEN_VIEWER_EVENT, { detail: { sourceImages: item.inputs, sourceIndex: index } }))}
+                    onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); window.dispatchEvent(new CustomEvent(OPEN_VIEWER_EVENT, { detail: { sourceImages: item.inputs, sourceIndex: index } })); } }}
+                    style={{ width: 130, position: 'relative', cursor: 'pointer' }}>
                     <img alt={input.title || input.input_name} src={`${BASE_PATH}/Gallery/source/thumbnail?url=${encodeURIComponent('/static_gallery/' + input.input_name)}`} style={{ width: 130, height: 110, objectFit: 'contain', background: '#8882', borderRadius: 4 }} />
                     <Tag color={input.original ? 'magenta' : 'default'} style={{ position: 'absolute', top: 4, left: 4, margin: 0 }}>{input.note}</Tag>
                     <div style={{ fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{input.title || input.input_name}</div>

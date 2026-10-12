@@ -17,3 +17,8 @@ export function collectSessionOutputs(previous: FileDetails[], output: unknown, 
     }
     return [...entries.values()].reverse();
 }
+
+/** Keep execution previews available for opt-in viewing without pinning them ahead of saved outputs. */
+export function visibleSessionOutputs(files: FileDetails[], showTemporary = false): FileDetails[] {
+    return showTemporary ? files : files.filter(file => !file.url.startsWith('/view?') || new URLSearchParams(file.url.slice(6)).get('type') !== 'temp');
+}

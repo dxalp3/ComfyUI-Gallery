@@ -99,6 +99,18 @@ function workflowTemplates(metadata: unknown): Map<string, { title: string; temp
     return found;
 }
 
+/** Templates for editing/reuse, kept separate from the actual choices used by search and export. */
+export function promptTemplates(metadata: unknown): Record<string, EncoderRecord> {
+    const records = encoderRecords(metadata), saved = workflowTemplates(metadata);
+    const prompt = object(metadataSources(metadata).prompt);
+    return Object.fromEntries([...new Set([...Object.keys(records), ...saved.keys()])].map(id => {
+        const record = records[id] || {}, api = object(prompt[id]?.inputs);
+        const source = record.source_text ?? (typeof api.source_text === 'string' ? api.source_text : undefined);
+        const template = saved.get(id)?.template ?? record.text;
+        return [id, { ...record, resolved: template === undefined ? record.resolved : composeWithSource(template, source) }];
+    }));
+}
+
 /** Per encoder: the template, what was encoded, and which option every group took (when that can be told). */
 export function promptResolutions(metadata: unknown): EncoderResolution[] {
     const sources = metadataSources(metadata);

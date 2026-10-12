@@ -5,8 +5,8 @@ import { hideWidget } from './NodeWidgets';
 import { alwaysTogether, chipTerms, compileBoxes, composeWithSource, disableConflicts, insertText, neverTogether, parseState, reconcileText, stateFromText, type BoxState } from './PromptBoxes';
 import { conflicts, EXCLUSIVE_MODE_EVENT, exclusiveMode } from './TagConflicts';
 import { getComfyApp } from './ComfyAppApi';
-import { sourcePrompt } from './ImageSourceGeometry';
-import type { SharedLibrary } from './PrefixLibrary';
+import { sourcePrompt, type ImageSourceManifest } from './ImageSourceGeometry';
+import { expandPrefix, loadPrefixes, savePrefix, type SharedLibrary } from './PrefixLibrary';
 
 /** What the connected `source_text` provides: known at edit time for Gallery Image Source, otherwise after a run. */
 export function sourcePromptInfo(node: any): SourceInfo {
@@ -16,7 +16,21 @@ export function sourcePromptInfo(node: any): SourceInfo {
     const link = graph?.links?.get?.(input.link) || graph?.links?.[input.link];
     const source = graph?.getNodeById?.(link?.origin_id) || graph?._nodes?.find((value: any) => value.id === link?.origin_id);
     if ((source?.comfyClass || source?.type) === 'GalleryImageSource' && [4, 5].includes(link?.origin_slot)) {
-        try { return { connected: true, text: sourcePrompt(JSON.parse(source.widgets.find((value: any) => value.name === 'sources').value), link.origin_slot === 4 ? 'positive' : 'negative') }; }
+        try {
+            const manifest: ImageSourceManifest = JSON.parse(source.widgets.find((value: any) => value.name === 'sources').value);
+            const side = link.origin_slot === 4 ? 'positive' : 'negative';
+            const images = manifest.layout === 'single' ? manifest.images.slice(manifest.active_index || 0, (manifest.active_index || 0) + 1) : manifest.images;
+            const ids = [...new Set(images.map(image => image.metadata?.gallery_prefix?.id).filter((id): id is string => typeof id === 'string'))];
+            return { connected: true, text: sourcePrompt(manifest, side), prefixes: ids.map(id => ({ id, name: images.find(image => image.metadata?.gallery_prefix?.id === id)?.metadata?.gallery_prefix?.name || id })),
+                append: async (id, text) => {
+                    const library = await loadPrefixes();
+                    const prefix = library.prefixes.find(item => item.id === id);
+                    if (!prefix) throw new Error('The paired prefix no longer exists.');
+                    const positive = expandPrefix(library, '@' + prefix.name), negative = prefix.negative_terms || [];
+                    const terms = [...new Set([...(side === 'positive' ? positive : negative), text])];
+                    await savePrefix(prefix.name, side === 'positive' ? terms : positive, library.revision, undefined, side === 'negative' ? terms : negative);
+                } };
+        }
         catch { return { connected: true, note: 'Source settings unavailable' }; }
     }
     return typeof node.__galleryRuntimeSource === 'string' ? { connected: true, text: node.__galleryRuntimeSource } : { connected: true, note: 'Connected prompt will be shown after execution.' };

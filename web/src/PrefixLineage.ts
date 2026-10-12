@@ -132,14 +132,14 @@ export async function descendantsOf(files: FileDetails[], seedHashes: Iterable<s
 }
 
 /** Ancestors of an image, nearest first: the input images it was made from, their inputs, and so on. The last level is the original. */
-export function ancestorLevels(metadata: unknown, maxDepth = 6): { input_name: string; hash?: string; title?: string; depth: number; original: boolean }[] {
-    const result: { input_name: string; hash?: string; title?: string; depth: number; original: boolean }[] = [];
+export function ancestorLevels(metadata: unknown, maxDepth = 6): { input_name: string; hash?: string; title?: string; metadata?: Record<string, any>; depth: number; original: boolean }[] {
+    const result: { input_name: string; hash?: string; title?: string; metadata?: Record<string, any>; depth: number; original: boolean }[] = [];
     let level: unknown[] = [metadata];
     for (let depth = 1; depth <= maxDepth && level.length; depth++) {
         const next: unknown[] = [];
         for (const item of level) for (const input of madeFrom(item)) {
             const parents = input.metadata ? madeFrom(input.metadata) : [];
-            result.push({ input_name: input.input_name, hash: input.hash, title: input.title, depth, original: !parents.length });
+            result.push({ input_name: input.input_name, hash: input.hash, title: input.title, metadata: input.metadata ? object(input.metadata) : undefined, depth, original: !parents.length });
             if (input.metadata) next.push(input.metadata);
         }
         level = next;

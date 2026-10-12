@@ -32,6 +32,7 @@ function getImages(): Promise<FilesTree> {
 }
 
 export interface SettingsState {
+    showTemporaryPreviews?: boolean;
     relativePath: string;
     extraFolders: string[];
     autoOrganize: boolean;
@@ -65,6 +66,7 @@ export interface SettingsState {
 
 const legacySpaces = () => { try { return localStorage.getItem('gallery-prompt-spaces') !== 'false'; } catch { return true; } };
 export const DEFAULT_SETTINGS: SettingsState = {
+    showTemporaryPreviews: false,
     relativePath: './',
     extraFolders: [], autoOrganize: false, routingRules: [],
     buttonBoxQuery: 'div.flex.gap-2.mx-2',

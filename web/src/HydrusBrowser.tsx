@@ -1,3 +1,4 @@
+import { useViewState } from './ViewState';
 import { HydrusTagSelect } from './HydrusTagSelect';
 import { useGalleryContext } from './GalleryContext';
 import { indexPrompts } from './LocalPromptLibrary';
@@ -18,42 +19,42 @@ type InputCopy = { name: string; subfolder: string; type: string; input_name: st
 export function HydrusBrowser({ open, source = 'hydrus', searchMode, viewRevision, onSourceChange }: { onSourceChange: (source: string) => void; source?: string; open: boolean; searchMode: string; viewRevision: number }) {
     const gallery = useGalleryContext();
     const hybrid = searchMode === 'both';
-    const [shareTags, setShareTags] = useState(true);
-    const autoView = useRef<number | null>(null);
-    const [sortRequest, setSortRequest] = useState<{ type: number; ascending: boolean; revision: number }>();
-    const [localBranch, setLocalBranch] = useState<string[]>([]);
-    const [fieldJoin, setFieldJoin] = useState<'all' | 'any'>('any');
-    const [localField, setLocalField] = useState<LocalSearchField>('positive');
-    const [localQuery, setLocalQuery] = useState('');
-    const [localEditor, setLocalEditor] = useState(false);
-    const localSuggestions = useMemo(() => Array.from(new Set(indexPrompts(gallery.data?.folders || {}).map(item => item.value).concat(Object.values(gallery.localHydrusTags).flat()))), [gallery.data, gallery.localHydrusTags]);
     const { settings, setSettingsOpen, reloadMemory } = useHydrus();
-    const [tab, setTab] = useState('search');
-    const [tags, setTags] = useState<string[]>([]);
-    const [match, setMatch] = useState<'all' | 'any'>('all');
-    const [limit, setLimit] = useState(100);
-    const [orGroups, setOrGroups] = useState<string[][]>([]);
-    const [sortType, setSortType] = useState(2);
-    const [ascending, setAscending] = useState(false);
-    const [pages, setPages] = useState<Page[]>([]);
-    const [pageKey, setPageKey] = useState('');
-    const [result, setResult] = useState<Results>();
-    const [selected, setSelected] = useState<string[]>([]);
-    const [copies, setCopies] = useState<Record<string, InputCopy>>({});
+    const scope = `${settings?.url}|${settings?.profile}`;
+    const viewKey = scope + ':' + searchMode;
+    const [shareTags, setShareTags] = useViewState(viewKey, true);
+    const [sortRequest, setSortRequest] = useViewState<{ type: number; ascending: boolean; revision: number } | undefined>(viewKey, undefined);
+    const [localBranch, setLocalBranch] = useViewState<string[]>(viewKey, []);
+    const [fieldJoin, setFieldJoin] = useViewState<'all' | 'any'>(viewKey, 'any');
+    const [localField, setLocalField] = useViewState<LocalSearchField>(viewKey, 'positive');
+    const [localQuery, setLocalQuery] = useViewState(viewKey, '');
+    const [localEditor, setLocalEditor] = useViewState(viewKey, false);
+    const localSuggestions = useMemo(() => Array.from(new Set(indexPrompts(gallery.data?.folders || {}).map(item => item.value).concat(Object.values(gallery.localHydrusTags).flat()))), [gallery.data, gallery.localHydrusTags]);
+    const [tab, setTab] = useViewState(viewKey, 'search');
+    const [tags, setTags] = useViewState<string[]>(viewKey, []);
+    const [match, setMatch] = useViewState<'all' | 'any'>(viewKey, 'all');
+    const [limit, setLimit] = useViewState(viewKey, 100);
+    const [orGroups, setOrGroups] = useViewState<string[][]>(viewKey, []);
+    const [sortType, setSortType] = useViewState(viewKey, 2);
+    const [ascending, setAscending] = useViewState(viewKey, false);
+    const [pages, setPages] = useViewState<Page[]>(viewKey, []);
+    const [pageKey, setPageKey] = useViewState(viewKey, '');
+    const [result, setResult] = useViewState<Results | undefined>(viewKey, undefined);
+    const [selected, setSelected] = useViewState<string[]>(viewKey, []);
+    const [copies, setCopies] = useViewState<Record<string, InputCopy>>(viewKey, {});
     const [busy, setBusy] = useState(false);
     const [copying, setCopying] = useState(false);
     const [downloading, setDownloading] = useState(false);
-    const [notice, setNotice] = useState('');
-    const [error, setError] = useState('');
+    const [notice, setNotice] = useViewState(viewKey, '');
+    const [error, setError] = useViewState(viewKey, '');
     const [progress, setProgress] = useState('');
     const requestVersion = useRef(0);
-    const lastSampling = useRef('2:false');
+    const lastSampling = useRef<Record<string, string>>({});
     const cancelCopies = useRef(false);
     const cancelDownloads = useRef(false);
     const actionBusy = useRef(false);
     const searchRef = useRef<any>(null);
     const working = copying || downloading;
-    const scope = `${settings?.url}|${settings?.profile}`;
     useEffect(() => {
         requestVersion.current++; setResult(undefined); setSelected([]); setPages([]); setPageKey(''); setCopies({}); setBusy(false);
     }, [scope]);
@@ -61,17 +62,13 @@ export function HydrusBrowser({ open, source = 'hydrus', searchMode, viewRevisio
 
     useEffect(() => { requestVersion.current++; setBusy(false); }, [viewRevision]);
     const localCount = gallery.imagesDetailsList.filter(file => !['divider', 'empty-space'].includes(file.type)).length;
-    useEffect(() => {
-        if (autoView.current !== viewRevision || busy || !result || !hybrid) return;
-        onSourceChange(localCount && result.items.length ? 'both' : localCount ? 'local' : result.items.length ? 'hydrus' : 'both');
-    }, [localCount, result, busy, hybrid, viewRevision, onSourceChange]);
+
 
     const read = async (kind: 'search' | 'pages' | 'page', key = pageKey, offset = 0) => {
         const version = ++requestVersion.current;
         setBusy(true); setError(''); setNotice('');
         if (kind !== 'pages') { setResult(undefined); setSelected([]); }
         if (kind === 'search') {
-            autoView.current = hybrid ? viewRevision : null;
             gallery.setLibrarySearch(hybrid ? { tags, match, orGroups, share: shareTags, localTerms: localBranch, localField, fieldJoin } : null);
             gallery.setSearchFileName(''); gallery.setLocalTerms([]);
             onSourceChange(hybrid ? 'both' : 'hydrus');
@@ -87,10 +84,10 @@ export function HydrusBrowser({ open, source = 'hydrus', searchMode, viewRevisio
                 setResult(data); reloadMemory();
                 if (kind === 'search') {
                     const sampling = `${sortType}:${ascending}`;
-                    if (sampling !== lastSampling.current || sortType === 4) setSortRequest({ type: sortType, ascending, revision: version });
-                    lastSampling.current = sampling;
+                    if (sampling !== (lastSampling.current[viewKey] || '2:false') || sortType === 4) setSortRequest({ type: sortType, ascending, revision: version });
+                    lastSampling.current[viewKey] = sampling;
                 }
-                else { autoView.current = null; onSourceChange('hydrus'); }
+                else { onSourceChange(searchMode); }
             }
         } catch (reason) { if (version === requestVersion.current) setError(reason instanceof Error ? reason.message : String(reason)); }
         finally { if (version === requestVersion.current) setBusy(false); }
@@ -172,6 +169,6 @@ export function HydrusBrowser({ open, source = 'hydrus', searchMode, viewRevisio
         {error && <Alert type="error" showIcon message={error} style={{ marginBottom: 12, whiteSpace: 'pre-wrap' }} />}
         {notice && <Alert type="success" showIcon message={notice} style={{ marginBottom: 12 }} />}
         {(busy || working) && <Space><Spin size="small" /><span aria-live="polite">{progress || 'Searching Hydrus…'}</span>{working && <Button onClick={() => { cancelCopies.current = true; cancelDownloads.current = true; }}>Cancel remaining</Button>}</Space>}
-        <UnifiedGallery sortRequest={sortRequest} onTrashed={hashes => setResult(old => old ? { ...old, items: old.items.filter(item => !hashes.includes(item.hash)), total: Math.max(0, old.total - hashes.length) } : old)} source={source} remote={items} selectedRemote={selected} setSelectedRemote={setSelected} copy={copy} download={download} working={working} scope={scope} active={open} />
+        <UnifiedGallery viewKey={viewKey} sortRequest={sortRequest} onTrashed={hashes => setResult(old => old ? { ...old, items: old.items.filter(item => !hashes.includes(item.hash)), total: Math.max(0, old.total - hashes.length) } : old)} source={source} remote={items} selectedRemote={selected} setSelectedRemote={setSelected} copy={copy} download={download} working={working} scope={scope} active={open} />
     </section>;
 }

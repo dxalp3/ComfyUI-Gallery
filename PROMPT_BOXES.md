@@ -17,8 +17,45 @@ Every edit is compiled into one prompt string, so the node still works as a norm
   A source tag can be **left out** with its ×: it moves to the box's "Left out" row (click it there to put it back). The source itself,
   and the image lineage it came from, are unchanged; only this prompt drops the tag.
 
+## Batch blacklist
+
+Open **Batch blacklist** below a tag box, or in Gallery settings. Enter names separated by commas or newlines and click **Save batch blacklist**. Save an empty list to clear it. The list is saved immediately in this browser, shared across encoder/gallery editors and browser tabs, and survives reloads.
+
+Select all, Ctrl/Cmd+A, Shift-click ranges, Ctrl/Cmd-click and selection mode all skip matching chips. Saving blacklist changes removes newly blocked chips from the current selection. Matching ignores case, spaces versus underscores, brackets and weights, and uses whole tag names rather than substrings. A grouped chip containing any blocked tag is skipped as a whole, including nested alternatives.
+
+This controls batch selection, not generation filtering: it does not delete tags, alter source images, or prevent deliberate single-chip editing. Whole-box format remains an explicit operation on the entire box.
+
+## Batch selection and box format
+
+- **Select chips** turns ordinary clicks into selection toggles. Ctrl/Cmd-click also toggles individual chips; Shift-click selects a range from the last selection anchor.
+- **Select all** picks the box's chips. Ctrl/Cmd+A does the same when the box or its empty add input has focus; a nonempty text input keeps normal text-selection behavior.
+- The selection toolbar converts selected chips to tags, alternatives, optional alternatives, an optional group, or individually optional tags. It also enables, disables, removes, or clears the selection. Backspace in an empty add input removes the selection; Escape clears it.
+- **Box format** controls the entire box, including future additions, without changing its underlying chips:
+
+  | Format | Example for a, b, c |
+  |---|---|
+  | Comma-separated tags | `a, b, c` |
+  | Alternatives | `{a|b|c}` |
+  | Optional alternatives | `{a|b|c|}` |
+  | Optional group | `{a, b, c|}` |
+  | Optional tags (each) | `{a|}, {b|}, {c|}` |
+
+  Switching back to comma-separated tags restores the original chips. Disabled chips do not enter the compiled prompt. Encoder workflows store the box format; gallery prefixes save the resulting syntax and reopen it as grouped chips. Both surfaces offer the same batch controls.
+
 ## Editing
 
+- Click unused space in a tag box to focus its input (a collapsed box expands). With an empty input,
+  Backspace removes the selected chip, or the last chip when none is selected. Holding Backspace does not
+  remove a whole list. Double-click a chip to remove it; the existing × buttons remain available.
+- Drag chips between boxes to move them. Dragging to a separate encoder or gallery term editor copies the
+  chip with its grouping, brackets and weight. Source and image-prompt chips can also be dragged as copies.
+- Drop onto **Source** to add to its paired saved prefix, on the connected positive or negative side.
+  If multiple prefixes contribute, choose the destination in **Source prefix drop target** first.
+  You can also type into **Add tags to source prefix**. These additions save immediately to the shared
+  library; failures appear in the source box. Removing a source chip still only excludes it from this encoder.
+- The gallery's **Use for prefix** window displays draggable chips using saved prompt templates where
+  available, preserving alternatives and optional groups. Image search and Hydrus export continue to use
+  the actual resolved prompt. Images without saved templates cannot recover their original grouping.
 - Type into a box's input to add tags (Enter adds everything typed; a comma ends a tag unless a bracket is still open).
   Suggestions come from your saved prefixes and tags and from the Danbooru dictionary. Picking a prefix adds its terms.
 - Prompt syntax can be typed directly. Suggestions keep working after `{`, `(` and `|`, and **closing the brackets adds the chip**
@@ -51,7 +88,7 @@ Every edit is compiled into one prompt string, so the node still works as a norm
     always used cannot be resolved and are pointed out under the boxes.
   Danbooru's wiki groups only list related tags, not exclusive ones, so the sets are a list of their own
   (`data/exclusive-tags.json`, edited copy per ComfyUI user).
-- Shift/Ctrl-click several chips to combine them into one grouped chip.
+- Shift/Ctrl/Cmd-click several chips, then use **Convert selection** to change their grouping.
 - The input at the bottom creates a new box.
 - Click a chip to edit its text, weight, brackets, "or nothing" and on/off state.
 - **Drag** a chip to reorder it or to move it into another box (drop on a chip to land before or after it, on a box to land at the end).

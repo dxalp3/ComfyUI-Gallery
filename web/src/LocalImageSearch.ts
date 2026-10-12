@@ -1,5 +1,5 @@
 import type { FileDetails } from './types';
-import { encoderRecords, stripUnresolved, type EncoderRecord } from './PromptResolution';
+import { encoderRecords, promptTemplates, stripUnresolved, type EncoderRecord } from './PromptResolution';
 import { filterSource, replaceSourceMarkers } from './PromptBoxes';
 
 export type LocalSearchField = 'all' | 'name' | 'hydrus' | 'positive' | 'negative';
@@ -166,13 +166,13 @@ function collectGraph(graph: Map<string, Node>, records: Record<string, EncoderR
 }
 
 /** API prompts are authoritative; saved-workflow links and explicit fields fill missing sides. */
-export function extractLocalPrompts(metadata: unknown): LocalPrompts {
+export function extractLocalPrompts(metadata: unknown, templates = false): LocalPrompts {
     const raw = object(metadata);
     const hydrus = object(raw.hydrus || raw);
     const notes = Object.entries(object(hydrus.notes)).filter(([name]) => name.startsWith('ComfyUI Gallery generation metadata')).map(([, value]) => object(value));
     const source = Object.assign({}, ...notes, raw);
     const directPrompt = object(source.prompt);
-    const records = encoderRecords(metadata);
+    const records = templates ? promptTemplates(metadata) : encoderRecords(metadata);
     const api = collectGraph(promptGraph(source.prompt), records);
     const workflow = (!api.positive || !api.negative) ? collectGraph(workflowGraph(source.workflow), records) : { positive: '', negative: '' };
     const result: LocalPrompts = { positive: '', negative: '' };

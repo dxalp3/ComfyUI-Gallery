@@ -1,3 +1,4 @@
+import { useViewState } from './ViewState';
 import { useSessionOutputs } from './SessionOutputs';
 import { recoverStoredSourceMetadata, recoverSourceOriginals, sourceViewerEntry } from './SourceViewer';
 import { ASSET_ACTION_EVENT } from './GalleryWorkspace';
@@ -31,7 +32,8 @@ function ModelThumbnail({ file }: { file: FileDetails }) {
     return thumbnail ? <img src={thumbnail} alt={file.name} style={{ width: '100%', height: '100%', objectFit: 'contain' }} /> : <div style={{ padding: 40, color: 'white' }}>3D · Open viewer</div>;
 }
 
-export function UnifiedGallery({ sortRequest, source, remote, selectedRemote, setSelectedRemote, copy, download, working, scope, active, onTrashed }: {
+export function UnifiedGallery({ viewKey, sortRequest, source, remote, selectedRemote, setSelectedRemote, copy, download, working, scope, active, onTrashed }: {
+    viewKey: string;
     sortRequest?: { type: number; ascending: boolean; revision: number };
     onTrashed: (hashes: string[]) => void;
     source: string; remote: RemoteImage[]; selectedRemote: string[]; setSelectedRemote: React.Dispatch<React.SetStateAction<string[]>>;
@@ -42,14 +44,14 @@ export function UnifiedGallery({ sortRequest, source, remote, selectedRemote, se
     const { token } = theme.useToken();
     const hydrus = useHydrus();
     const [appending, setAppending] = useState<GalleryEntry[]>([]);
-    const [selectionMode, setSelectionMode] = useState(false);
+    const [selectionMode, setSelectionMode] = useViewState(viewKey, false);
     const [trashing, setTrashing] = useState<GalleryEntry[]>([]);
     const [deleting, setDeleting] = useState<GalleryEntry[]>([]);
     const lastClick = useRef<{ id: string; selected: boolean } | undefined>(undefined);
     const [tileSize, setTileSize] = useState(210);
-    const [order, setOrder] = useState<GalleryOrder>('date');
-    const [ascending, setAscending] = useState(false);
-    const [seed, setSeed] = useState(() => Date.now());
+    const [order, setOrder] = useViewState<GalleryOrder>(viewKey, 'date');
+    const [ascending, setAscending] = useViewState(viewKey, false);
+    const [seed, setSeed] = useViewState(viewKey, () => Date.now());
     const [viewer, setViewer] = useState<string>();
     const [detached, setDetached] = useState(false);
     const viewerActive = active || detached;
@@ -59,6 +61,7 @@ export function UnifiedGallery({ sortRequest, source, remote, selectedRemote, se
     const [failedOriginal, setFailedOriginal] = useState<string>();
     const anchor = useRef<string | undefined>(undefined);
     const grid = useRef<FixedSizeGrid>(null);
+    const scrollPositions = useRef<Record<string, number>>({});
     const viewerRef = useRef<HTMLDivElement>(null);
     const lastViewerIndex = useRef(0);
     const columns = useRef(1);
@@ -74,11 +77,13 @@ export function UnifiedGallery({ sortRequest, source, remote, selectedRemote, se
             hash: file.hash, mime: file.mime?.split('/')[1]?.replace('jpeg', 'jpg'), source: 'hydrus' }));
         return orderGallery([...local, ...library], order, ascending, seed);
     }, [source, gallery.imagesDetailsList, hydrus.items, remote, order, ascending, seed]);
+    const appliedSort = useRef<Record<string, number>>({});
     useEffect(() => {
-        if (!sortRequest) return;
+        if (!sortRequest || appliedSort.current[viewKey] === sortRequest.revision) return;
+        appliedSort.current[viewKey] = sortRequest.revision;
         const order = ({ 2: 'date', 4: 'random', 3: 'mime', 20: 'hash' } as Record<number, GalleryOrder>)[sortRequest.type];
         if (order) { setOrder(order); setAscending(sortRequest.ascending); if (order === 'random') setSeed(value => value + 1); }
-    }, [sortRequest]);
+    }, [sortRequest, viewKey]);
     const selected = new Set([...gallery.selectedImages.map(url => 'local:' + url), ...selectedRemote.map(hash => 'hydrus:' + hash)]);
     const selectionActive = selectionMode || selected.size > 0;
     const isVideo = (entry: GalleryEntry) => entry.local?.type === 'media' || entry.remote?.mime?.startsWith('video/');
@@ -319,7 +324,7 @@ export function UnifiedGallery({ sortRequest, source, remote, selectedRemote, se
         <div style={{ flex: 1, minHeight: 120, position: 'relative' }} aria-label="Unified gallery">
             {!entries.length ? <Empty description="No files loaded. Choose a local folder or search Hydrus." /> : <AutoSizer>{({ width, height }) => {
                 const count = Math.max(1, Math.floor(width / tileSize)); columns.current = count;
-                return <FixedSizeGrid ref={grid} width={width} height={height} columnCount={count} columnWidth={width / count} rowCount={Math.ceil(entries.length / count)} rowHeight={Math.round(width / count * .7) + 58}
+                return <FixedSizeGrid key={viewKey} initialScrollTop={scrollPositions.current[viewKey] || 0} onScroll={({ scrollTop }) => { scrollPositions.current[viewKey] = scrollTop; }} ref={grid} width={width} height={height} columnCount={count} columnWidth={width / count} rowCount={Math.ceil(entries.length / count)} rowHeight={Math.round(width / count * .7) + 58}
                     itemData={{ render: ({ rowIndex, columnIndex, style }: GridChildComponentProps) => {
                         return renderCard(rowIndex, columnIndex, count, style);
                     } }}

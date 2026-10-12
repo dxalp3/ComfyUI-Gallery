@@ -1,3 +1,4 @@
+import { BatchBlacklistEditor } from './BatchBlacklistEditor';
 import { FolderRules } from './FolderRules';
 import Modal from 'antd/es/modal/Modal';
 import { openExclusiveTags } from './ExclusiveTagsPanel';
@@ -105,6 +106,10 @@ const GallerySettingsModal = () => {
                         onChange={e => setStaged({ buttonLabel: e.target.value })}
                     />
                 </div>
+                <BatchBlacklistEditor />
+                <Checkbox checked={staged.showTemporaryPreviews === true} onChange={event => setStaged({ showTemporaryPreviews: event.target.checked })}>
+                    Show temporary previews in the gallery sidebar (including ControlNet)
+                </Checkbox>
                 <Switch
                     checkedChildren={"Show Date Divider"}
                     unCheckedChildren={"Don't Show Date Divider"}

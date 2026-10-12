@@ -18,12 +18,12 @@ import { AppendImagesModal } from './AppendImagesModal';
 import { associateImages, dissociateImages, expandPrefix, imagePrefixKeys, imagePrefixRefs, loadPrefixes, openPrefixManager, savePrefix, sidesLabel, type PrefixImage, type SharedLibrary } from './PrefixLibrary';
 import { PrefixImages } from './PrefixImages';
 import { formatPromptTerms } from './PromptSpelling';
-import { TermsEditor } from './PromptBoxEditor';
+import { PromptTermChips, TermsEditor } from './PromptBoxEditor';
 import { makeSuggest } from './PromptSuggest';
 import { extractHydrusTags, extractLocalPrompts } from './LocalImageSearch';
 import { chosenTags, promptResolutions } from './PromptResolution';
 import { GROUPING_LABELS } from './PromptBoxes';
-import { promptTags } from './PromptTags';
+import { promptTerms } from './PromptTags';
 import type { GalleryEntry } from './GalleryOrder';
 import { openImageSearch } from './TagSearchPanel';
 import type { RemoteImage } from './HydrusBrowser';
@@ -201,9 +201,9 @@ export function SourcePrefixPanel() {
     const tags = useMemo(() => {
         const sets = { positive: new Set<string>(), negative: new Set<string>(), hydrus: new Set<string>() };
         for (const entry of entries) {
-            const metadata = metadataOf(entry), prompts = extractLocalPrompts(metadata);
-            promptTags(prompts.positive, '').forEach(tag => sets.positive.add(tag));
-            promptTags(prompts.negative, '').forEach(tag => sets.negative.add(tag));
+            const metadata = metadataOf(entry), prompts = extractLocalPrompts(metadata, true);
+            promptTerms(prompts.positive).forEach(tag => sets.positive.add(tag));
+            promptTerms(prompts.negative).forEach(tag => sets.negative.add(tag));
             extractHydrusTags(metadata).forEach(tag => sets.hydrus.add(tag));
         }
         return { positive: [...sets.positive], negative: [...sets.negative], hydrus: [...sets.hydrus] };
@@ -247,9 +247,7 @@ export function SourcePrefixPanel() {
         <Space size={4}><Typography.Text strong>{label}</Typography.Text><Typography.Text type="secondary">({tags[key].filter(has).length}/{tags[key].length} in the prefix)</Typography.Text>
             <Button size="small" type="link" disabled={tags[key].every(has)} onClick={() => setValue(old => [...old, ...tags[key].filter(tag => !old.some(item => item.toLowerCase() === tag.toLowerCase()))])}>add all →</Button></Space>
         <div role="list" aria-label={label} style={{ display: 'flex', flexWrap: 'wrap', gap: 4, maxHeight: 150, overflowY: 'auto' }}>
-            {tags[key].map(tag => { const inside = has(tag); return <Tag key={tag} role="listitem" color={inside ? 'blue' : undefined} title={inside ? 'In the prefix · click to take it back out' : 'Click to add to the prefix'}
-                onClick={() => setValue(old => inside ? old.filter(item => item.toLowerCase() !== tag.toLowerCase()) : [...old, tag])}
-                style={{ cursor: 'pointer', margin: 0, opacity: inside ? .6 : 1, userSelect: 'none' }}>{inside ? '✓ ' : '+ '}{tag}</Tag>; })}
+            <PromptTermChips terms={tags[key]} selected={has} onSelect={tag => setValue(old => has(tag) ? old.filter(item => item.toLowerCase() !== tag.toLowerCase()) : [...old, tag])} />
         </div>
     </div>;
     const total = positive.length + negative.length;
@@ -281,6 +279,7 @@ export function SourcePrefixPanel() {
             <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'flex-start' }}>
                 <div style={{ flex: '1 1 340px', minWidth: 0 }}>
                     <Typography.Title level={5} style={{ marginTop: 0 }}>From the image{entries.length === 1 ? '' : 's'}</Typography.Title>
+                    <Typography.Paragraph type="secondary">Prompt templates preserve saved groups and alternatives. Click or drag a chip to add it; choices may differ from those used for this image.</Typography.Paragraph>
                     {side === 'positive' ? <>{imageTags('positive', 'Positive prompt')}{imageTags('hydrus', 'Hydrus tags')}</> : imageTags('negative', 'Negative prompt')}
                     {!tags[side === 'positive' ? 'positive' : 'negative'].length && !(side === 'positive' && tags.hydrus.length) && <Typography.Text type="secondary">No {side} tags found on the image{entries.length === 1 ? '' : 's'}.</Typography.Text>}
                 </div>
