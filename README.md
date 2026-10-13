@@ -282,6 +282,6 @@ Associated prefix images open in the gallery viewer, including Hydrus originals.
 
 ## Hydrus Web interoperability
 
-Prefix searches display associated Hydrus originals by their saved hashes and follow their descendants, without requiring prefix prompt words to match Hydrus tags. Hydrus media can also start **Find related images** directly. Explicit extra-tag filters and the strict-prefix option still apply. Prompt inheritance adds a `comfyui outputs` marker and namespaces inherited tags under `comfyui outputs:`.
+Prefix searches display associated Hydrus originals by their saved hashes and follow their descendants, without requiring prefix prompt words to match Hydrus tags. Hydrus media can also start **Find related images** directly. Explicit extra-tag filters and the strict-prefix option still apply. Prompt inheritance adds the standalone `comfyui outputs` tag alongside inherited prompt tags, preserving their selected namespaces.
 
 Hydrus Web's optional integration bridge can read this gallery, transfer media, preserve prompt/provenance metadata, and search saved prefixes and lineage. Uploaded videos use `/Gallery/source/provenance` to retain their metadata without changing their bytes. Restart ComfyUI after updating the Python routes.
