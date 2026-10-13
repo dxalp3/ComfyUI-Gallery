@@ -1,5 +1,5 @@
 import { BatchBlacklistEditor, useBatchTagBlacklist } from './BatchBlacklistEditor';
-import { eligibleBatchIds } from './BatchTagBlacklist';
+import { applyBatchTags, batchTagItems, batchTagName, removeTagsFromChip, availableBatchTags, eligibleBatchIds } from './BatchTagBlacklist';
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type DragEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { theme } from 'antd';
@@ -66,14 +66,14 @@ function ChipParts({ chip, suggest, onItems }: { chip: OrChip; suggest?: (query:
             </span>
         </span>)}
         {onItems && suggest && (adding
-            ? <PartInput chip={chip} suggest={suggest} onAdd={items => onItems([...parts, ...items])} onClose={() => setAdding(false)} />
+            ? <PartInput chip={chip} suggest={suggest} onAdd={items => onItems([...parts, ...items])} onRemoveTag={tag => onItems(parts.map(part => parsePrompt(part).map(chip => removeTagsFromChip(chip, [tag])).filter((chip): chip is Chip => !!chip).map(compileChip).join(', ')).filter(Boolean))} onClose={() => setAdding(false)} />
             : <button type="button" aria-label={kind === 'group' ? 'Add a tag to this group' : 'Add an option'} title={kind === 'group' ? 'Add a tag to this group' : 'Add an option'} onClick={event => { event.stopPropagation(); setAdding(true); }}
                 style={{ ...S.x, color, fontWeight: 700, padding: '0 4px' }}>+</button>)}
     </span>;
 }
 
 /** Inline input in a grouped chip: Enter adds what was typed as more options (`a | b`, `a OR b`) or more group tags. */
-function PartInput({ chip, suggest, onAdd, onClose }: { chip: OrChip; suggest: (query: string) => Promise<Suggestion[]>; onAdd: (items: string[]) => void; onClose: () => void }) {
+function PartInput({ chip, suggest, onAdd, onClose, onRemoveTag }: { chip: OrChip; suggest: (query: string) => Promise<Suggestion[]>; onAdd: (items: string[]) => void; onClose: () => void; onRemoveTag: (tag: string) => void }) {
     const [value, setValue] = useState('');
     const [items, setItems] = useState<Suggestion[]>([]);
     const [active, setActive] = useState(-1);
@@ -90,7 +90,7 @@ function PartInput({ chip, suggest, onAdd, onClose }: { chip: OrChip; suggest: (
     }, [value]);
     // Group: every tag typed joins the group. Alternatives: `|` or OR separate options; commas stay inside one option.
     const partsOf = (text: string) => group ? parsePrompt(expandKeywords(text)).flatMap(chipTerms) : text.replace(/^[\s{]+|[\s}]+$/g, '').split(/\s+OR\s+|\|/).map(part => part.replace(/^\s*,|,\s*$/g, '').trim()).filter(Boolean);
-    const add = (text: string) => { const parts = partsOf(text); if (parts.length) onAdd(parts); setValue(''); setItems([]); requestAnimationFrame(() => input.current?.focus()); };
+    const add = (text: string) => { if (text.trim().startsWith('-')) { onRemoveTag(text.trim().slice(1)); setValue(''); setItems([]); return; } const parts = partsOf(text); if (parts.length) onAdd(parts); setValue(''); setItems([]); requestAnimationFrame(() => input.current?.focus()); };
     const pick = (item: Suggestion) => {
         const before = value.slice(0, typingToken(value).start);
         if (item.kind === 'prefix') { onAdd([...partsOf(before), ...(group ? item.terms || [] : [(item.terms || []).join(', ')])]); setValue(''); setItems([]); return; }
@@ -245,9 +245,10 @@ function AddInput({ onBackspace, target, onTargetMode, placeholder, suggest, onT
     const commit = (text = value, refocus = true) => {
         // Adding re-renders the node, and ComfyUI then moves focus to the canvas: keep typing in this input.
         if (refocus) requestAnimationFrame(() => input.current?.focus());
+        if (text.trim().startsWith('-')) { onText(text.trim()); setPending([]); reset(); return; }
         if (target) { const tags = [...pending, ...tagsOf(text)]; if (tags.length) onGroup?.(addModeOf(target), tags); setPending([]); reset(); return; }
         if (grouping) { const tags = [...pending, ...tagsOf(text)]; if (tags.length) onGroup!(mode, tags); setPending([]); reset(); return; }
-        const expanded = expandKeywords(closeBraces(text));
+        const expanded = text.trim().startsWith('-') ? text.trim() : expandKeywords(closeBraces(text));
         if (expanded.trim()) onText(expanded); reset();
     };
     const collect = (tags: string[]) => { setPending(old => [...old, ...tags.filter(tag => !old.includes(tag))]); reset(); input.current?.focus(); };
@@ -343,7 +344,8 @@ function GroupView({ box, index, count, state, onChange, suggest, bare, placehol
         setSelected(undefined); setActiveChipId(undefined);
     };
     const clearSelection = () => { setPicked([]); setSelected(undefined); setActiveChipId(undefined); };
-    const removePicked = () => { onChange(editChips(state, box.id, chips => chips.filter(chip => !pickedIds.includes(chip.id)))); clearSelection(); };
+    const removePicked = () => { onChange(applyBatchTags(state, box.id, pickedIds, blacklist, 'remove')); clearSelection(); };
+    const selectedCount = batchTagItems(box.chips.filter(chip => pickedIds.includes(chip.id))).filter(chip => !blacklist.includes(batchTagName(chip))).length;
 
     const [renaming, setRenaming] = useState<string>();
     const [mark, setMark] = useState<'before' | 'after'>();
@@ -415,19 +417,20 @@ function GroupView({ box, index, count, state, onChange, suggest, bare, placehol
             <button type="button" aria-label="Select chips" aria-pressed={selecting} onClick={() => { setSelecting(!selecting); clearSelection(); }} style={S.btn}>Select chips</button>
             <Btn label="Select all chips" disabled={!eligible.length} onClick={() => { setPicked(eligible); setSelected(undefined); setActiveChipId(undefined); }}>Select all</Btn>
         </div>
-        <BatchBlacklistEditor />
+        <Btn label={box.chipsCollapsed ? 'Expand tag groups' : 'Collapse tag groups'} onClick={() => patch({ chipsCollapsed: !box.chipsCollapsed })}>{box.chipsCollapsed ? '▸' : '▾'} Tag groups ({box.chips.length})</Btn>
+        <BatchBlacklistEditor chips={box.chips} />
         {eligible.length < box.chips.length && <small style={S.muted}>{box.chips.length - eligible.length} chip(s) excluded from batch selection</small>}
-        {!!pickedIds.length && <MergeBar count={pickedIds.length} onClear={clearSelection} onFormat={mode => { onChange(formatSelectedChips(state, box.id, pickedIds, mode)); clearSelection(); }}
-            onEnabled={enabled => onChange(editChips(state, box.id, chips => chips.map(chip => pickedIds.includes(chip.id) ? { ...chip, enabled } : chip)))} onRemove={removePicked} />}
+        {!!pickedIds.length && <MergeBar count={selectedCount} onClear={clearSelection} onFormat={mode => { onChange(applyBatchTags(state, box.id, pickedIds, blacklist, 'format', mode)); clearSelection(); }}
+            onEnabled={enabled => { const next = applyBatchTags(state, box.id, pickedIds, blacklist, enabled ? 'enable' : 'disable'); const ids = new Set(box.chips.map(chip => chip.id)); setPicked(next.boxes.flatMap(item => item.kind === 'group' && item.id === box.id ? item.chips.filter(chip => (!ids.has(chip.id) || pickedIds.includes(chip.id)) && eligibleBatchIds([chip], blacklist).includes(chip.id)).map(chip => chip.id) : [])); onChange(next); }} onRemove={removePicked} />}
         {box.collapsed
             ? !!preview && <div style={S.preview} title={preview}>{preview}</div>
             : <div style={S.body}>
-                <div data-tag-surface style={{ ...S.chips, minHeight: 48, alignItems: 'flex-start', cursor: 'text' }}>{box.chips.map(item => <ChipView key={item.id} chip={item} selected={item.id === selected || item.id === activeChipId} picked={picked.includes(item.id)} onSelect={() => { if (selecting) { pick(item.id); return; } setSelected(item.id); setActiveChipId(item.id); focusInput(); }} onRemove={() => remove(item.id)}
+                <div data-tag-surface style={{ ...S.chips, minHeight: 48, alignItems: 'flex-start', cursor: 'text' }}><span hidden={box.chipsCollapsed} style={{ display: box.chipsCollapsed ? 'none' : 'contents' }}>{box.chips.map(item => <ChipView key={item.id} chip={item} selected={item.id === selected || item.id === activeChipId} picked={picked.includes(item.id)} onSelect={() => { if (selecting) { pick(item.id); return; } setSelected(item.id); setActiveChipId(item.id); focusInput(); }} onRemove={() => remove(item.id)}
                     onPick={range => pick(item.id, range)}
                     onDrop={(sourceChip, after) => onChange(dropPromptChip(state, sourceChip, box.id, { chipId: item.id, after }))}
                     onKind={mode => onChange(convertChip(state, box.id, item.id, mode))} suggest={suggest}
-                    onItems={items => { const next = withItems(item, items); onChange(editChips(state, box.id, chips => next ? chips.map(other => other.id === item.id ? next : other) : chips.filter(other => other.id !== item.id))); }} />)}
-                <AddInput onBackspace={() => { if (pickedIds.length) { removePicked(); return; } const id = activeChipId || box.chips[box.chips.length - 1]?.id; if (id) remove(id); }} target={target} onTargetMode={mode => { if (target) onChange(convertChip(state, box.id, target.id, mode)); }} placeholder={placeholder} suggest={suggest} onText={text => target ? append(parseTyped(text).flatMap(chipTerms)) : onChange(addChips(state, box.id, text))}
+                    onItems={items => { const next = withItems(item, items); onChange(editChips(state, box.id, chips => next ? chips.map(other => other.id === item.id ? next : other) : chips.filter(other => other.id !== item.id))); }} />)}</span>
+                <AddInput onBackspace={() => { if (pickedIds.length) { removePicked(); return; } const id = activeChipId || box.chips[box.chips.length - 1]?.id; if (id) remove(id); }} target={target} onTargetMode={mode => { if (target) onChange(convertChip(state, box.id, target.id, mode)); }} placeholder={placeholder} suggest={query => query.startsWith('-') ? Promise.resolve(availableBatchTags(box.chips).filter(tag => tag.includes(query.slice(1).toLowerCase())).map(tag => ({ label: '-' + tag, kind: 'tag' as const }))) : suggest(query)} onText={text => text.startsWith('-') ? onChange(editChips(state, box.id, chips => chips.map(chip => target && chip.id !== target.id ? chip : removeTagsFromChip(chip, [text.slice(1).trim()])).filter((chip): chip is Chip => !!chip))) : target ? append(parseTyped(text).flatMap(chipTerms)) : onChange(addChips(state, box.id, text))}
                     onGroup={(mode, tags) => { if (target) { append(tags); return; } const made = groupChips(mode, tags); if (made.length) onChange(editChips(state, box.id, chips => [...chips, ...made])); }}
                     onPrefix={(item, head) => target ? append([...parseTyped(head).flatMap(chipTerms), ...(item.terms || [])]) : onChange(addChips(state, box.id, [head, (item.terms || []).join(', ')].filter(Boolean).join(', ')))} />
                 </div>
@@ -452,7 +455,7 @@ function SourceView({ box, index, count, state, onChange, source, suggest }: Com
     const append = async (text: string) => {
         if (!source.append || !selectedPrefix || saving || !text.trim()) return;
         setSaving(true); setStatusMessage('Saving…');
-        try { await source.append(selectedPrefix.id, text); setStatusMessage('Added to ' + selectedPrefix.name); }
+        try { await source.append(selectedPrefix.id, text); setStatusMessage((text.trim().startsWith('-') ? 'Removed from ' : 'Added to ') + selectedPrefix.name); }
         catch (error) { setStatusMessage(String(error)); }
         finally { setSaving(false); }
     };
@@ -487,7 +490,7 @@ function SourceView({ box, index, count, state, onChange, source, suggest }: Com
                     {source.prefixes.map(prefix => <option key={prefix.id} value={prefix.id}>{prefix.name}</option>)}
                 </select>
                 <small>Drop copies tags into the saved prefix. Double-click a source chip to leave it out of this encoder.</small>
-                {selectedPrefix && <fieldset disabled={saving} style={{ border: 0, padding: 0, margin: 0 }}><AddInput placeholder="Add tags to source prefix (Enter)" suggest={suggest} onText={text => void append(text)} onPrefix={(item, head) => void append([head, ...(item.terms || [])].filter(Boolean).join(', '))} /></fieldset>}
+                {selectedPrefix && <fieldset disabled={saving} style={{ border: 0, padding: 0, margin: 0 }}><AddInput placeholder="Add tags to source prefix (Enter)" suggest={query => query.startsWith('-') ? Promise.resolve(availableBatchTags(parsePrompt(source.text || '')).filter(tag => tag.includes(query.slice(1).toLowerCase())).map(tag => ({ label: '-' + tag, kind: 'tag' as const }))) : suggest(query)} onText={text => void append(text)} onPrefix={(item, head) => void append([head, ...(item.terms || [])].filter(Boolean).join(', '))} /></fieldset>}
             </div>}
             {statusMessage && <div role="status" style={S.muted}>{statusMessage}</div>}
             {!source.connected
@@ -510,7 +513,7 @@ export function PromptBoxEditor({ state, source, preview, suggest, onChange, not
         {state.boxes.map((box, index) => box.kind === 'source'
             ? <SourceView key={box.id} box={box} index={index} count={state.boxes.length} state={state} onChange={onChange} source={source} suggest={suggest} />
             : <GroupView key={box.id} box={box} index={index} count={state.boxes.length} state={state} onChange={onChange} suggest={suggest} />)}
-        <AddInput placeholder="New box: type tags and press Enter" suggest={suggest} onText={text => onChange(addBox(state, undefined, text))}
+        <AddInput placeholder="New box: type tags and press Enter" suggest={suggest} onText={text => onChange(addBoxWithChip(state, parseTyped(text)))}
             onGroup={(mode, tags) => { const made = groupChips(mode, tags); if (made.length) onChange(addBoxWithChip(state, made)); }}
             onPrefix={(item, head) => onChange(addBox(head ? addBox(state, undefined, head) : state, item.label, (item.terms || []).join(', ')))} />
         {notice && <div role="status" style={{ opacity: .8, color: '#d89614' }}>{notice}</div>}

@@ -42,7 +42,7 @@ export function filterSource(source: string, excluded: string[]): string {
 export type TagChip = { id: string; kind: 'tag'; text: string; enabled: boolean; weight?: number; emphasis?: 'round' | 'square' };
 export type OrChip = { id: string; kind: 'or'; options: string[]; optional: boolean; enabled: boolean; weight?: number };
 export type Chip = TagChip | OrChip;
-export type GroupBox = { id: string; kind: 'group'; name: string; chips: Chip[]; enabled: boolean; collapsed: boolean; format?: AddMode };
+export type GroupBox = { id: string; kind: 'group'; name: string; chips: Chip[]; enabled: boolean; collapsed: boolean; chipsCollapsed?: boolean; format?: AddMode };
 export type SourceBox = { id: string; kind: 'source'; enabled: boolean; collapsed: boolean; /** Source tags left out of the prompt. */ excluded?: string[] };
 export type PromptBox = GroupBox | SourceBox;
 export type BoxState = { version: 1; boxes: PromptBox[] };
@@ -236,7 +236,7 @@ export function parseState(value: unknown): BoxState | undefined {
             const excluded = Array.isArray(raw.excluded) ? raw.excluded.filter((item): item is string => typeof item === 'string' && !!item.trim()) : [];
             if (!hasSource) { hasSource = true; boxes.push({ id, kind: 'source', enabled: raw.enabled !== false, collapsed: raw.collapsed === true, ...(excluded.length ? { excluded } : {}) }); }
         } else if (raw.kind === 'group') {
-            boxes.push({ id, kind: 'group', name: typeof raw.name === 'string' ? raw.name.slice(0, 80) : '', ...(ADD_MODES.some(mode => mode.value === raw.format) ? { format: raw.format as AddMode } : {}), chips: (Array.isArray(raw.chips) ? raw.chips : []).map(cleanChip).filter((chip): chip is Chip => !!chip), enabled: raw.enabled !== false, collapsed: raw.collapsed === true });
+            boxes.push({ id, kind: 'group', name: typeof raw.name === 'string' ? raw.name.slice(0, 80) : '', ...(ADD_MODES.some(mode => mode.value === raw.format) ? { format: raw.format as AddMode } : {}), chips: (Array.isArray(raw.chips) ? raw.chips : []).map(cleanChip).filter((chip): chip is Chip => !!chip), enabled: raw.enabled !== false, collapsed: raw.collapsed === true, chipsCollapsed: raw.chipsCollapsed === true });
         }
     }
     if (!hasSource) boxes.push(sourceBox());
@@ -265,6 +265,8 @@ export const editChips = (state: BoxState, boxId: string, change: (chips: Chip[]
 export const addChips = (state: BoxState, boxId: string, text: string): BoxState => editChips(state, boxId, chips => [...chips, ...parsePrompt(text)]);
 
 export function addBox(state: BoxState, name: string | undefined, text: string, position: 'start' | 'end' = 'end'): BoxState {
+    const empty = state.boxes.find(box => box.kind === 'group' && !box.chips.length);
+    if (empty && parsePrompt(text).length) return updateBox(editChips(state, empty.id, () => parsePrompt(text)), empty.id, { ...(name?.trim() ? { name: name.trim() } : {}), collapsed: false });
     const box = emptyGroup(name?.trim() || nextName(state), parsePrompt(text));
     return { ...state, boxes: position === 'start' ? [box, ...state.boxes] : [...state.boxes, box] };
 }
@@ -571,6 +573,8 @@ export function groupChips(mode: AddMode, tags: string[]): Chip[] {
 export const addChip = (state: BoxState, boxId: string, chip: Chip): BoxState => editChips(state, boxId, chips => [...chips, chip]);
 
 export function addBoxWithChip(state: BoxState, chip: Chip | Chip[]): BoxState {
+    const empty = state.boxes.find(box => box.kind === 'group' && !box.chips.length);
+    if (empty) return editChips(state, empty.id, () => Array.isArray(chip) ? chip : [chip]);
     const box = emptyGroup(nextName(state), Array.isArray(chip) ? chip : [chip]);
     return { ...state, boxes: [...state.boxes, box] };
 }

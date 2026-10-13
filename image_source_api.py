@@ -175,6 +175,24 @@ def local_hashes(gallery_root, urls):
     return {"hashes": result}
 
 
+def save_input_provenance(input_root, name, metadata):
+    path = resolve_input(input_root, name)
+    if not isinstance(metadata, dict):
+        raise ImageSourceError('Provide a metadata object for the uploaded media.')
+    if path.stat().st_size > 512 * 1024 * 1024:
+        raise ImageSourceError('Uploaded media exceeds the 512 MiB metadata limit.')
+    hasher = hashlib.sha256()
+    with path.open('rb') as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b''):
+            hasher.update(chunk)
+    digest = hasher.hexdigest()
+    expected = metadata.get('hydrus', {}).get('hash') if isinstance(metadata.get('hydrus'), dict) else None
+    if expected is not None and (not isinstance(expected, str) or expected.lower() != digest):
+        raise ImageSourceError('Uploaded media does not match its Hydrus hash.')
+    write_metadata(path, digest, {**read_metadata(path), **metadata})
+    return {'input_name': name, 'hash': digest, 'metadata': metadata}
+
+
 def source_metadata(input_root, names):
     if not isinstance(names, list) or len(names) > 32 or any(not isinstance(name, str) for name in names):
         raise ImageSourceError('Send up to 32 input image names.')
@@ -204,6 +222,8 @@ def register_source_routes(routes, get_gallery_root, get_input_root):
             if not isinstance(data, dict):
                 raise ImageSourceError("Request body must be a JSON object.")
             async with workers:
+                if action == "provenance":
+                    return web.json_response(await asyncio.to_thread(save_input_provenance, get_input_root(), data.get('name'), data.get('metadata')))
                 if action == "metadata":
                     return web.json_response(await asyncio.to_thread(source_metadata, get_input_root(), data.get("names")))
                 if action == "hashes":
@@ -211,7 +231,11 @@ def register_source_routes(routes, get_gallery_root, get_input_root):
                 if action == "inputs":
                     return web.json_response(await asyncio.to_thread(list_input_images, get_input_root()))
                 if action == "input":
-                    return web.json_response(await asyncio.to_thread(import_input_image, get_input_root(), data.get("name")))
+                    result = await asyncio.to_thread(import_input_image, get_input_root(), data.get("name"))
+                    if isinstance(data.get('metadata'), dict):
+                        result['metadata'] = {**result.get('metadata', {}), **data['metadata']}
+                        await asyncio.to_thread(write_metadata, Path(get_input_root()) / result['input_name'], result['hash'], result['metadata'])
+                    return web.json_response(result)
                 if action == "local":
                     result = await asyncio.to_thread(import_local_image, get_gallery_root(), get_input_root(), data.get("url"))
                     if isinstance(data.get('metadata'), dict):
@@ -242,6 +266,10 @@ def register_source_routes(routes, get_gallery_root, get_input_root):
     @routes.post("/Gallery/source/hashes")
     async def hashes(request):
         return await handle(request, "hashes")
+
+    @routes.post("/Gallery/source/provenance")
+    async def provenance(request):
+        return await handle(request, "provenance")
 
     @routes.post("/Gallery/source/metadata")
     async def metadata(request):

@@ -1111,6 +1111,14 @@ def register_hydrus_routes(routes, get_root, storage_dir=None, get_input_root=No
                     result = await bridge.save_output(data, get_output_root or get_root)
                 elif action == "suggest":
                     result = await bridge.suggest(data)
+                elif action == "records":
+                    hashes = data.get('hashes')
+                    if not isinstance(hashes, list) or not 1 <= len(hashes) <= 200:
+                        raise HydrusError('Provide 1–200 Hydrus hashes.')
+                    hashes = list(dict.fromkeys(bridge.validate_hash(value) for value in hashes))
+                    settings = bridge.settings.load()
+                    async with bridge.client_factory(settings) as client:
+                        result = {'items': await bridge.cache_records(await bridge.remote_metadata(client, hashes, True), settings)}
                 elif action in ("search", "pages", "page"):
                     result = await bridge.browse(action, data)
                 elif action == "import":
@@ -1129,7 +1137,7 @@ def register_hydrus_routes(routes, get_root, storage_dir=None, get_input_root=No
                                  ("post", "test", "test"), ("post", "status", "status"),
                                  ("post", "services", "services"), ("post", "dictionary", "dictionary"), ("post", "format_terms", "format_terms"), ("post", "tag_sync", "tag_sync"), ("post", "danbooru_tags", "danbooru_tags"), ("post", "aliases", "aliases"), ("post", "save_output", "save_output"), ("post", "trash", "trash"),
                                  ("post", "export", "export"), ("post", "refresh", "refresh"),
-                                 ("post", "search", "search"), ("post", "pages", "pages"),
+                                 ("post", "search", "search"), ("post", "records", "records"), ("post", "pages", "pages"),
                                  ("post", "suggest", "suggest"), ("get", "download", "download"), ("get", "original", "original"),
                                  ("post", "page", "page"), ("get", "thumbnail", "thumbnail"), ("post", "import", "import")):
         async def endpoint(request, action=action):

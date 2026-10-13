@@ -173,7 +173,6 @@ const ImageCardView = memo(function ImageCardView({
             { key: 'info', label: 'Metadata' },
             { key: 'prefix', label: `Use for prefix… (${targetCount})` },
             { key: 'imagesearch', label: 'Find related images' },
-            { key: 'imageadd', label: 'Add image to the open search' },
             { key: 'select', label: selected ? 'Deselect image' : 'Select image' },
         ], onClick: async ({ key, domEvent }) => {
             domEvent.stopPropagation();
@@ -186,7 +185,6 @@ const ImageCardView = memo(function ImageCardView({
             if (key === 'info') openImageInfo({ url: image.url });
             if (key === 'prefix') openSourcePrefix(targets);
             if (key === 'imagesearch') openImageSearch({ chips: [{ kind: 'image', url: image.url, name: image.name }] });
-            if (key === 'imageadd') openImageSearch({ chips: [{ kind: 'image', url: image.url, name: image.name }], append: true });
             if (key === 'select') selectImage(image.url);
             if (key === 'refresh') {
                 try { const results = await refresh(targets); const failed = results.filter(item => item.error); if (failed.length) message.warning(failed[0].error); else message.success(`Refreshed ${results.length} image(s).`); }

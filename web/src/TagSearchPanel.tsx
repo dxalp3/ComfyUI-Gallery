@@ -8,8 +8,10 @@ import { hydrusRequest } from './HydrusApi';
 import { appendLocalImages } from './ImageSourceBridge';
 import { extractLocalPrompts, matchesLocalImage, type LocalPrompts, type LocalSearchField } from './LocalImageSearch';
 import { ancestorLevels, hashLookup, hasAllTerms, imagePrefixIds, imageTagSet, lineageTree, madeFrom, pairedHashIndex, pairedImages, prefixConditions, requiredTerms, type LineageTree } from './PrefixLineage';
-import { associateImages, expandPrefix, imagePrefixKeys, imagePrefixRefs, loadPrefixes, type SharedLibrary } from './PrefixLibrary';
+import { associateImages, expandPrefix, imagePrefixKeys, imagePrefixRefs, loadPrefixes, type SharedLibrary }
+ from './PrefixLibrary';
 import { openImageInfo, openSourcePrefix, localEntry } from './ImageInfo';
+import { collectPrefixImages } from './PrefixAssociations';
 import { useSearchPool } from './SearchPool';
 import type { FileDetails } from './types';
 
@@ -24,7 +26,7 @@ import type { FileDetails } from './types';
  *            Generated from it / Same source (other images made from the same source) / Same prefix
  * Images can be dragged into the query from the gallery or from the results.
  */
-export type QueryChip = { kind: 'tag'; text: string } | { kind: 'prefix'; id: string; name: string } | { kind: 'image'; url: string; name: string };
+export type QueryChip = { kind: 'tag'; text: string } | { kind: 'prefix'; id: string; name: string } | { kind: 'image'; url: string; name: string; hash?: string; metadata?: unknown };
 /** A prefix a search was started from ("Find images" in the prefix editor). */
 export type SearchPrefix = { id?: string; name: string; terms: string[] };
 /** `append` adds the chips to an open search instead of starting a new one. */
@@ -146,8 +148,16 @@ export function ImageSearchPanel() {
                     const paired = await pairedImages(files, shared, chip.id, hashOf, known);
                     const seedUrls = await hashOf([...paired.urls]);
                     const tree = await lineageTree(files, paired.hashes, [chip.id], hashOf, paired.urls, 6, seedUrls);
+                    const refs = collectPrefixImages(shared, chip.id).filter(image => image.hash && (!image.local_url || !byUrl.has(image.local_url)));
+                    const records = new Map<string, any>();
+                    try { for (let start = 0; start < refs.length; start += 200) {
+                        const result = await hydrusRequest<{ items: { hash: string }[] }>('records', { hashes: refs.slice(start, start + 200).map(image => image.hash) });
+                        result.items.forEach(item => records.set(item.hash, item));
+                    } } catch { /* Saved associations remain visible when Hydrus is offline. */ }
+                    const remote = refs.map(image => ({ input_name: '', hash: image.hash, title: image.name || 'Hydrus ' + image.hash!.slice(0, 12), metadata: { gallery_origin: 'hydrus', hydrus: records.get(image.hash!) || { hash: image.hash } }, note: 'paired', original: true }));
                     const derived = [...tree.usedAsSource];
                     const sources = tabFor('sources', 'Sources', 'Images paired with the prefix, and generated images that were later used as a source (reiterations). Pair those with the prefix so they count as its sources everywhere.');
+                    sources.inputs = [...(sources.inputs || []), ...remote];
                     sources.sections.push({ title: tag + 'Paired' + (paired.remoteOnly ? ` (${paired.remoteOnly} more only in Hydrus)` : ''), hits: [...paired.urls].flatMap(url => hit(url, 'paired', 'gold')) });
                     if (derived.length) { sources.sections.push({ title: tag + 'Used as a source later', hits: derived.flatMap(url => hit(url, 'generation ' + tree.nodes.get(url)!.depth, 'green')) }); sources.derived = { prefixId: chip.id, prefixName: chip.name, urls: derived }; }
                     tabFor('generated', 'Generated', 'Everything made from the sources through Gallery Image Source (any number of generations, whatever the prompt), grouped by the image it was made from.')
@@ -161,6 +171,7 @@ export function ImageSearchPanel() {
                     const has = (file: FileDetails, term: string) => matchesLocalImage(file, term, 'all', gallery.localHydrusTags[file.url] || [], promptsOf(file));
                     const tagged = conditions.length ? files.filter(file => !lineageUrls.has(file.url) && conditions.every(options => options.some(term => has(file, term)))).sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0)) : [];
                     const everything = tabFor('prefix-all', 'Everything', "The prefix's paired images (gold border), generated images later used as a source (green), everything generated from them (blue), and other images whose prompt has all of the prefix's tags (dashed purple).");
+                    everything.inputs = [...(everything.inputs || []), ...remote];
                     everything.sections.push(
                         { title: tag + 'Paired', hits: [...paired.urls].flatMap(url => hit(url, 'paired', 'gold')) },
                         { title: tag + 'Generated from the lineage', hits: [...tree.nodes.keys()].flatMap(url => hit(url, tree.usedAsSource.has(url) ? 'used as source' : 'generation ' + tree.nodes.get(url)!.depth, tree.usedAsSource.has(url) ? 'green' : 'blue')).sort((a, b) => (b.file.timestamp || 0) - (a.file.timestamp || 0)) },
@@ -172,8 +183,10 @@ export function ImageSearchPanel() {
                     const tag = many ? chip.name + ' · ' : '';
                     const lineage = tabFor('lineage', 'Lineage', 'The searched image and what it was made from, back to the original.');
                     lineage.sections.push({ title: tag + 'Searched image', hits: hit(chip.url, 'searched', 'purple') });
-                    if (!file) continue;
-                    const levels = ancestorLevels(file.metadata);
+                    if (!file && !chip.hash) continue;
+                    const metadata = file?.metadata || chip.metadata;
+                    if (chip.hash) lineage.inputs = [{ input_name: '', hash: chip.hash, title: chip.name, metadata: { gallery_origin: 'hydrus', hydrus: { ...(chip.metadata as any || {}), hash: chip.hash } }, note: 'searched', original: true }];
+                    const levels = ancestorLevels(metadata);
                     // Input copies are named by hash: the loaded image with that hash is the same picture, and is shown
                     // as a normal result (open, select, search by it). Only images of the same file type can match.
                     const types = new Set(levels.map(level => level.input_name.split('.').pop()?.toLowerCase()));
@@ -183,19 +196,19 @@ export function ImageSearchPanel() {
                     const found = levels.filter(level => level.hash && byHash.has(level.hash.toLowerCase()));
                     if (found.length) lineage.sections.push({ title: tag + 'Made from (nearest first)', hits: found.flatMap(level => hit(byHash.get(level.hash!.toLowerCase())!, noteOf(level), level.original ? 'magenta' : 'cyan')) });
                     lineage.inputs = [...(lineage.inputs || []), ...levels.filter(level => !found.includes(level)).map(level => ({ input_name: level.input_name, hash: level.hash, title: level.title, metadata: level.metadata, note: noteOf(level), original: level.original }))];
-                    const own = Object.values(await hashOf([chip.url]));
+                    const own = chip.hash ? [chip.hash.toLowerCase()] : Object.values(await hashOf([chip.url]));
                     const fromIt = await lineageTree(files, own, [], hashOf, new Set([chip.url]), 6, Object.fromEntries(own.map(hash => [chip.url, hash])));
                     tabFor('generated', 'Generated from it', 'Images made from the searched image, grouped by the image they were made from.').sections.push(...bySource(fromIt, new Set(), 'Made from it').map(section => ({ ...section, title: tag + section.title })));
                     // Other images made from the same source image(s) as this one, and what came from those.
-                    const direct = madeFrom(file.metadata).flatMap(input => input.hash ? [input.hash] : []);
-                    madeFrom(file.metadata).forEach(input => { if (input.hash && input.title) inputTitles.set(input.hash, input.title); });
+                    const direct = madeFrom(metadata).flatMap(input => input.hash ? [input.hash] : []);
+                    madeFrom(metadata).forEach(input => { if (input.hash && input.title) inputTitles.set(input.hash, input.title); });
                     const skip = new Set([chip.url, ...fromIt.nodes.keys()]);
                     const siblings = direct.length ? await lineageTree(files, direct, [], hashOf, skip) : undefined;
                     const sameSource = tabFor('source', 'Same source', 'Other images made from the same source image as the searched one (and what was made from those).');
                     if (siblings) sameSource.sections.push(...bySource(siblings, skip, '').map(section => ({ ...section, title: tag + section.title })));
                     // Images of the prefixes it belongs to that are not in the tabs above.
                     const seen = new Set([...skip, ...(siblings?.nodes.keys() || [])]);
-                    for (const id of imagePrefixIds(shared, imagePrefixKeys(localEntry(file, known[file.url]), root), file.metadata, pairedHashes)) {
+                    for (const id of imagePrefixIds(shared, imagePrefixKeys(file ? localEntry(file, known[file.url]) : { hash: chip.hash }, root), metadata, pairedHashes)) {
                         const name = shared.prefixes.find(prefix => prefix.id === id)?.name || 'prefix';
                         const paired = await pairedImages(files, shared, id, hashOf, known);
                         const tree = await lineageTree(files, paired.hashes, [id], hashOf, paired.urls);
@@ -208,7 +221,7 @@ export function ImageSearchPanel() {
                 if (!live) return;
                 // Tabs that add nothing (no images) are hidden; Lineage always shows.
                 const order = ['prefix-all', 'lineage', 'sources', 'generated', 'source', 'prefix'];
-                const list = order.flatMap(key => result.get(key) ? [result.get(key)!] : []).filter(item => item.key === 'lineage' || item.key === 'prefix-all' || item.key === 'sources' || item.sections.some(section => section.hits.length));
+                const list = order.flatMap(key => result.get(key) ? [result.get(key)!] : []).filter(item => item.key === 'lineage' || item.key === 'prefix-all' || item.key === 'sources' || item.sections.some(section => section.hits.length) || !!item.inputs?.length);
                 setLibrary(shared); setAliases(spellings); setTabs(list);
                 setTab(current => list.some(item => item.key === current) ? current : (list.find(item => item.key === 'prefix-all') || list.find(item => item.key === 'generated') || list.find(item => item.key === 'source') || list[0])?.key || '');
             } catch (reason) { if (live) setError(String(reason)); }
@@ -227,7 +240,7 @@ export function ImageSearchPanel() {
     const matchesTags = (file: FileDetails) => !tags.length || tags.every(term => matchesLocalImage(file, term, field, gallery.localHydrusTags[file.url] || [], promptsOf(file)));
     const keep = (hits: Hit[]) => hits.filter(item => matchesTags(item.file) && (!strict || !aliases || hasAllTerms(imageTagSet(item.file, gallery.localHydrusTags[item.file.url] || []), aliases)));
     const tagOnly = useMemo<Hit[]>(() => open && !scoped && tags.length ? files.filter(matchesTags).sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0)).map(file => ({ file })) : [], [open, scoped, tags.join('\n'), field, files, gallery.localHydrusTags]);
-    const shownTabs = tabs.map(item => ({ ...item, sections: item.sections.map(section => ({ ...section, hits: keep(section.hits) })) }));
+    const shownTabs = tabs.map(item => ({ ...item, sections: item.sections.map(section => ({ ...section, hits: keep(section.hits) })), inputs: item.inputs?.filter(input => { const file = { name: input.title || input.input_name, url: '', type: 'image', timestamp: 0, date: '', metadata: input.metadata } as FileDetails; return matchesTags(file) && (!strict || !aliases || hasAllTerms(imageTagSet(file), aliases)); }) }));
     const active = shownTabs.find(item => item.key === tab) || shownTabs[0];
     const currentHits: Hit[] = scoped ? (active?.sections.flatMap(section => section.hits) || []) : tagOnly;
     const allHits = scoped ? shownTabs.flatMap(item => item.sections.flatMap(section => section.hits)) : tagOnly;
@@ -250,7 +263,7 @@ export function ImageSearchPanel() {
     const chipLabel = (value: string) => {
         const chip = chips.find(item => encode(item) === value);
         if (chip?.kind === 'prefix') return <><b>prefix</b> {chip.name}</>;
-        if (chip?.kind === 'image') return <><img alt="" src={`${BASE_PATH}/Gallery/thumbnail?url=${encodeURIComponent(chip.url)}&root=${encodeURIComponent(root)}`} style={{ width: 16, height: 16, objectFit: 'cover', verticalAlign: 'middle', marginRight: 4 }} /><b>image</b> {chip.name}</>;
+        if (chip?.kind === 'image') return <><img alt="" src={chip.hash ? `${BASE_PATH}/Gallery/hydrus/thumbnail?hash=${chip.hash}&target=${encodeURIComponent(`${hydrus.settings?.url}|${hydrus.settings?.profile}`)}` : `${BASE_PATH}/Gallery/thumbnail?url=${encodeURIComponent(chip.url)}&root=${encodeURIComponent(root)}`}  style={{ width: 16, height: 16, objectFit: 'cover', verticalAlign: 'middle', marginRight: 4 }} /><b>image</b> {chip.name}</>;
         return value;
     };
     const kindColor = (value: string) => value.startsWith('prefix::') ? 'gold' : value.startsWith('image::') ? 'blue' : undefined;
@@ -278,7 +291,7 @@ export function ImageSearchPanel() {
         { key: 'view', label: 'Open in gallery' },
         { key: 'select', label: selected.has(file.url) ? 'Deselect' : 'Select' },
         { type: 'divider' as const },
-        { key: 'search', label: 'Find related images' }, { key: 'add', label: 'Add this image to the search' },
+        { key: 'search', label: 'Find related images' },
         { type: 'divider' as const },
         { key: 'info', label: 'Metadata' }, { key: 'prefix', label: `Use for prefix… (${targets(file.url).length})` }, ...prefixActions(file.url),
         { key: 'source', label: `Append to Image Source (${targets(file.url).length})` }, { key: 'export', label: `Export to Hydrus (${targets(file.url).length})` },
@@ -316,20 +329,20 @@ export function ImageSearchPanel() {
                     {grid(visible)}
                 </div>;
             })}
-            {item.inputs && !!item.inputs.length && <><Typography.Text strong style={{ display: 'block', margin: '4px 0' }}>{item.sections.length > 1 ? 'Not in the loaded gallery' : 'Made from (input images, nearest first)'}</Typography.Text>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>{item.inputs.map((input, index) => <div key={input.input_name + index} title="Open source in gallery viewer" role="button" tabIndex={0}
+            {item.inputs && !!item.inputs.length && <><Typography.Text strong style={{ display: 'block', margin: '4px 0' }}>{item.inputs.every(input => input.note === 'paired') ? 'Paired Hydrus images' : item.inputs.some(input => input.note === 'searched') ? 'Hydrus image and input sources' : item.sections.length > 1 ? 'Not in the loaded gallery' : 'Made from (input images, nearest first)'}</Typography.Text>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>{item.inputs.map((input, index) => <div key={input.input_name + index} title="Open source in gallery viewer" role="button" aria-label={input.title || input.input_name} tabIndex={0}
                     onClick={() => window.dispatchEvent(new CustomEvent(OPEN_VIEWER_EVENT, { detail: { sourceImages: item.inputs, sourceIndex: index } }))}
                     onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); window.dispatchEvent(new CustomEvent(OPEN_VIEWER_EVENT, { detail: { sourceImages: item.inputs, sourceIndex: index } })); } }}
                     style={{ width: 130, position: 'relative', cursor: 'pointer' }}>
-                    <img alt={input.title || input.input_name} src={`${BASE_PATH}/Gallery/source/thumbnail?url=${encodeURIComponent('/static_gallery/' + input.input_name)}`} style={{ width: 130, height: 110, objectFit: 'contain', background: '#8882', borderRadius: 4 }} />
-                    <Tag color={input.original ? 'magenta' : 'default'} style={{ position: 'absolute', top: 4, left: 4, margin: 0 }}>{input.note}</Tag>
+                    <img alt={input.title || input.input_name} src={input.input_name ? `${BASE_PATH}/Gallery/source/thumbnail?url=${encodeURIComponent('/static_gallery/' + input.input_name)}` : `${BASE_PATH}/Gallery/hydrus/thumbnail?hash=${input.hash}&target=${encodeURIComponent(`${hydrus.settings?.url}|${hydrus.settings?.profile}`)}`} style={{ width: 130, height: 110, objectFit: 'contain', background: '#8882', borderRadius: 4 }} />
+                    <Tag color={input.note === 'paired' ? 'gold' : input.original ? 'magenta' : 'default'} style={{ position: 'absolute', top: 4, left: 4, margin: 0 }}>{input.note}</Tag>
                     <div style={{ fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{input.title || input.input_name}</div>
                 </div>)}</div></>}
             {!total && !item.inputs?.length && !busy && <Typography.Text type="secondary">Nothing here{tags.length ? ' that matches the tag chips' : ''}.</Typography.Text>}
             {total > shown && <div style={{ marginTop: 8 }}><Button onClick={() => setShown(value => value + PAGE)}>Show more ({(total - shown).toLocaleString()} left)</Button></div>}
         </>;
     };
-    const count = (item: ResultTab) => item.sections.reduce((sum, section) => sum + section.hits.length, 0);
+    const count = (item: ResultTab) => item.sections.reduce((sum, section) => sum + section.hits.length, 0) + (item.inputs?.length || 0);
     const selectedHere = allHits.filter(item => selected.has(item.file.url)).length;
     return <FloatingPanel panelKey="tag-search" title={title} open={open} onCancel={() => setOpen(false)} footer={null} width={800}>
         <div onDragOver={event => { if ([...event.dataTransfer.types].some(type => type === IMAGE_DRAG_TYPE || type === 'custom' || type === 'text/uri-list')) { event.preventDefault(); setDropping(true); } }} onDragLeave={() => setDropping(false)} onDrop={onDrop}

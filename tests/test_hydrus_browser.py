@@ -421,3 +421,12 @@ class BrowserTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status, 400)
         response = await self.client.post('/Gallery/hydrus/import', json={'hash': self.digest}, headers={'Origin': 'https://untrusted.example'})
         self.assertEqual(response.status, 403)
+
+    async def test_records_resolve_associated_hashes_without_tag_search(self):
+        result = await self.post('records', {'hashes': [self.digest]})
+        self.assertTrue(any(item['hash'] == self.digest for item in result['items']))
+        self.assertFalse(any(path == '/get_files/search_files' for path, _ in self.calls))
+        call = next(params for path, params in self.calls if path == '/get_files/file_metadata')
+        self.assertEqual(json.loads(call['hashes']), [self.digest])
+        response = await self.client.post('/Gallery/hydrus/records', json={'hashes': ['bad']})
+        self.assertEqual(response.status, 400)

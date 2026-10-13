@@ -176,8 +176,7 @@ export function UnifiedGallery({ viewKey, sortRequest, source, remote, selectedR
         const local = list.flatMap(item => item.local?.type === 'image' ? [item.local.url] : []);
         const hashes = list.flatMap(item => item.remote && (key === 'download' || isImage(item)) ? [item.remote.hash] : []);
         if (key === 'prefix') { openSourcePrefix(list); return; }
-        if (key === 'imagesearch' && entry?.local) { openImageSearch({ chips: [{ kind: 'image', url: entry.local.url, name: entry.name }] }); return; }
-        if (key === 'imageadd' && entry?.local) { openImageSearch({ chips: [{ kind: 'image', url: entry.local.url, name: entry.name }], append: true }); return; }
+        if (key === 'imagesearch' && entry) { openImageSearch({ chips: [{ kind: 'image', url: entry.local?.url || 'hydrus:' + entry.hash, name: entry.name, hash: entry.remote?.hash, metadata: entry.remote }] }); return; }
         if (key === 'source') { setAppending(list.filter(isImage)); return; }
         if (key === 'trash') { setTrashing(list.filter(item => item.remote)); return; }
         if (key === 'delete') { setDeleting(list.filter(item => item.local)); return; }
@@ -237,8 +236,7 @@ export function UnifiedGallery({ viewKey, sortRequest, source, remote, selectedR
         { key: 'source', disabled: !targets(entry).some(isImage), label: `Append to Image Source (${targets(entry).filter(item => isImage(item)).length})` },
         { key: 'info', label: 'Metadata' },
         { key: 'prefix', label: `Use for prefix… (${targets(entry).filter(isImage).length})` },
-        { key: 'imagesearch', disabled: !entry.local, label: 'Find related images' },
-        { key: 'imageadd', disabled: !entry.local, label: 'Add image to the open search' },
+        { key: 'imagesearch', label: 'Find related images' },
         { key: 'download', label: 'Download original(s)' },
         ...(entry.local ? [{ key: 'export', label: 'Export local selection to Hydrus' }, { key: 'refresh', label: 'Refresh Hydrus status' }] : [{ key: 'copy', disabled: !targets(entry).some(item => item.remote && isImage(item)), label: 'Save copy to input only (no workflow append)' }]),
         ...(targets(entry).some(item => item.remote) ? [{ key: 'trash', danger: true, label: `Delete from Hydrus — send to trash (${targets(entry).filter(item => item.remote).length})` }] : []),

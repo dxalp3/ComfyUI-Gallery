@@ -9,7 +9,7 @@ try{
  const editor=page.locator('#qa-batch');
  await editor.locator('summary').filter({hasText:'Batch blacklist'}).click();
  const blacklist=editor.getByRole('textbox',{name:'Batch tag blacklist',exact:true});
- await blacklist.fill('b');await editor.getByRole('button',{name:'Save batch blacklist',exact:true}).click();
+ await editor.getByRole('textbox',{name:'Search tags in this box',exact:true}).fill('b');await editor.getByRole('checkbox',{name:'Blacklist b',exact:true}).check();await editor.getByRole('button',{name:'Save batch blacklist',exact:true}).click();
  await editor.getByText('1 chip(s) excluded from batch selection',{exact:true}).waitFor();
  await editor.getByRole('button',{name:'Select all chips',exact:true}).click();await editor.getByText('2 selected',{exact:true}).waitFor();
  // Saving new entries also removes them from an existing selection.

@@ -19,9 +19,9 @@ Every edit is compiled into one prompt string, so the node still works as a norm
 
 ## Batch blacklist
 
-Open **Batch blacklist** below a tag box, or in Gallery settings. Enter names separated by commas or newlines and click **Save batch blacklist**. Save an empty list to clear it. The list is saved immediately in this browser, shared across encoder/gallery editors and browser tabs, and survives reloads.
+Open **Batch blacklist** below a tag box, or in Gallery settings. Search the individual tags already present in the box and tick the ones to exclude, or enter names separated by commas or newlines, then click **Save batch blacklist**. Save an empty list to clear it. The list is saved immediately in this browser, shared across encoder/gallery editors and browser tabs, and survives reloads.
 
-Select all, Ctrl/Cmd+A, Shift-click ranges, Ctrl/Cmd-click and selection mode all skip matching chips. Saving blacklist changes removes newly blocked chips from the current selection. Matching ignores case, spaces versus underscores, brackets and weights, and uses whole tag names rather than substrings. A grouped chip containing any blocked tag is skipped as a whole, including nested alternatives.
+Select all, Ctrl/Cmd+A, Shift-click ranges, Ctrl/Cmd-click and selection mode all skip matching individual tags. Saving blacklist changes excludes those tags from any current batch action. Matching ignores case, spaces versus underscores, brackets and weights, and uses whole tag names rather than substrings. Groups are inspected recursively: protected tags remain in their original group while other tags can be removed, disabled or reformatted.
 
 This controls batch selection, not generation filtering: it does not delete tags, alter source images, or prevent deliberate single-chip editing. Whole-box format remains an explicit operation on the entire box.
 
@@ -120,3 +120,7 @@ named after the prefix when prefixes were used, otherwise `#n`. "Append after" p
 - A source image that is paired with a prefix is stamped with that prefix (`gallery_prefix`) when it is appended to a
   Gallery Image Source, so images generated from it count toward the prefix's lineage in the image search.
 - Workflows made before the box editor open with their text in box `#1`, and the old before/after/replace setting becomes the source box position.
+
+## Additional group controls
+
+Collapse **Tag groups** independently of the box to reach controls below while leaving its entry field writable. Fresh terms use an existing empty group box before creating another one. Enter `-tag` in a box or group input to remove that tag (matching case, underscores, brackets and weights); source-prefix entry applies the same removal to its paired saved prefix.

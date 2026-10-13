@@ -1,8 +1,9 @@
+import { removeTagsFromChip } from './BatchTagBlacklist';
 import { createRoot } from 'react-dom/client';
 import { PromptBoxEditor, type SourceInfo } from './PromptBoxEditor';
 import { makeSuggest, type SuggestDeps } from './PromptSuggest';
 import { hideWidget } from './NodeWidgets';
-import { alwaysTogether, chipTerms, compileBoxes, composeWithSource, disableConflicts, insertText, neverTogether, parseState, reconcileText, stateFromText, type BoxState } from './PromptBoxes';
+import { alwaysTogether, chipTerms, compileBoxes, composeWithSource, compileChip, parsePrompt, disableConflicts, insertText, neverTogether, parseState, reconcileText, stateFromText, type BoxState } from './PromptBoxes';
 import { conflicts, EXCLUSIVE_MODE_EVENT, exclusiveMode } from './TagConflicts';
 import { getComfyApp } from './ComfyAppApi';
 import { sourcePrompt, type ImageSourceManifest } from './ImageSourceGeometry';
@@ -27,7 +28,8 @@ export function sourcePromptInfo(node: any): SourceInfo {
                     const prefix = library.prefixes.find(item => item.id === id);
                     if (!prefix) throw new Error('The paired prefix no longer exists.');
                     const positive = expandPrefix(library, '@' + prefix.name), negative = prefix.negative_terms || [];
-                    const terms = [...new Set([...(side === 'positive' ? positive : negative), text])];
+                    const current = side === 'positive' ? positive : negative;
+                    const terms = text.trim().startsWith('-') ? current.flatMap(term => parsePrompt(term).map(chip => removeTagsFromChip(chip, [text.trim().slice(1)])).filter((chip): chip is NonNullable<typeof chip> => !!chip).map(compileChip)) : [...new Set([...current, text])];
                     await savePrefix(prefix.name, side === 'positive' ? terms : positive, library.revision, undefined, side === 'negative' ? terms : negative);
                 } };
         }

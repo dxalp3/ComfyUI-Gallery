@@ -279,3 +279,9 @@ Tag boxes have an inline input beside their chips. Click blank space to type or 
 When appending saved prefixes, Automatic polarity uses positive terms if present, otherwise negative terms. Choose the intended workflow text target explicitly. Select multiple prefixes and choose **Separate groups, same rule**, **One combined group**, or **Separate groups, individual rules**. Separate encoder boxes retain their prefix names. Existing single-conditioning encoders remain compatible; a dual-conditioning encoder is not introduced.
 
 Associated prefix images open in the gallery viewer, including Hydrus originals. Context menus consistently use **Find related images**. Image Source keeps **Open in gallery** and **Choose batch images**; connect its **batch** IMAGE output to send the chosen images together. Its ordinary **image** output still follows the selected image/composition layout.
+
+## Hydrus Web interoperability
+
+Prefix searches display associated Hydrus originals by their saved hashes and follow their descendants, without requiring prefix prompt words to match Hydrus tags. Hydrus media can also start **Find related images** directly. Explicit extra-tag filters and the strict-prefix option still apply. Prompt inheritance adds a `comfyui outputs` marker and namespaces inherited tags under `comfyui outputs:`.
+
+Hydrus Web's optional integration bridge can read this gallery, transfer media, preserve prompt/provenance metadata, and search saved prefixes and lineage. Uploaded videos use `/Gallery/source/provenance` to retain their metadata without changing their bytes. Restart ComfyUI after updating the Python routes.

@@ -84,8 +84,8 @@ export function HydrusExportModal() {
     const proposedTags = useMemo(() => Object.fromEntries(exportUrls.map(url => {
         if (!danbooru && !positiveTags && !negativeTags) return [url, []];
         const prompts = extractLocalPrompts(imageFiles[url]?.metadata);
-        return [url, [...(danbooru ? dictionaryTags[url] || [] : positiveTags ? promptTags(prompts.positive, prefixPositive ? 'positive_prompt' : '') : []),
-            ...(negativeTags ? promptTags(prompts.negative, 'negative_prompt') : [])]];
+        return [url, [...(danbooru || positiveTags || negativeTags ? ['comfyui outputs'] : []), ...(danbooru ? dictionaryTags[url] || [] : positiveTags ? promptTags(prompts.positive, prefixPositive ? 'positive_prompt' : '') : []).map(tag => 'comfyui outputs:' + tag),
+            ...(negativeTags ? promptTags(prompts.negative, 'negative_prompt').map(tag => 'comfyui outputs:' + tag) : [])]];
     })), [urlsKey, imageFiles, positiveTags, negativeTags, prefixPositive, danbooru, dictionaryTags]);
     const imageTags = (url: string): string[] => editedPromptTags[url] ?? proposedTags[url] ?? [];
     const serviceOptions = services.filter(service => [0, 5].includes(service.type)).map(service => ({ value: service.service_key, label: service.name }));
@@ -160,7 +160,7 @@ export function HydrusExportModal() {
             {positiveTags && !danbooru && <Checkbox checked={prefixPositive} disabled={running} onChange={event => { setPrefixPositive(event.target.checked); setEditedPromptTags({}); }} style={{ marginLeft: 24 }}>Prefix positive tags with positive_prompt:</Checkbox>}
             <Checkbox checked={negativeTags} disabled={running} onChange={event => { setNegativeTags(event.target.checked); setEditedPromptTags({}); }}>Add negative-prompt tags</Checkbox>
         </Space>
-        <Typography.Paragraph type="secondary">Split on commas and newlines. Positive tags can be plain (blue sky) or prefixed (positive_prompt:blue sky); negative tags use negative_prompt:. Review each image below. Changing these options resets the preview edits.</Typography.Paragraph>
+        <Typography.Paragraph type="secondary">Inherited prompt tags use the comfyui outputs: namespace and include a comfyui outputs marker tag. Split on commas and newlines. Positive tags can be plain (blue sky) or prefixed (positive_prompt:blue sky); negative tags use negative_prompt:. Review each image below. Changing these options resets the preview edits.</Typography.Paragraph>
         {(danbooru || positiveTags || negativeTags) && <Collapse style={{ marginBottom: 16 }} items={[{ key: 'preview', label: 'Review and edit prompt tags per image', children: exportUrls.map(url => <div key={url} style={{ marginBottom: 12 }}>
             <Typography.Text>{imageFiles[url]?.name || url}</Typography.Text>
             <HydrusTagSelect label={`Prompt tags for ${imageFiles[url]?.name || url}`} value={imageTags(url)} onChange={values => setEditedPromptTags(previous => ({ ...previous, [url]: values }))} disabled={running} active={exportUrls.length > 0} serviceKey={serviceKey} style={{ width: '100%' }} placeholder="Type to find or add tags" />
